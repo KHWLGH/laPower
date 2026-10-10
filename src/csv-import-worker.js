@@ -5,6 +5,7 @@
  * neither thread ever holds the whole file.
  */
 import { createCsvImport } from './csv-import-core.js';
+import { columnTransferBuffers } from './state.js';
 
 const worker = /** @type {any} */ (self);
 /** @type {ReturnType<typeof createCsvImport>|null} */
@@ -30,9 +31,7 @@ worker.onmessage = (/** @type {MessageEvent} */ event) => {
       session = null;
       decoder = null;
       // Every chunk was allocated while parsing this file in this Worker.
-      const transfer = Object.values(result.columns).flatMap((column) =>
-        column._chunks.map((/** @type {Float64Array} */ chunk) => chunk.buffer),
-      );
+      const transfer = columnTransferBuffers(result.columns);
       worker.postMessage({ type: 'done', result }, transfer);
     }
   } catch (error) {

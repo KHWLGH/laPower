@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- 完整常量数据块共享存储，降低空通道、稳定信号线、记录段号和采样间隔的内存占用；CSV 导入收尾逐块补齐，保留精确值与全部历史数据。
+- 窗口风格移除「跟随平台」，Windows / Linux 默认 Windows 风格，旧自动配置随加载迁移；macOS 继续使用原生红绿灯。
+
+### Fixed
+
+- 「跟随系统」括号内显示检测到的系统语言，手动切换界面语言不会改变它；未支持的系统语种保留真实名称，界面回退英文。
+- Windows 繁体中文与简体中文统一优先使用微软雅黑 UI，改善正黑体在小字号下笔画偏细、发虚的问题；正黑体保留为缺字回退，表单与图表字体同步切换。
+
 ## [0.2.3] - 2026-10-09
 
 ### Added

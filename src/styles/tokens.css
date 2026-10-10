@@ -349,6 +349,17 @@
   --font-mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace;
 }
 
+/* 小字号下正黑体常规字重偏细，繁体与简体统一优先微软雅黑 UI。
+   正黑体与繁体无衬线字体补齐缺字，英数仍保留平台 UI / 等宽字体。 */
+:root[data-os="windows"][lang="zh-TW"] {
+  --font-ui:
+    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Microsoft JhengHei UI",
+    "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", sans-serif;
+  --font-mono:
+    "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", "Microsoft JhengHei UI", "Microsoft JhengHei",
+    "Noto Sans CJK TC", "Noto Sans TC", monospace;
+}
+
 :root[data-os="macos"] {
   --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
   --font-mono: "SF Mono", Menlo, Monaco, "PingFang SC", "Hiragino Sans GB", monospace;

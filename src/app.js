@@ -592,7 +592,7 @@ function setupControls() {
   });
 
   // 窗口风格只更新 CSS 属性；动作始终由真实 OS 决定。
-  for (const choice of ['auto', 'windows', 'macos']) {
+  for (const choice of ['windows', 'macos']) {
     const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`window-style-${choice}`));
     input?.addEventListener('change', () => {
       if (!input.checked) return;

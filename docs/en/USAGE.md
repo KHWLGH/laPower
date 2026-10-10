@@ -215,13 +215,13 @@ Open settings with the gear button in the title bar. On macOS, you can also pres
 | Setting | Control | Default |
 | --- | --- | --- |
 | `Theme` | `Follow system` / `Light` / `Dark` | Follow system |
-| `Language` | `Follow system` / `简体中文` / `繁體中文` / `English` / `日本語`; automatic mode shows the effective language | Follow system |
-| `Window style` | `Follow platform` / `Windows style` / `macOS style` (Windows / Linux only) | Follow platform |
+| `Language` | `Follow system` / `简体中文` / `繁體中文` / `English` / `日本語`; the system option always names the detected system language | Follow system |
+| `Window style` | `Windows style` / `macOS style` (Windows / Linux only) | Windows style |
 | `UI scale` | Slider, 50–200% | 100% |
 
 UI scale resizes the whole interface, including chart and title bar. Lower it if system scaling crowds the window. It applies when dragging ends, avoiding repeated layout changes while dragging. On macOS, the native traffic lights keep their size and the title bar reserves fixed space for them.
 
-On first run and after resetting settings, the theme follows OS appearance. Existing choices are retained. `Follow platform` selects the platform title-bar style independently of the light/dark theme. macOS uses native traffic lights for full screen, tiling and minimization. Double-clicking empty title-bar space follows the Desktop & Dock setting, so the window-style option is hidden on macOS.
+On first run and after resetting settings, the theme follows OS appearance. Existing choices are retained. Window style is independent of the light/dark theme and defaults to Windows style; legacy `Follow platform` settings migrate to Windows style. macOS uses native traffic lights for full screen, tiling and minimization. Double-clicking empty title-bar space follows the Desktop & Dock setting, so the window-style option is hidden on macOS. Changing the interface language does not change the system language shown in parentheses; unsupported system languages still use English for the interface in automatic mode.
 
 ### Charts and recording
 

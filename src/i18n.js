@@ -30,7 +30,6 @@ const EN = {
   light: 'Light',
   dark: 'Dark',
   windowStyle: 'Window style',
-  followPlatform: 'Follow platform',
   windowsStyle: 'Windows style',
   macosStyle: 'macOS style',
   chartAndRecording: 'Charts & recording',
@@ -259,7 +258,6 @@ const ZH_CN = {
   light: '浅色',
   dark: '深色',
   windowStyle: '窗口风格',
-  followPlatform: '跟随平台',
   windowsStyle: 'Windows 风格',
   macosStyle: 'macOS 风格',
   chartAndRecording: '图表与记录',
@@ -481,7 +479,6 @@ const ZH_TW = {
   light: '淺色',
   dark: '深色',
   windowStyle: '視窗風格',
-  followPlatform: '跟隨平台',
   windowsStyle: 'Windows 風格',
   macosStyle: 'macOS 風格',
   chartAndRecording: '圖表與記錄',
@@ -698,7 +695,6 @@ const JA = {
   light: 'ライト',
   dark: 'ダーク',
   windowStyle: 'ウィンドウスタイル',
-  followPlatform: 'プラットフォームに従う',
   windowsStyle: 'Windows スタイル',
   macosStyle: 'macOS スタイル',
   chartAndRecording: 'グラフと記録',
@@ -943,11 +939,32 @@ function updateLanguageSelector() {
   if (typeof HTMLSelectElement === 'undefined' || !(select instanceof HTMLSelectElement)) return;
   const auto = select.querySelector('option[value="auto"]');
   if (auto) {
-    const name = { 'zh-CN': '简体中文', 'zh-TW': '繁體中文', en: 'English', ja: '日本語' }[resolvedLanguage];
-    auto.textContent = `${t('followSystem')} (${name})`;
+    auto.textContent = `${t('followSystem')} (${systemLanguageName(systemLocale || browserLocale())})`;
   }
   select.value = normalizeLanguagePreference(state.settings.language);
   select.setAttribute('aria-label', t('language'));
+}
+
+/** @returns {string} */
+function browserLocale() {
+  return typeof navigator !== 'undefined' ? navigator.languages?.[0] || navigator.language || '' : '';
+}
+
+/** Native language name, independent of the selected interface language. @param {string} locale */
+export function systemLanguageName(locale) {
+  const raw = String(locale ?? '').trim();
+  const tag = raw.replace(/_/g, '-').split(/[.@]/, 1)[0];
+  if (!tag) return t('unknown');
+  if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(tag)) return raw;
+  const base = tag.split('-')[0].toLowerCase();
+  if (base === 'zh') return resolveLocale(tag) === 'zh-TW' ? '繁體中文' : '简体中文';
+  if (base === 'en') return 'English';
+  if (base === 'ja') return '日本語';
+  try {
+    return new Intl.DisplayNames([tag], { type: 'language' }).of(base) || raw;
+  } catch {
+    return raw;
+  }
 }
 
 /** @param {LanguagePreference} preference @param {string|undefined|null} systemLocale */
@@ -1014,8 +1031,7 @@ export function errorText(error) {
 export async function applyLanguage(preference, options = {}) {
   const normalized = normalizeLanguagePreference(preference);
   if (options.systemLocale !== undefined) systemLocale = options.systemLocale;
-  const browserLocale = typeof navigator !== 'undefined' ? navigator.languages?.[0] || navigator.language : '';
-  resolvedLanguage = resolveLanguage(normalized, systemLocale || browserLocale);
+  resolvedLanguage = resolveLanguage(normalized, systemLocale || browserLocale());
   state.settings.language = normalized;
   translateDocument();
   updateLanguageSelector();
@@ -1040,8 +1056,7 @@ export async function initI18n() {
   } catch {
     native = '';
   }
-  systemLocale =
-    native || (typeof navigator !== 'undefined' ? navigator.languages?.[0] || navigator.language : '') || '';
+  systemLocale = native || browserLocale();
   await applyLanguage(normalizeLanguagePreference(state.settings.language), { systemLocale });
   return resolvedLanguage;
 }

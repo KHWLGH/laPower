@@ -52,7 +52,7 @@
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
  * @property {'auto'|'zh-CN'|'zh-TW'|'en'|'ja'} language - 界面语言；auto=跟随系统
- * @property {'auto'|'windows'|'macos'} windowStyle - 窗口风格；与真实平台及窗口动作分离
+ * @property {'windows'|'macos'} windowStyle - 窗口风格；与真实平台及窗口动作分离
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
  * @property {{ pdType: number, em: number, sink: number }} km003cPdm - POWER-Z PDM 参数（PD 类型 / 线缆模拟 / Sink）
@@ -140,7 +140,10 @@ export class F64Snapshot {
   }
 
   get byteLength() {
-    return this._chunks.reduce((bytes, chunk) => bytes + chunk.byteLength, 0);
+    return [...new Set(this._chunks.map((chunk) => chunk.buffer))].reduce(
+      (bytes, buffer) => bytes + buffer.byteLength,
+      0,
+    );
   }
 }
 
@@ -149,6 +152,8 @@ export { F64Snapshot as F64ColSnapshot };
 /** Append-only, fixed-size Float64 chunks; old chunks never move as a recording grows. */
 export class F64Col extends F64Snapshot {
   revision = 0;
+  /** Most recent uniform full chunk; shared chunks are immutable. @type {Float64Array|null} */
+  _constantChunk = null;
 
   /** @param {number} [capacity=4096] */
   constructor(capacity = 4096) {
@@ -163,6 +168,16 @@ export class F64Col extends F64Snapshot {
     if (index === this._chunks.length * F64_CHUNK_SIZE) this._chunks.push(new Float64Array(F64_CHUNK_SIZE));
     this._chunks[index >>> 12][index & (F64_CHUNK_SIZE - 1)] = value;
     this.length = index + 1;
+    if ((this.length & (F64_CHUNK_SIZE - 1)) === 0) this.shareConstantChunk(index >>> 12);
+  }
+
+  /** Only complete chunks may share storage; the appendable tail always owns its buffer. @param {number} index */
+  shareConstantChunk(index) {
+    const chunk = this._chunks[index];
+    const value = chunk[0];
+    for (let i = 1; i < F64_CHUNK_SIZE; i++) if (!Object.is(chunk[i], value)) return;
+    if (this._constantChunk && Object.is(this._constantChunk[0], value)) this._chunks[index] = this._constantChunk;
+    else this._constantChunk = chunk;
   }
 
   /** Allocate a pending chunk before a multi-column row is published. */
@@ -172,17 +187,46 @@ export class F64Col extends F64Snapshot {
 
   /** Replace all values, leaving any prior snapshot intact. @param {ArrayLike<number>} values */
   set(values) {
-    /** @type {Float64Array[]} */
-    const chunks = [];
+    const next = new F64Col();
     for (let offset = 0; offset < values.length; offset += F64_CHUNK_SIZE) {
       const chunk = new Float64Array(F64_CHUNK_SIZE);
       const stop = Math.min(values.length, offset + F64_CHUNK_SIZE);
       for (let i = offset; i < stop; i++) chunk[i - offset] = values[i];
-      chunks.push(chunk);
+      next._chunks.push(chunk);
+      if (stop - offset === F64_CHUNK_SIZE) next.shareConstantChunk(offset >>> 12);
     }
-    this._chunks = chunks;
+    this._chunks = next._chunks;
+    this._constantChunk = next._constantChunk;
     this.length = values.length;
     this.revision++;
+  }
+
+  /**
+   * Transform fresh import columns one block at a time. Unchanged blocks are reused;
+   * changed blocks copy on write, so snapshots and other uniform blocks stay intact.
+   * @param {(value:number, index:number)=>number} transform
+   */
+  mapValues(transform) {
+    this._constantChunk = null;
+    let changed = false;
+    for (let c = 0; c < this._chunks.length; c++) {
+      const source = this._chunks[c];
+      const start = c * F64_CHUNK_SIZE;
+      const count = Math.min(F64_CHUNK_SIZE, this.length - start);
+      let next = source;
+      for (let i = 0; i < count; i++) {
+        const value = transform(source[i], start + i);
+        if (Object.is(value, source[i])) continue;
+        if (next === source) next = source.slice();
+        next[i] = value;
+      }
+      if (next !== source) {
+        this._chunks[c] = next;
+        changed = true;
+      }
+      if (count === F64_CHUNK_SIZE) this.shareConstantChunk(c);
+    }
+    if (changed) this.revision++;
   }
 
   /** @param {number} index @param {number} value */
@@ -193,6 +237,7 @@ export class F64Col extends F64Snapshot {
     const chunk = this._chunks[chunkIndex].slice();
     chunk[index & (F64_CHUNK_SIZE - 1)] = value;
     this._chunks[chunkIndex] = chunk;
+    if (this._constantChunk && !this._chunks.includes(this._constantChunk)) this._constantChunk = null;
     this.revision++;
   }
 
@@ -211,6 +256,11 @@ export class F64Col extends F64Snapshot {
     if (this._chunks.length > 1) throw new Error('Multi-chunk column has no contiguous buffer');
     return this._chunks[0] ?? new Float64Array(0);
   }
+}
+
+/** Unique owned buffers for CSV Worker transfer; sharing survives structured clone. @param {ChartSeriesColumns} columns */
+export function columnTransferBuffers(columns) {
+  return [...new Set(Object.values(columns).flatMap((column) => column._chunks.map((chunk) => chunk.buffer)))];
 }
 
 /**
@@ -303,7 +353,7 @@ export const defaultSettings = {
   uiScalePercent: 100,
   theme: 'system',
   language: 'auto',
-  windowStyle: 'auto',
+  windowStyle: 'windows',
   realtimePanelWidth: 250,
   pdSplitSide: false,
   km003cPdm: { pdType: 1, em: 1, sink: 0 },

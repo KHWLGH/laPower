@@ -16,6 +16,14 @@ button {
   background-image: none;
 }
 
+/* 原生表单控件也继承语言对应的字体；数值输入可由组件的等宽字体覆盖。 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 /* Fluent 焦点环：仅键盘焦点显示（:focus-visible），2px 亮描边 + 1px 间隙 */
 :focus-visible {
   outline: 2px solid var(--stroke-focus-outer);

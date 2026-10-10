@@ -14,6 +14,7 @@
     "bench:core": "node bench/core.mjs",
     "bench:gate": "node bench/core.mjs --compare",
     "bench:extrema": "node bench/extrema.mjs",
+    "bench:memory": "node bench/memory.mjs",
     "bench:startup": "node bench/startup.mjs",
     "bench:packaging": "node bench/packaging.mjs",
     "showcase:dev": "node tools/showcase/server.mjs",

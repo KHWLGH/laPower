@@ -209,6 +209,40 @@ test('old and invalid language preferences use auto; valid choices survive a sto
   }
 });
 
+test('legacy window style migrates, persists and resets to Windows while explicit macOS survives reload', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    for (const windowStyle of [undefined, null, 'auto', 'invalid', 'windows', 'macos']) {
+      window.__TAURI__.core.invoke = async (command, args = {}) => {
+        if (command === 'plugin:store|get' && args.key === 'appSettings') return [{ windowStyle }, true];
+        return invoke(command, args);
+      };
+      state.settings = { ...defaultSettings };
+      await loadSettings();
+      assert.equal(state.settings.windowStyle, windowStyle === 'macos' ? 'macos' : 'windows');
+      assert.equal(el(`window-style-${state.settings.windowStyle}`).checked, true);
+    }
+    window.__TAURI__.core.invoke = invoke;
+    for (const choice of ['macos', 'windows']) {
+      state.settings.windowStyle = choice;
+      assert.equal(await saveSettings(), true);
+      state.settings = { ...defaultSettings };
+      await loadSettings();
+      assert.equal(state.settings.windowStyle, choice);
+    }
+    assert.equal(await resetSettings(), true);
+    assert.equal(state.settings.windowStyle, 'windows');
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
 test('loaded settings keep the protocol view and clamp PDM choices field by field', async () => {
   installStoreStub();
   const stored = globalThis.window.__TAURI__.core.invoke;

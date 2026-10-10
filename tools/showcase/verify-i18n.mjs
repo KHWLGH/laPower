@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
-import { dictionaries, resolveLocale } from '../../src/i18n.js';
+import { dictionaries, resolveLocale, systemLanguageName } from '../../src/i18n.js';
 import { startServer } from './server.mjs';
 
 const languages = ['en', 'zh-CN', 'zh-TW', 'ja'];
@@ -67,7 +67,13 @@ try {
     await page.goto(`${server.url}/app/?capture=1&language=auto&systemLocale=${locale}`);
     await page.waitForFunction(() => !!document.getElementById('tab-monitor'));
     assert.equal(await page.locator('html').getAttribute('lang'), resolveLocale(locale));
-    assert.match(await page.locator('#language-select option[value=auto]').textContent(), /\(.+\)/);
+    for (const language of languages) {
+      await page.evaluate(async (language) => (await import('/i18n.js')).applyLanguage(language), language);
+      assert.equal(
+        await page.locator('#language-select option[value=auto]').textContent(),
+        `${dictionaries[language].followSystem} (${systemLanguageName(locale)})`,
+      );
+    }
     await page.close();
   }
   for (const theme of ['light', 'dark'])
@@ -100,6 +106,8 @@ try {
       await page.locator('#btn-km-read-pdo').click();
       await page.waitForFunction(() => document.querySelectorAll('.trigger-pdo-row').length > 0);
       await page.locator('#btn-settings-tab').click();
+      assert.equal(await page.locator('#window-style-auto').count(), 0);
+      assert.equal(await page.locator('#window-style-windows').isChecked(), true);
       await page.evaluate(async () => {
         const { state } = await import('/state.js');
         state.settings.rangeStart = 200;

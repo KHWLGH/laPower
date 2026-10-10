@@ -13,6 +13,7 @@ import {
   onLanguageChange,
   resolveLanguage,
   resolveLocale,
+  systemLanguageName,
   t,
   translateDocument,
 } from '../src/i18n.js';
@@ -49,6 +50,26 @@ test('locale mapping uses script before region and rejects invalid language pref
   for (const language of Object.keys(dictionaries)) assert.equal(resolveLanguage(language, 'fr_FR'), language);
   assert.equal(resolveLanguage('auto', 'ja_JP'), 'ja');
   assert.equal(resolveLanguage('invalid', 'zh_HK'), 'zh-TW');
+});
+
+test('system language autonyms stay independent of manual interface changes', async () => {
+  for (const locale of ['zh_CN.UTF-8', 'zh-Hant-CN', 'ja_JP', 'en-US', 'fr-FR']) {
+    const name = systemLanguageName(locale);
+    for (const language of ['en', 'zh-CN', 'zh-TW', 'ja']) {
+      await applyLanguage(language, { systemLocale: locale });
+      assert.equal(systemLanguageName(locale), name);
+    }
+  }
+  assert.equal(systemLanguageName('zh_CN.UTF-8'), '简体中文');
+  assert.equal(systemLanguageName('zh-HK'), '繁體中文');
+  assert.equal(systemLanguageName('ja_JP'), '日本語');
+  assert.equal(systemLanguageName('en-US'), 'English');
+  assert.equal(systemLanguageName('fr-FR'), 'français');
+  await applyLanguage('auto', { systemLocale: 'fr-FR' });
+  assert.equal(getResolvedLanguage(), 'en');
+  assert.equal(systemLanguageName(''), t('unknown'));
+  assert.equal(systemLanguageName('C.UTF-8'), 'C.UTF-8');
+  assert.equal(systemLanguageName('zh-!'), 'zh-!');
 });
 
 test('dictionaries have the same keys and interpolation parameters', () => {

@@ -2118,12 +2118,23 @@ function renderLegend() {
 
 /** Refresh chart labels after a language change without replacing chart data or state. */
 export function refreshChartLanguage() {
+  syncChartFonts();
   const chart = state.mainChart;
   if (!chart) return;
   for (let i = 0; i < FIELDS.length; i++) {
     if (chart.series[i + 1]) chart.series[i + 1].label = chartLabel(i);
   }
   const axes = chart.axes ?? [];
+  for (let i = 0; i < axes.length; i++) {
+    // uPlot normalises fonts to [scaled CSS font, scaled size, original size].
+    // Preserve its DPI bookkeeping when replacing the family of an existing axis.
+    if (Array.isArray(axes[i].font)) axes[i].font[0] = `${axes[i].font[1]}px ${MONO_FONT}`;
+    else axes[i].font = `12px ${MONO_FONT}`;
+    if (i > 0) {
+      if (Array.isArray(axes[i].labelFont)) axes[i].labelFont[0] = `${axes[i].labelFont[1]}px ${CHART_FONT}`;
+      else axes[i].labelFont = `12px ${CHART_FONT}`;
+    }
+  }
   const titles = [
     chartAxisTitle('voltage', 'V'),
     chartAxisTitle('current', 'A'),

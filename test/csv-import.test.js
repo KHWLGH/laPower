@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ModuleWorker } from '../bench/module-worker.mjs';
 import { parseCsv } from '../src/csv-codec.js';
 import { computeCsvImport } from '../src/csv-import-core.js';
 import { calculateEnergyInRange } from '../src/measurement.js';
-import { emptyChartColumns } from '../src/state.js';
+import { columnTransferBuffers, emptyChartColumns } from '../src/state.js';
 
 const options = { signedCurrent: true, fallbackStartTime: 1234 };
 const text =
@@ -39,7 +40,7 @@ test('only newly imported buffers are detached when transferring results', () =>
   live.voltage.push(123);
   const liveBuffer = live.voltage.buf.buffer;
   const result = computeCsvImport(text, options);
-  const buffers = Object.values(result.columns).flatMap((column) => column._chunks.map((chunk) => chunk.buffer));
+  const buffers = columnTransferBuffers(result.columns);
   const received = structuredClone(result, { transfer: buffers });
   assert.ok(buffers.every((buffer) => buffer.byteLength === 0));
   assert.ok(liveBuffer.byteLength > 0);
@@ -49,4 +50,38 @@ test('only newly imported buffers are detached when transferring results', () =>
 
 test('invalid file never returns partial computation', () => {
   assert.throws(() => computeCsvImport('invalid', options), /Header not found/);
+});
+
+test('real CSV Worker transfers shared chunks, preserving missing values and exact intervals', async () => {
+  const rows = 3 * 4096 + 7;
+  const header =
+    'SampTime(ms),1\nTime(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),RelativeTime(s),Timestamp(ms),RecordingSegment,SampleInterval(ms),\n';
+  const worker = new ModuleWorker(new URL('../src/csv-import-worker.js', import.meta.url));
+  const send = (message, transfer = []) =>
+    new Promise((resolve, reject) => {
+      worker.onmessage = ({ data }) => (data.type === 'error' ? reject(new Error(data.error)) : resolve(data));
+      worker.onerror = ({ message }) => reject(new Error(message));
+      worker.postMessage(message, transfer);
+    });
+  try {
+    await send({ type: 'begin', options });
+    let text = header;
+    for (let i = 0; i < rows; i++) text += `00:00:00,5,-0,0,${i / 1000},${1700000000000 + i},1,1,\n`;
+    const bytes = new TextEncoder().encode(text).buffer;
+    await send({ type: 'chunk', bytes }, [bytes]);
+    const reply = await send({ type: 'end' });
+    assert.equal(reply.type, 'done');
+    assert.equal(reply.result.columns.x.length, rows);
+    for (const key of ['temp', 'sampleIntervals', 'recordingSegments']) {
+      const column = reply.result.columns[key];
+      assert.equal(column._chunks[0], column._chunks[2], key);
+      assert.notEqual(column._chunks[2], column._chunks[3], key);
+    }
+    assert.ok(Number.isNaN(reply.result.columns.temp._chunks[0][1]));
+    assert.ok(Object.is(reply.result.columns.current._chunks[0][1], -0));
+    assert.equal(reply.result.columns.sampleIntervals._chunks[0][1], 1);
+    assert.equal(reply.result.columns.timestamps._chunks[3][6], 1700000000000 + rows - 1);
+  } finally {
+    worker.terminate();
+  }
 });

@@ -388,22 +388,15 @@ export function createCsvParser(options) {
       if (!headerFound) throw new Error('Invalid CSV format: Header not found');
       if (columns.x.length === 0) throw new Error('No valid data found in CSV');
       if (timestampsPending) {
-        const filled = new F64Col();
-        const n = columns.x.length;
-        for (let i = 0; i < n; i++) {
-          const value = columns.timestamps.valueAt(i);
-          filled.push(Number.isNaN(value) ? startTime + columns.x.valueAt(i) * 1000 : value);
-        }
-        columns.timestamps = filled;
+        columns.timestamps.mapValues((value, i) =>
+          Number.isNaN(value) ? startTime + columns.x.valueAt(i) * 1000 : value,
+        );
       }
       if (!sorted) stableSortColumns(columns);
       const intervalMs = declaredIntervalMs ?? estimateIntervalMsFromX(columns.x);
-      const intervals = new F64Col();
-      for (const { values } of columns.sampleIntervals.chunks()) {
-        for (const value of values)
-          intervals.push(Number.isFinite(value) && value > 0 && value <= 60000 ? value : (intervalMs ?? NaN));
-      }
-      columns.sampleIntervals = intervals;
+      columns.sampleIntervals.mapValues((value) =>
+        Number.isFinite(value) && value > 0 && value <= 60000 ? value : (intervalMs ?? NaN),
+      );
       return {
         columns,
         startTime,

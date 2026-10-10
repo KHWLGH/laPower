@@ -28,19 +28,15 @@
 
   // 与 window-style.js 的 resolveWindowStyle 及镜像键保持一致；异步 LazyStore 最终覆盖。
   // macOS 使用系统原生红绿灯，忽略偏好。
-  let windowStyle = 'auto';
+  let windowStyle = 'windows';
   try {
     const stored = localStorage.getItem('lapower-window-style');
     if (stored === 'windows' || stored === 'macos') windowStyle = stored;
   } catch {
-    /* 镜像不可用时跟随真实平台。 */
+    /* 镜像不可用时使用默认 Windows 风格。 */
   }
   document.documentElement.setAttribute(
     'data-window-style',
-    document.documentElement.getAttribute('data-os') === 'macos'
-      ? 'macos'
-      : windowStyle === 'auto'
-        ? 'windows'
-        : windowStyle,
+    document.documentElement.getAttribute('data-os') === 'macos' ? 'macos' : windowStyle,
   );
 })();

@@ -177,6 +177,10 @@ done
 
 ## 开发展示工具
 
+长期记录内存对比使用 `npm run bench:memory`，默认比较 `bench/results/memory-before/` 中修改前的 `state.js`、`csv-codec.js`、`csv-import-core.js`、`measurement.js` 四个纯模块快照与当前源码；也可用 `-- --baseline <目录>` 指定快照位置。测试包含 100 万和 500 万点持续追加、持有导出快照时继续追加、流式 CSV 导入及反复清空，逐列 SHA-256 必须一致，列缓冲至少节省 20%。结果保存到 `bench/results/memory.json`，分别记录独立列缓冲、Node RSS 抽样峰值及 OS 峰值，不能把它们当作 Tauri / WebView2 整个进程树的测量。
+
+Windows 字体检查可运行 `node tools/showcase/verify-appearance.mjs`，覆盖繁体中文浅深主题与 100% / 125% / 150% DPI，检查 DOM 实际使用的字体、Canvas 轴字体和语言切换，截图及结果保存在 `output/appearance-verification/`。
+
 `tools/showcase/` 是独立的浏览器开发工具，提供虚拟 WITRN K2 与 POWER-Z KM003C、确定性的测量曲线、PD 报文和协议控制结果。数据仍经过软件现有摄入与渲染逻辑；完整标题栏使用 decorum 同款控件结构与软件自身的图标、样式，窗口行为虚拟化。工具不连接真实仪表，不进入 `src/`、`out/` 或安装包，也不加入浏览器 CI。
 
 首次准备：

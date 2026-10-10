@@ -40,9 +40,9 @@ function bootAttributes(userAgent, storedStyle) {
   return attributes;
 }
 
-test('未知偏好归一为跟随平台', () => {
-  for (const value of [undefined, null, '', 'linux', 'Mac', 1]) {
-    assert.equal(normalizeWindowStyle(value), 'auto');
+test('旧 auto 与未知偏好迁移为 Windows 风格', () => {
+  for (const value of [undefined, null, '', 'auto', 'linux', 'Mac', 1]) {
+    assert.equal(normalizeWindowStyle(value), 'windows');
   }
   assert.equal(normalizeWindowStyle('windows'), 'windows');
   assert.equal(normalizeWindowStyle('macos'), 'macos');
@@ -54,7 +54,7 @@ test('macOS 使用系统红绿灯，任何偏好都解析为 macOS 布局', () =
   }
 });
 
-test('Windows / Linux 按偏好换皮肤，跟随平台时为 Windows 风格', () => {
+test('Windows / Linux 按偏好换皮肤，旧 auto 使用 Windows 风格', () => {
   for (const os of ['windows', 'linux']) {
     assert.equal(resolveWindowStyle('auto', os), 'windows');
     assert.equal(resolveWindowStyle('windows', os), 'windows');

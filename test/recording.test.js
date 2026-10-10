@@ -337,7 +337,9 @@ test('CSV import waits for the pause boundary and does not replace data if it fa
           } else if (message.type === 'end') {
             this.session.push(this.decoder.decode());
             const result = this.session.finish();
-            const transfer = Object.values(result.columns).flatMap((column) => column._chunks.map((c) => c.buffer));
+            const transfer = [
+              ...new Set(Object.values(result.columns).flatMap((column) => column._chunks.map((c) => c.buffer))),
+            ];
             this.onmessage?.({ data: { type: 'done', result: structuredClone(result, { transfer }) } });
           }
         } catch (error) {

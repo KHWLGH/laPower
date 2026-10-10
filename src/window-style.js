@@ -1,14 +1,14 @@
 // @ts-check
 /** 窗口外观偏好；只换皮肤，不改变真实平台、原生装饰或窗口动作。 */
 
-/** @typedef {'auto'|'windows'|'macos'} WindowStylePreference */
+/** @typedef {'windows'|'macos'} WindowStylePreference */
 
 /** 与 theme-boot.js 的首屏镜像键保持一致；LazyStore 为最终真值。 */
 export const WINDOW_STYLE_STORAGE_KEY = 'lapower-window-style';
 
 /** @param {unknown} value @returns {WindowStylePreference} */
 export function normalizeWindowStyle(value) {
-  return value === 'windows' || value === 'macos' ? value : 'auto';
+  return value === 'macos' ? 'macos' : 'windows';
 }
 
 /**
@@ -20,8 +20,7 @@ export function normalizeWindowStyle(value) {
  */
 export function resolveWindowStyle(preference, os) {
   if (os === 'macos') return 'macos';
-  const pref = normalizeWindowStyle(preference);
-  return pref === 'auto' ? 'windows' : pref;
+  return normalizeWindowStyle(preference);
 }
 
 /**
@@ -50,7 +49,7 @@ export function applyWindowStyle(preference) {
 export function echoWindowStyleUI(preference) {
   if (typeof document === 'undefined') return;
   const pref = normalizeWindowStyle(preference);
-  for (const choice of ['auto', 'windows', 'macos']) {
+  for (const choice of ['windows', 'macos']) {
     const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`window-style-${choice}`));
     if (input) input.checked = choice === pref;
   }

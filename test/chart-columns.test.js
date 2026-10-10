@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { emptyChartColumns, F64Col } from '../src/state.js';
+import { columnTransferBuffers, emptyChartColumns, F64_CHUNK_SIZE, F64Col } from '../src/state.js';
 
 test('F64Col push crosses fixed chunks without moving prior values', () => {
   const col = new F64Col(2);
@@ -69,4 +69,56 @@ test('emptyChartColumns starts empty and aligned', () => {
   cols.voltage.push(5);
   assert.equal(cols.x.at(-1), 1.5);
   assert.equal(cols.voltage.length, 1);
+});
+
+test('uniform chunks share buffers without merging signed zero or changing snapshots', () => {
+  for (const value of [NaN, -0, 0, Infinity, -Infinity, 1.65]) {
+    const col = new F64Col();
+    for (let i = 0; i < 3 * F64_CHUNK_SIZE + 1; i++) col.push(value);
+    assert.equal(col.byteLength, 2 * F64_CHUNK_SIZE * 8);
+    assert.equal(col._chunks[0], col._chunks[2]);
+    assert.notEqual(col._chunks[2], col._chunks[3], 'appendable tail owns its buffer');
+    const snapshot = col.snapshot();
+    col.setAt(F64_CHUNK_SIZE, 42);
+    col.push(43);
+    assert.ok(Object.is(col.valueAt(0), value));
+    assert.ok(Object.is(snapshot.valueAt(F64_CHUNK_SIZE), value));
+    assert.ok(Object.is(snapshot.valueAt(3 * F64_CHUNK_SIZE), value));
+    assert.equal(col.valueAt(F64_CHUNK_SIZE), 42);
+    assert.equal(col.valueAt(3 * F64_CHUNK_SIZE + 1), 43);
+  }
+  const zeros = new F64Col();
+  zeros.set(Float64Array.from({ length: 2 * F64_CHUNK_SIZE }, (_, i) => (i < F64_CHUNK_SIZE ? -0 : 0)));
+  assert.notEqual(zeros._chunks[0], zeros._chunks[1]);
+  assert.ok(Object.is(zeros.valueAt(0), -0));
+  assert.ok(Object.is(zeros.valueAt(F64_CHUNK_SIZE), 0));
+});
+
+test('block transforms reuse valid data and copy shared chunks only where values change', () => {
+  const col = new F64Col();
+  col.set(new Float64Array(3 * F64_CHUNK_SIZE + 1).fill(250));
+  const buffers = col._chunks.slice();
+  const revision = col.revision;
+  col.mapValues((value) => value);
+  assert.deepEqual(col._chunks, buffers);
+  assert.equal(col.revision, revision);
+  const snapshot = col.snapshot();
+  col.mapValues((value, i) => (i === F64_CHUNK_SIZE ? 5000 : value));
+  assert.equal(col._chunks[0], buffers[0]);
+  assert.equal(col._chunks[2], buffers[2]);
+  assert.notEqual(col._chunks[1], buffers[1]);
+  assert.equal(col.valueAt(F64_CHUNK_SIZE), 5000);
+  assert.equal(snapshot.valueAt(F64_CHUNK_SIZE), 250);
+  assert.equal(col.revision, revision + 1);
+});
+
+test('shared import buffers transfer once and retain sharing after structured clone', () => {
+  const cols = emptyChartColumns();
+  for (const col of Object.values(cols)) col.set(new Float64Array(3 * F64_CHUNK_SIZE).fill(NaN));
+  const transfer = columnTransferBuffers(cols);
+  assert.equal(transfer.length, 12);
+  const received = structuredClone(cols, { transfer });
+  assert.equal(received.temp._chunks[0], received.temp._chunks[2]);
+  assert.ok(Number.isNaN(received.temp._chunks[1][123]));
+  assert.ok(transfer.every((buffer) => buffer.byteLength === 0));
 });
