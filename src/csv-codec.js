@@ -6,6 +6,7 @@
 
 import { sanitizeMarkerLabel } from './markers.js';
 import { estimateIntervalMsFromX, mapCsvColumns, parseRelativeTime } from './measurement.js';
+import { parseDeviceList } from './provenance.js';
 import { emptyChartColumns, F64Col } from './state.js';
 
 /** @typedef {'x'|'timestamps'|'voltage'|'current'|'power'|'temp'|'dp'|'dn'|'cc1'|'cc2'|'sampleIntervals'} ColumnKey */
@@ -26,6 +27,10 @@ const COLUMN_KEYS = [
 const TIME_HEADER = 'Time(D.hh:mm:ss.ms)';
 /** 标记列的表头名。单元格是清洗过的标签（不含逗号、换行与引号），空单元格表示该行没有标记。 */
 const MARKER_HEADER = 'Marker';
+/** 来源元信息行的前缀，见 {@link formatSourceLines}。 */
+const SOFTWARE_HEADER = 'Software,';
+const DEVICE_HEADER = 'Device,';
+const POINTS_HEADER = 'Points,';
 /** 摘要行里声明采样间隔的前缀，导入时用它决定能量积分的空档阈值。 */
 const SAMP_TIME_HEADER = 'SampTime(ms),';
 export const CSV_CHUNK_ROWS = 1024;
@@ -39,6 +44,15 @@ export const CSV_CHUNK_ROWS = 1024;
  * @property {boolean} withTemp
  * @property {import('./state.js').F64Snapshot|null} recordingSegments
  * @property {Map<number, string>|null} markers 行号 → 标签；null 表示不写 `Marker` 列
+ * @property {CsvSource|null} source 来源元信息；null 表示不写这几行
+ */
+
+/**
+ * 表头前的来源元信息（`Software` / `Device` / `Points`）。值已清洗，不含逗号与换行。
+ * @typedef {Object} CsvSource
+ * @property {string|null} software 写文件的软件，例如 `laPower 0.2.3`
+ * @property {string[]} devices 采集这份数据的仪表
+ * @property {string|null} points 每个点怎么从仪表帧得到；未知或混合时为 null
  */
 
 /**
@@ -50,7 +64,7 @@ export const CSV_CHUNK_ROWS = 1024;
  * @param {import('./state.js').ChartSeriesColumns} columns
  * markers：传数组即写 `Marker` 列（空数组也写，临时恢复文件靠它固定列结构），null / 省略不写。
  * 只收行号落在快照范围内的标记；录制中刚打、还没等到下一行的点留给下一次快照。
- * @param {{sampleRate: number, startTime: number, withTemp?: boolean, recordingSegments?: F64Col|null, markers?: readonly import('./markers.js').Marker[]|null}} options
+ * @param {{sampleRate: number, startTime: number, withTemp?: boolean, recordingSegments?: F64Col|null, markers?: readonly import('./markers.js').Marker[]|null, source?: CsvSource|null}} options
  * @returns {CsvSnapshot}
  */
 export function snapshotCsvColumns(columns, options) {
@@ -71,6 +85,7 @@ export function snapshotCsvColumns(columns, options) {
     markers: options.markers
       ? new Map(options.markers.filter((marker) => marker.index < length).map((marker) => [marker.index, marker.label]))
       : null,
+    source: options.source ?? null,
   };
 }
 
@@ -136,10 +151,23 @@ export function formatCsvRange(snapshot, from, to) {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * `DateTime` 之后的来源行，每行以换行结束；缺的项不写。旧版本导入时会跳过表头前不认识的行。
+ * @param {CsvSource|null|undefined} source
+ */
+function formatSourceLines(source) {
+  if (!source) return '';
+  let lines = '';
+  if (source.software) lines += `${SOFTWARE_HEADER}${source.software}\n`;
+  if (source.devices.length) lines += `${DEVICE_HEADER}${source.devices.join(' / ')}\n`;
+  if (source.points) lines += `${POINTS_HEADER}${source.points}\n`;
+  return lines;
+}
+
 /** Fixed header used by both the main-thread and Worker streaming exporters. @param {CsvSnapshot} snapshot */
 export function formatCsvHeader(snapshot) {
-  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments, markers } = snapshot;
-  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n\n${columnHeader(withTemp, !!recordingSegments, !!markers)}\n`;
+  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments, markers, source } = snapshot;
+  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n${formatSourceLines(source)}\n${columnHeader(withTemp, !!recordingSegments, !!markers)}\n`;
 }
 
 /**
@@ -192,10 +220,11 @@ export const SPOOL_PATCH_BYTES = formatSpoolHeaderPatch({ length: 0, lastX: 0, s
 
 /**
  * 落盘文件的完整表头。列固定带温度、段号与标记：落盘开始时还不知道之后会不会用到它们。
- * @param {SpoolSummary & { startTime: number }} summary
+ * 来源行写在 `DateTime` 之后，不在可回写的定宽区域内。
+ * @param {SpoolSummary & { startTime: number, source?: CsvSource|null }} summary
  */
 export function formatSpoolHeader(summary) {
-  return `${formatSpoolHeaderPatch(summary)}DateTime,${formatDateTime(summary.startTime)}\n\n${columnHeader(true, true, true)}\n`;
+  return `${formatSpoolHeaderPatch(summary)}DateTime,${formatDateTime(summary.startTime)}\n${formatSourceLines(summary.source)}\n${columnHeader(true, true, true)}\n`;
 }
 
 /**
@@ -299,6 +328,8 @@ export function createCsvParser(options) {
   let markerIndex = -1;
   /** @type {import('./markers.js').Marker[]} */
   const markers = [];
+  /** @type {CsvSource} */
+  const source = { software: null, devices: [], points: null };
   let precise = false;
   let readCell = optionalCell;
   const columns = emptyChartColumns();
@@ -379,6 +410,9 @@ export function createCsvParser(options) {
     }
     if (!headerFound) {
       if (text.startsWith(TIME_HEADER)) acceptHeader(text);
+      else if (text.startsWith(SOFTWARE_HEADER)) source.software = text.slice(SOFTWARE_HEADER.length).trim() || null;
+      else if (text.startsWith(DEVICE_HEADER)) source.devices = parseDeviceList(text.slice(DEVICE_HEADER.length));
+      else if (text.startsWith(POINTS_HEADER)) source.points = text.slice(POINTS_HEADER.length).trim() || null;
       return;
     }
     if (last && precise && rowsEndWithComma && columns.x.length > 0 && !text.endsWith(',')) return;
@@ -437,6 +471,7 @@ export function createCsvParser(options) {
         recordingSegments: segmentIndex === -1 ? null : columns.recordingSegments,
         intervalMs,
         markers,
+        source,
       };
     },
   };

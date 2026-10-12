@@ -271,13 +271,16 @@ PDM、PDO 读取、PD/PPS/AVS 请求、QC/FCP/SCP/UFCS 检测与取消；实时�
 
 ### CSV
 
-导出文件为 4 行元信息 + 1 个空行 + 表头 + 数据行：
+导出文件为元信息行 + 1 个空行 + 表头 + 数据行。前 4 行元信息固定，之后是来源行：
 
 ```csv
 SUM,1
 TotalTime,="00:00:00.000"
 SampTime(ms),250
 DateTime,2026-08-23 00:15:42
+Software,laPower 0.2.4
+Device,WITRN K2 (0716:5060)
+Points,mean
 
 Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms),RecordingSegment,SampleInterval(ms),
 ="00:00:00.000",9.0991,0.0646,0.58820186,31.5,0.61,0.02,0.5,1.6,0,1787415342000,1,250,
@@ -288,6 +291,7 @@ Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),
 - 数值列使用可往返的十进制文本，保留原始精度与电流符号，不按界面显示的小数位数截断。缺失值留空；设备的实际分辨率因通道和型号而异。
 - `RelativeTime(s)` 保存精确相对秒，`Timestamp(ms)` 保存绝对时间戳；`RecordingSegment` 为可选列，用来区分录制段，暂停期间不积分。`SampleInterval(ms)` 保存逐点采样间隔，支持混合采样率。旧文件缺少这些尾列时仍可导入。
 - `Marker` 为可选列，保存打点标签：标签写在它所在的那一行，其余行留空；没有标记时不写这一列，临时恢复文件总是带这一列。
+- `Software` / `Device` / `Points` 是来源行：写文件的软件与版本；采集这份数据的仪表（型号与 USB VID:PID，导入后继续用另一台仪表记录时追加，用 ` / ` 分隔）；每个点怎么从仪表帧得到（`mean` 表示采样间隔内全部仪表帧的平均值，间隔等于仪表节拍时就是那一帧）。来源混合或未知（例如接着旧文件记录）时不写 `Points`。导入时读取并在再次导出时保留；没有这几行的旧文件照常导入。
 - 信号线列在数据缺失时留空，因此**不含这四列的旧文件仍可导入** —— 导入逻辑按表头名匹配列，不依赖列序。
 
 ### PD 捕获

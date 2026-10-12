@@ -121,6 +121,9 @@ pub enum Outgoing {
 /// newest frame, the right end of the window: its timestamp (which the right-endpoint energy
 /// integral pairs with the mean), CC (0.1 V steps), temperature and the meter's own
 /// accumulators. A window of one frame passes through bit for bit.
+///
+/// Exported CSV files name this rule on their `Points` line (`POINT_RULE` in
+/// `src/provenance.js`); change both together.
 #[derive(Default)]
 struct Window {
     frames: u32,

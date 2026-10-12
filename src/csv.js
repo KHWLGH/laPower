@@ -34,6 +34,7 @@ import {
 } from './file-io.js';
 import { errorText, t } from './i18n.js';
 import { markersOf, setMarkers } from './markers.js';
+import { noteImportedSource, provenanceOf, softwareLabel } from './provenance.js';
 import { F64_CHUNK_SIZE, F64Col, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
@@ -86,6 +87,7 @@ export async function exportCSV(withTemp = false) {
     sampleRate: state.dataIntervalMs ?? state.settings.sampleRate,
     startTime: state.lastRecordingStartTime ?? cols.timestamps.at(0) ?? Date.now(),
     markers: markers.some((marker) => marker.index < cols.x.length) ? markers : null,
+    source: { software: softwareLabel(), ...provenanceOf(cols) },
   });
   if (snapshot.length >= LARGE_EXPORT_ROWS) toast.info(() => t('csvExporting', { count: snapshot.length }));
   try {
@@ -246,6 +248,7 @@ async function importOpenedFile(
     state.lastRecordingStartTime = imported.startTime;
     setChartColumns(cols);
     setMarkers(cols, Array.isArray(imported.markers) ? imported.markers : null, n);
+    noteImportedSource(cols, imported.source);
     state.dataIntervalMs = imported.intervalMs;
     state.stats = imported.stats;
     state.energy.wh = imported.energy.wh;

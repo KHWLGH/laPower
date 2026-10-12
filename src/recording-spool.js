@@ -23,6 +23,7 @@ import {
 import { formatCsvRangeAsync } from './csv-export.js';
 import { closeWriter, openSpool, patchText, syncFile, writeText } from './file-io.js';
 import { markersOf } from './markers.js';
+import { provenanceOf, softwareLabel } from './provenance.js';
 import { state } from './state.js';
 import { toast } from './ui/toast.js';
 
@@ -190,6 +191,7 @@ export function spoolRecordingStarted() {
       lastX: Number.NaN,
       sampleRate,
       startTime,
+      source: { software: softwareLabel(), ...provenanceOf(columns) },
     });
     const file = await openSpool(stem(), SPOOL_PATCH_BYTES);
     const target = { handle: file.handle, path: file.path, columns, written: 0, startTime, sampleRate };

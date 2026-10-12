@@ -48,6 +48,7 @@ import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
 import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
 import { initMarkerUI } from './marker-ui.js';
+import { setSoftwareVersion } from './provenance.js';
 import { clampLimitMb } from './recording-limit.js';
 import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
@@ -1061,6 +1062,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupControls();
   setupShell();
   initMarkerUI();
+  // 导出的 CSV 在表头写明软件版本；拿不到时只写 laPower。
+  const appApi = /** @type {any} */ (window.__TAURI__)?.app;
+  void appApi?.getVersion?.().then(setSoftwareVersion, () => {});
   fillUiScaleHint();
   applyPdSplitLayout();
   window.addEventListener('resize', applyPdSplitLayout);

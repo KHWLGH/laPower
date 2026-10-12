@@ -165,7 +165,7 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 | --- | --- | --- |
 | 装配 | `app.js`、`shell.js`、`state.js` | 入口与事件绑定、视图注册表与 Tab 切换、共享状态与类型定义 |
 | 图表 | `chart.js`、`chart-buckets.js`、`chart-extrema.js`、`chart-pacing.js`、`chart-window.js`、`performance-diagnostics.js`、`theme.js` | uPlot 渲染调度、窗口极值桶与历史索引、自动刷新和绘制反馈、时间窗缩放、性能诊断与 Canvas 主题 |
-| 数据 | `data.js`、`measurement.js`、`csv.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出 |
+| 数据 | `data.js`、`measurement.js`、`csv.js`、`provenance.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出、数据来源（仪表、选点规则、软件版本） |
 | 打点 | `markers.js`、`marker-ui.js` | 标记按数据集保存、标签清洗与行号规则（纯函数）；打点按钮、快捷键 M 与标记列表 |
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
 | 设备 | `device.js`、`temperature.js` | 连接管理、设置页 VID/PID/SN、TCP 温度源 |
