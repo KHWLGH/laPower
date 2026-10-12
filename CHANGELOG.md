@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- WITRN 仪表 100 次/秒采集时，读线程迟醒后一次读出的积压报告不再被合并成一个点。此前 hidapi 排队的报告全部按读取时刻打戳，落进同一个 10 ms 选择窗口后只留电流峰值；现在读到报告后先排空队列，再按设备节拍（≤ 10 ms）把时间戳回推到迟醒期间。macOS 上一份 70 分钟、425,121 点的 WITRN K2 实测记录中，旧逻辑在 84 次迟醒（最长 89.9 ms）里合并掉约 149 帧（0.035%），单次最多 19 帧。
+
 ## [0.2.3] - 2026-10-09
 
 ### Added

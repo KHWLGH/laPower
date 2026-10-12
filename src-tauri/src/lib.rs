@@ -1094,13 +1094,23 @@ fn disconnect_temp_service(
 /// 连续超时超过此时长且曾经读到过报告，视为拔线。
 const UNPLUG_IDLE: Duration = Duration::from_secs(2);
 
-/// 维简 HID 仪表：阻塞读 64 字节报告，每个报告最多一个到达物。
+/// 维简仪表按自己的节拍推送测量报告（K2 实测 10.00 ms），上位机不能调；
+/// 一次排空的积压报告回推时间戳时，相邻两点最多相隔这么久。
+const WITRN_REPORT_SPACING_US: u64 = 10_000;
+
+/// 单次最多排空的报告数：hidapi 在 macOS 上每台设备最多缓存 30 份，Windows HID 默认环形缓冲 32 份。
+const BACKLOG_DRAIN_CAP: usize = 64;
+
+/// 维简 HID 仪表：阻塞读 64 字节报告，再非阻塞排空主机已经排队的报告，统一打时间戳。
 struct HidSource {
     device: hidapi::HidDevice,
     epoch: Instant,
     buf: [u8; 64],
     last_report_at: Instant,
     saw_report: bool,
+    /// 上一个测量样本的时间戳，排空的积压报告回推到它之后。
+    last_sample_us: Option<u64>,
+    drained: Vec<acquire::Payload>,
 }
 
 impl HidSource {
@@ -1111,7 +1121,17 @@ impl HidSource {
             buf: [0u8; 64],
             last_report_at: Instant::now(),
             saw_report: false,
+            last_sample_us: None,
+            drained: Vec::with_capacity(BACKLOG_DRAIN_CAP),
         }
+    }
+}
+
+fn report_payload(report: &[u8]) -> Option<acquire::Payload> {
+    match ReportKind::of(report)? {
+        ReportKind::General => parse_device_data(report).map(acquire::Payload::Sample),
+        ReportKind::Pd => Some(acquire::Payload::Pd(report.to_vec())),
+        _ => None,
     }
 }
 
@@ -1126,7 +1146,6 @@ impl acquire::Source for HidSource {
             .read_timeout(&mut self.buf, rate_ms.min(20) as i32);
         // Stamp immediately after host reception, before parsing or peak selection.
         let received_at = Instant::now();
-        let received_us = received_at.duration_since(self.epoch).as_micros() as u64;
         match read {
             Ok(0) => {
                 if self.saw_report && self.last_report_at.elapsed() >= UNPLUG_IDLE {
@@ -1136,20 +1155,30 @@ impl acquire::Source for HidSource {
             Ok(read_len) => {
                 self.last_report_at = received_at;
                 self.saw_report = true;
-                let report = &self.buf[..read_len.min(self.buf.len())];
-                let payload = match ReportKind::of(report) {
-                    Some(ReportKind::General) => {
-                        parse_device_data(report).map(acquire::Payload::Sample)
+                self.drained
+                    .extend(report_payload(&self.buf[..read_len.min(self.buf.len())]));
+                // Whatever the host queued behind this report arrived while the reader was away
+                // (a late wake). Collect it now so the batch is stamped across that stall instead
+                // of at one instant, where the cadence gate would merge it into a single peak.
+                let mut newest_at = received_at;
+                for _ in 1..BACKLOG_DRAIN_CAP {
+                    match self.device.read_timeout(&mut self.buf, 0) {
+                        Ok(len) if len > 0 => {
+                            newest_at = Instant::now();
+                            self.drained
+                                .extend(report_payload(&self.buf[..len.min(self.buf.len())]));
+                        }
+                        // Queue empty. A read error here resurfaces on the next blocking read.
+                        _ => break,
                     }
-                    Some(ReportKind::Pd) => Some(acquire::Payload::Pd(report.to_vec())),
-                    _ => None,
-                };
-                if let Some(payload) = payload {
-                    out.push(acquire::Arrival {
-                        received_us,
-                        payload,
-                    });
                 }
+                self.last_sample_us = acquire::stamp_drained(
+                    &mut self.drained,
+                    self.last_sample_us,
+                    newest_at.duration_since(self.epoch).as_micros() as u64,
+                    WITRN_REPORT_SPACING_US,
+                    out,
+                );
             }
             // A failed HID read is how Windows reports a pulled cable.
             Err(_) => return Err(acquire::Stop::Unplugged),

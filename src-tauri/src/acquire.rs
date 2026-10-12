@@ -33,6 +33,56 @@ pub(crate) enum Payload {
     PdReset,
 }
 
+/// Stamp reports a source drained from the host in one go.
+///
+/// A HID meter keeps its own cadence while the reader is away, and the host queues what it
+/// sends (hidapi holds up to 30 reports per device on macOS). Draining that queue returns
+/// every report within microseconds. Stamped with the drain time, a 40 ms stall puts four
+/// samples into one 10 ms selection window and the cadence gate keeps only their peak, even
+/// though the device generated them a period apart. Spread the samples back over the stall
+/// instead: evenly between the previous sample's stamp and `now_us`, at most `max_spacing_us`
+/// apart, the newest keeping `now_us`, so order is preserved and no stamp precedes the
+/// previous sample. A batch of one keeps `now_us`, as before. PD frames are event-driven
+/// rather than paced, so they keep `now_us` and do not widen the spread.
+///
+/// Returns the newest sample stamp, or `previous_us` when the batch held no sample.
+pub(crate) fn stamp_drained(
+    payloads: &mut Vec<Payload>,
+    previous_us: Option<u64>,
+    now_us: u64,
+    max_spacing_us: u64,
+    out: &mut Vec<Arrival>,
+) -> Option<u64> {
+    let samples = payloads
+        .iter()
+        .filter(|payload| matches!(payload, Payload::Sample(_)))
+        .count() as u64;
+    // The first batch of a session has no previous stamp: assume the device's own cadence.
+    let span = previous_us.map_or(max_spacing_us.saturating_mul(samples), |previous| {
+        now_us.saturating_sub(previous)
+    });
+    let spacing = span.checked_div(samples).unwrap_or(0).min(max_spacing_us);
+    let mut newer = samples;
+    for payload in payloads.drain(..) {
+        let received_us = match payload {
+            Payload::Sample(_) => {
+                newer -= 1;
+                now_us.saturating_sub(newer * spacing)
+            }
+            _ => now_us,
+        };
+        out.push(Arrival {
+            received_us,
+            payload,
+        });
+    }
+    if samples == 0 {
+        previous_us
+    } else {
+        Some(now_us)
+    }
+}
+
 /// Why a source ended the session.
 pub(crate) enum Stop {
     /// The device went away. The stream ends quietly, like a cable pulled mid-read.
@@ -495,6 +545,112 @@ mod tests {
         assert_eq!(end.last_seq, 10);
         assert!(!harness.running.load(Ordering::Acquire));
         assert_eq!(harness.end.lock().unwrap().as_ref().unwrap().last_seq, 10);
+    }
+
+    fn drained(
+        payloads: Vec<Payload>,
+        previous_us: Option<u64>,
+        now_us: u64,
+    ) -> (Vec<u64>, Option<u64>) {
+        let mut payloads = payloads;
+        let mut out = Vec::new();
+        let newest = stamp_drained(&mut payloads, previous_us, now_us, 10_000, &mut out);
+        assert!(payloads.is_empty(), "the batch is handed over whole");
+        (out.iter().map(|a| a.received_us).collect(), newest)
+    }
+
+    fn queued(count: usize) -> Vec<Payload> {
+        (0..count)
+            .map(|i| Payload::Sample(data(2.0 + i as f32)))
+            .collect()
+    }
+
+    #[test]
+    fn a_drained_backlog_is_spread_back_over_the_stall() {
+        // Last sample at 20 ms; the reader came back at 61 ms and found four reports queued.
+        let (at, newest) = drained(queued(4), Some(20_000), 61_000);
+        assert_eq!(
+            at,
+            [31_000, 41_000, 51_000, 61_000],
+            "a device period apart, newest now"
+        );
+        assert_eq!(newest, Some(61_000));
+        assert_eq!(
+            drained(queued(1), Some(20_000), 61_000).0,
+            [61_000],
+            "a lone report keeps its receive time"
+        );
+    }
+
+    #[test]
+    fn a_short_stall_compresses_rather_than_reaching_past_the_previous_sample() {
+        let (at, _) = drained(queued(3), Some(1_000_000), 1_012_000);
+        assert_eq!(at, [1_004_000, 1_008_000, 1_012_000]);
+        let (at, _) = drained(queued(2), Some(5_000), 5_000);
+        assert!(
+            at.iter().all(|&us| us >= 5_000),
+            "never before the previous sample"
+        );
+    }
+
+    #[test]
+    fn pd_frames_keep_the_drain_time_and_do_not_move_the_sample_clock() {
+        let batch = vec![
+            Payload::Sample(data(1.0)),
+            Payload::Pd(vec![0xFE; 4]),
+            Payload::Sample(data(2.0)),
+        ];
+        let (at, newest) = drained(batch, Some(0), 30_000);
+        assert_eq!(at, [20_000, 30_000, 30_000]);
+        assert_eq!(newest, Some(30_000));
+        assert_eq!(
+            drained(vec![Payload::PdReset], Some(7), 9),
+            (vec![9], Some(7))
+        );
+    }
+
+    #[test]
+    fn the_first_batch_of_a_session_assumes_the_device_cadence() {
+        assert_eq!(drained(queued(3), None, 50_000).0, [30_000, 40_000, 50_000]);
+        assert_eq!(
+            drained(queued(3), None, 5_000).0,
+            [0, 0, 5_000],
+            "saturates at the session epoch"
+        );
+    }
+
+    #[test]
+    fn a_drained_backlog_survives_the_cadence_gate_at_the_device_rate() {
+        // 100 Hz meter at a 10 ms interval: on time at 0/10/20 ms, then the reader stalls until
+        // 61 ms and drains four queued reports at once, then is on time again at 70/80 ms.
+        let run = |burst: Vec<Arrival>| {
+            let mut steps: Vec<Result<Vec<Arrival>, Stop>> =
+                (0..3).map(|i| Ok(vec![sample(i * 10, 1.0)])).collect();
+            steps.push(Ok(burst));
+            steps.push(Ok(vec![sample(70, 1.0)]));
+            steps.push(Ok(vec![sample(80, 1.0)]));
+            steps.push(Err(Stop::Unplugged));
+            let (samples, _, _, harness) = collect(start(steps, 10, false));
+            harness.join.join().unwrap();
+            samples
+                .iter()
+                .map(|s| s.received_us / 1000)
+                .collect::<Vec<_>>()
+        };
+        // Stamped with the drain time, the queue lands in one window: the first queued report
+        // resyncs the grid, and the other three plus the on-time 70 ms one collapse into a
+        // single selected point.
+        let at_once = queued(4)
+            .into_iter()
+            .map(|payload| Arrival {
+                received_us: 61_000,
+                payload,
+            })
+            .collect();
+        assert_eq!(run(at_once).len(), 6, "nine reports, six points");
+        let mut spread = Vec::new();
+        stamp_drained(&mut queued(4), Some(20_000), 61_000, 10_000, &mut spread);
+        assert_eq!(run(spread), [0, 10, 20, 31, 41, 51, 61, 70, 80]);
     }
 
     #[test]
