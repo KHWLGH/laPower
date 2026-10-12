@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # usbpd-parser
 
 Parse USB Power Delivery messages into an inspectable field tree.

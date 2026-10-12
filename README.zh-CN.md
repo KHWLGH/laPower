@@ -123,7 +123,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 Windows 安装包当前未做证书签名，首次运行可能显示 SmartScreen 提示。
 
-**macOS 12+** —— Intel Mac 下载带 `macos-x64` 的 `.dmg`，Apple Silicon（M1 及以后）下载带 `macos-arm64` 的 `.dmg`，打开后将 `laPower.app` 拖到 Applications。应用采用 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证；首次启动如果被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中允许本次打开。macOS 12 是构建目标，旧系统兼容性仍需实机验证；历史验证边界见 [macOS ARM64 构建记录](docs/MACOS_BUILD.md)。
+**macOS 12+** —— Intel Mac 下载带 `macos-x64` 的 `.dmg`，Apple Silicon（M1 及以后）下载带 `macos-arm64` 的 `.dmg`，打开后将 `laPower.app` 拖到 Applications。应用采用 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证；首次启动如果被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中允许本次打开。macOS 12 是构建目标，旧系统兼容性仍需实机验证；构建步骤和验收边界见 [macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)。
 
 **Linux (x64)** —— 下载带 `linux-x64` 的 `.deb`、`.rpm` 或 `.AppImage`。Debian / Ubuntu 可用 `sudo apt install ./laPower_<版本>_linux-x64.deb`；Fedora 等使用 RPM 的发行版可用 `sudo dnf install ./laPower_<版本>_linux-x64.rpm`。AppImage 先执行 `chmod +x ./laPower_<版本>_linux-x64.AppImage`，再直接运行；可能需要安装发行版的 FUSE 2 运行库。安装包基于 Ubuntu 22.04 构建，不承诺适用于所有发行版。
 
@@ -144,11 +144,9 @@ Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [ude
 | --- | --- |
 | [使用指南](docs/USAGE.md) | 界面逐项说明、全部设置项、CSV 与 PD 捕获文件格式、常见问题 |
 | [技术架构](docs/ARCHITECTURE.md) | 线程模型、Tauri 命令、数据流、HID 报文布局、测试与安全边界 |
-| [开发与构建](docs/DEVELOPMENT.md) | 环境要求、构建命令、CI 门禁、Linux / macOS 自行编译、参与贡献 |
-| [macOS ARM64 构建记录](docs/MACOS_BUILD.md) | Apple Silicon 打包步骤、ad-hoc 签名、DMG 与验收边界 |
+| [开发与构建](docs/DEVELOPMENT.md) | 环境要求、构建命令、CI 门禁、Linux / macOS 自行编译、外部温度服务、参与贡献 |
 | [性能基准与边界](docs/PERFORMANCE.md) | 图表调度、数据完整性、性能测量与真机验收记录 |
-| [外部温度服务](docs/TEMPERATURE.md) | TCP 温度源协议、应用内配置、Python 示例服务器 |
-| [更新日志](CHANGELOG.md) | 完整版本历史 |
+| [更新日志](CHANGELOG.md) | 中英双语发布说明及早期中文历史 |
 
 ## 🙏 致谢与相关项目
 

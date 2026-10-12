@@ -84,7 +84,7 @@ These images show version **0.2.3** on Windows and use simulated devices and dat
 
 - uPlot draws **8 curves and 4 Y axes** (current A, voltage V, power W, temperature °C) with strictly aligned ticks and two levels of dense minor grids.
 - Dense data uses incremental min/max pixel buckets, keeping **million-point histories draggable**. History rendering preserves detail at the canvas pixel resolution; slow frames do not widen buckets, and zoom restores original points. Full data stays in column storage; hover retrieves original samples by binary search. Mouse-wheel horizontal zoom also works during recording.
-- At 1000 samples/s, automatic drawing runs at about 10–20 fps while dragging/zooming refresh independently. Acquisition and saving retain every sample. Recording and history browsing share the historical extrema index, avoiding a full-history scan when zooming out or panning. See [Performance notes](docs/PERFORMANCE.md#2026-10-04-高采样率窗口交互验收) (Simplified Chinese) for verified scope and limits.
+- At 1000 samples/s, automatic drawing runs at about 10–20 fps while dragging/zooming refresh independently. Acquisition and saving retain every sample. Recording and history browsing share the historical extrema index, avoiding a full-history scan when zooming out or panning. See [Performance notes](docs/en/PERFORMANCE.md#2026-10-04-high-rate-window-interaction-acceptance) for verified scope and limits.
 - Tooltips show all eight channels; the legend toggles each channel; the bottom timeline navigator selects ranges and pans them.
 - Each curve's fill is controlled directly by opacity (0 = off; 1–100 = on).
 
@@ -123,7 +123,7 @@ The project was formerly named WITRN-RS. laPower uses the identifier `io.github.
 
 Windows installers currently lack certificate signing and may trigger SmartScreen on first launch.
 
-**macOS 12+** — For Intel choose a `macos-x64` `.dmg`; for Apple Silicon (M1 or later), choose `macos-arm64`. Open it and drag `laPower.app` to Applications. Builds use ad-hoc signing without Developer ID or Apple notarization. If Gatekeeper blocks the first launch, allow it in System Settings → Privacy & Security. macOS 12 is the build target; older-system compatibility still requires real-machine verification. See [macOS ARM64 build records](docs/MACOS_BUILD.md) (Simplified Chinese) for historical verification limits.
+**macOS 12+** — For Intel choose a `macos-x64` `.dmg`; for Apple Silicon (M1 or later), choose `macos-arm64`. Open it and drag `laPower.app` to Applications. Builds use ad-hoc signing without Developer ID or Apple notarization. If Gatekeeper blocks the first launch, allow it in System Settings → Privacy & Security. macOS 12 is the build target; older-system compatibility still requires real-machine verification. See [Building on macOS](docs/en/DEVELOPMENT.md#building-on-macos) for current build instructions and acceptance limits.
 
 **Linux (x64)** — Download a `linux-x64` `.deb`, `.rpm` or `.AppImage`. On Debian/Ubuntu use `sudo apt install ./laPower_<version>_linux-x64.deb`; on RPM distributions such as Fedora use `sudo dnf install ./laPower_<version>_linux-x64.rpm`. For AppImage, run `chmod +x ./laPower_<version>_linux-x64.AppImage`, then launch it directly. Your distribution may require the FUSE 2 runtime. Packages are built on Ubuntu 22.04 and are not guaranteed to work on every distribution.
 
@@ -143,12 +143,10 @@ See the [User guide](docs/en/USAGE.md) for the complete interface, settings and 
 | Document | Contents |
 | --- | --- |
 | [User guide](docs/en/USAGE.md) | Every interface control, all settings, CSV/PD capture formats and FAQs |
-| [Architecture](docs/ARCHITECTURE.md) (Simplified Chinese) | Thread model, Tauri commands, data flow, HID layouts, tests and security boundaries |
-| [Development and build](docs/en/DEVELOPMENT.md) | Requirements, build commands, CI gates, Linux/macOS builds and contributions |
-| [macOS ARM64 build records](docs/MACOS_BUILD.md) (Simplified Chinese) | Apple Silicon packaging, ad-hoc signing, DMG and acceptance limits |
-| [Performance benchmarks and limits](docs/PERFORMANCE.md) (Simplified Chinese) | Chart scheduling, data integrity, measurements and hardware acceptance records |
-| [External temperature service](docs/en/TEMPERATURE.md) | TCP protocol, app configuration and Python example server |
-| [Changelog](CHANGELOG.md) (Simplified Chinese) | Full version history |
+| [Architecture](docs/en/ARCHITECTURE.md) | Thread model, Tauri commands, data flow, HID layouts, tests and security boundaries |
+| [Development and build](docs/en/DEVELOPMENT.md) | Requirements, build commands, CI gates, Linux/macOS builds, external temperature service and contributions |
+| [Performance benchmarks and limits](docs/en/PERFORMANCE.md) | Chart scheduling, data integrity, measurements and hardware acceptance records |
+| [Changelog](CHANGELOG.md) | English/Simplified Chinese release notes and earlier Chinese history |
 
 ## 🙏 Credits and related projects
 

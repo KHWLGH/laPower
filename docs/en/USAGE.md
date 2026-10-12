@@ -71,7 +71,7 @@ The bottom bar displays `Recording:` (current state, **click to start or pause**
 | `⋯` | Appears when space is insufficient; contains export, import and reset |
 | `Display` | Opens the channel display flyout |
 | `Auto pause` | Toggle and gear button for its configuration flyout |
-| `Temperature service` | Toggle and gear button for configuration; see [External temperature service](TEMPERATURE.md) |
+| `Temperature service` | Toggle and gear button for configuration; see [External temperature service](DEVELOPMENT.md#external-temperature-service) |
 
 Sample-rate presets, with the actual millisecond interval also used by CSV `SampTime(ms)`:
 
@@ -322,5 +322,5 @@ See [Development and build · udev rules](DEVELOPMENT.md#udev-rules-required).
 ### Temperature stays at `--`
 
 - The default source is `External` (TCP). For the meter's sensor, change `Source` to `Device` in the `Temperature service` flyout.
-- For TCP, check address, port and plain numeric lines with a newline. See [External temperature service](TEMPERATURE.md).
+- For TCP, check address, port and plain numeric lines with a newline. See [External temperature service](DEVELOPMENT.md#external-temperature-service).
 - Temperature offsets are verified on only some models. Out-of-range temperature is treated as missing without discarding the whole measurement, so voltage/current can work while temperature remains `--`.

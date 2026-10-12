@@ -1,4 +1,6 @@
-← 返回 [README](../README.md)
+[English](en/ARCHITECTURE.md) | **简体中文**
+
+← 返回 [README](../README.zh-CN.md)
 
 # 技术架构
 
@@ -112,6 +114,8 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 > 维简硬件的 USB 序列号是**生产批次日期**而非单机编号，同批次的两台仪表序列号相同。枚举时先按 USB 端口分组，再叠加序列号，以便标题栏区分插在不同口上的同型号仪表。
 
 ## 协议库
+
+`usbpd-parser` 与 `witrn-hid` 源于已停止维护的独立 `WITRN-API-RS` 仓库，最后导入提交为 `30c4bdb`。现在三个协议库统一在本仓库维护，通过 `workspace.package.version` 与应用共同版本管理，不单独发布。集成增加数值 `GeneralSample` 与由调用者维护上下文的 `decode_pd_report`；HID 设备封装保留兼容性，而 `src-tauri` 自行拥有设备句柄与后台线程。各库的 API 与示例见对应目录下的中英文 README。
 
 三个 crate 都不依赖 Tauri，可被其他 Rust 项目直接引用；均为 `publish = false`，仅在本工作区内使用。工作区公共许可证为 LGPL-3.0-or-later。
 

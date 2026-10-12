@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { prepareRelease, releaseRepository } from '../scripts/changelog.mjs';
 import {
   cleanBundles,
   collectPackages,
@@ -15,29 +18,45 @@ import {
 } from '../scripts/release.mjs';
 
 const VERSION = '1.2.3';
-const CHANGELOG = `# Changelog
+const NOTES = {
+  en: `# ${VERSION} - 2026-10-04
+
+## Added
+- Add meter support; see [Usage](../../docs/en/USAGE.md#monitor-workspace).
+`,
+  'zh-CN': `# ${VERSION} - 2026-10-04
+
+## 新增
+- 新增仪表支持，参见 [使用说明](../../docs/USAGE.md#监控工作区)。
+## 修复
+- 修复导入记录，参见 [官网](https://example.com)。
+`,
+};
+const INDEX = `# Changelog
+
+<!-- releases:start -->
 
 ## [Unreleased]
-### Added
-- 下一个版本的功能
 
-## [${VERSION}] - 2026-10-04
-### Added
-- 新增仪表支持，参见 [使用说明](docs/USAGE.md#监控工作区)。
-### Fixed
-- 修复导入记录，参见 [官网](https://example.com)。
+待发布草稿
 
-## [1.2.2] - 2026-09-01
-### Removed
+<!-- releases:end -->
+
+## [0.1.0] - 2026-01-20
 - 旧版本的改动
 `;
+const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'lapower-release-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'dist/packages');
   await mkdir(directory, { recursive: true });
-  await writeFile(join(root, 'CHANGELOG.md'), CHANGELOG);
+  await writeFile(join(root, 'CHANGELOG.md'), INDEX);
+  await mkdir(join(root, 'changelog', VERSION), { recursive: true });
+  for (const [language, text] of Object.entries(NOTES)) {
+    await writeFile(join(root, 'changelog', VERSION, `${language}.md`), text);
+  }
   const names = Object.keys(PACKAGES).flatMap((id) => packageNames(VERSION, id));
   for (const name of names) await writeFile(join(directory, name), `installer contents: ${name}`);
   return { root, directory, names };
@@ -117,7 +136,7 @@ async function publisher(t, mockOptions) {
     names,
     options: {
       directory,
-      changelogPath: join(root, 'CHANGELOG.md'),
+      root,
       version: VERSION,
       tag: `v${VERSION}`,
       repository: 'owner/repo',
@@ -223,7 +242,7 @@ test('publish a draft only after all eight uploaded assets pass size and digest 
   assert.equal(url, 'https://github.test/owner/repo/releases/v1.2.3');
   assert.equal(state.release.draft, false);
   assert.equal(state.release.prerelease, false);
-  assert.equal(state.release.body, releaseNotes(CHANGELOG, VERSION, 'owner/repo'));
+  assert.equal(state.release.body, releaseNotes(NOTES, VERSION, 'owner/repo'));
   assert.equal(state.release.generate_release_notes, undefined);
   assert.equal(state.assets.length, 8);
   assert.equal(state.calls.at(-2).method, 'GET');
@@ -256,32 +275,126 @@ test('rerun replaces only the owned draft assets and then publishes', async (t) 
   assert.ok(state.calls.some(({ method, pathname }) => method === 'DELETE' && pathname.endsWith('/42')));
   assert.equal(state.assets.length, 8);
   assert.equal(state.release.draft, false);
-  assert.equal(state.release.body, releaseNotes(CHANGELOG, VERSION, 'owner/repo'));
+  assert.equal(state.release.body, releaseNotes(NOTES, VERSION, 'owner/repo'));
 });
 
-test('release notes include only the matching version and keep links usable outside the repository', () => {
-  const body = releaseNotes(CHANGELOG.replaceAll('\n', '\r\n'), VERSION, 'owner/repo');
-  assert.ok(body.includes('### 新增\n- 新增仪表支持'));
-  assert.ok(body.includes('### 修复\n- 修复导入记录'));
+test('release notes expand English, collapse Chinese and pin relative links to the tag', () => {
+  const body = releaseNotes(
+    Object.fromEntries(Object.entries(NOTES).map(([key, text]) => [key, text.replaceAll('\n', '\r\n')])),
+    VERSION,
+    'owner/repo',
+  );
+  assert.ok(body.indexOf('## Added') < body.indexOf('<details>'));
+  assert.ok(body.includes('<summary>简体中文</summary>'));
+  assert.ok(body.includes('## 新增\n- 新增仪表支持'));
   assert.ok(body.includes('https://github.com/owner/repo/blob/v1.2.3/docs/USAGE.md#监控工作区'));
+  assert.ok(body.includes('https://github.com/owner/repo/blob/v1.2.3/docs/en/USAGE.md#monitor-workspace'));
   assert.ok(body.includes('[官网](https://example.com)'));
-  assert.ok(!body.includes('下一个版本的功能'));
+  assert.ok(body.includes('## Download and installation'));
+  assert.ok(body.includes('## 下载与安装'));
   assert.ok(!body.includes('旧版本的改动'));
 });
 
-test('missing, duplicate and empty changelog versions stop publication before any GitHub request', async (t) => {
-  for (const [problem, changelog] of [
-    ['missing', CHANGELOG.replace(`[${VERSION}]`, '[1.2.4]')],
-    ['duplicate', `${CHANGELOG}\n## [${VERSION}]\n- 重复版本\n`],
-    ['empty', `## [${VERSION}]\n### Added\n\n## [1.2.2]\n- 旧内容\n`],
-  ]) {
-    await t.test(problem, async (sub) => {
-      const { options, state } = await publisher(sub);
-      await writeFile(options.changelogPath, changelog);
-      await assert.rejects(publishRelease(options), /CHANGELOG.md/);
-      assert.equal(state.calls.length, 0);
-    });
+test('missing or empty bilingual notes stop publication before any GitHub request', async (t) => {
+  for (const language of ['en', 'zh-CN']) {
+    for (const problem of ['missing', 'empty']) {
+      await t.test(`${language}: ${problem}`, async (sub) => {
+        const { options, state } = await publisher(sub);
+        const path = join(options.root, 'changelog', VERSION, `${language}.md`);
+        if (problem === 'missing') await rm(path);
+        else await writeFile(path, `# ${VERSION}\n\n## Added\n`);
+        await assert.rejects(publishRelease(options), /更新日志/);
+        assert.equal(state.calls.length, 0);
+      });
+    }
   }
+});
+
+async function preparationFixture(t) {
+  const { root } = await fixture(t);
+  await mkdir(join(root, 'changelog/unreleased'));
+  for (const [language, text] of Object.entries(NOTES))
+    await writeFile(join(root, 'changelog/unreleased', `${language}.md`), text);
+  for (const rel of [
+    'package.json',
+    'package-lock.json',
+    'Cargo.toml',
+    'Cargo.lock',
+    'src-tauri/tauri.conf.json',
+    ...['src-tauri', 'crates/usbpd-parser', 'crates/witrn-hid', 'crates/km003c'].map(
+      (member) => `${member}/Cargo.toml`,
+    ),
+  ]) {
+    await mkdir(dirname(join(root, rel)), { recursive: true });
+    await writeFile(join(root, rel), await readFile(join(REPO_ROOT, rel)));
+  }
+  return root;
+}
+
+test('release preparation dry-run writes nothing; preparation archives notes and synchronizes versions', async (t) => {
+  const root = await preparationFixture(t);
+  const manifest = await readFile(join(root, 'package.json'), 'utf8');
+  const options = { root, date: '2026-10-12', repository: 'owner/repo' };
+  const preview = await prepareRelease('1.2.4', { ...options, dryRun: true });
+  assert.ok(preview.body.includes('/blob/v1.2.4/'));
+  assert.equal(await readFile(join(root, 'package.json'), 'utf8'), manifest);
+  assert.equal(await readFile(join(root, 'CHANGELOG.md'), 'utf8'), INDEX);
+  await assert.rejects(readFile(join(root, 'changelog/1.2.4/en.md')), /ENOENT/);
+  await assert.rejects(readFile(join(root, 'dist/release-notes.md')), /ENOENT/);
+  assert.equal(await readFile(join(root, 'changelog/unreleased/zh-CN.md'), 'utf8'), NOTES['zh-CN']);
+  const result = await prepareRelease('1.2.4', options);
+  assert.equal(result.body, preview.body);
+  assert.equal(JSON.parse(await readFile(join(root, 'package.json'), 'utf8')).version, '1.2.4');
+  assert.equal(JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8')).packages[''].version, '1.2.4');
+  assert.equal(JSON.parse(await readFile(join(root, 'src-tauri/tauri.conf.json'), 'utf8')).version, '1.2.4');
+  const index = await readFile(join(root, 'CHANGELOG.md'), 'utf8');
+  assert.ok(index.includes('## [1.2.4] - 2026-10-12'));
+  assert.equal(index.match(/^## \[Unreleased\]/gm)?.length, 1);
+  assert.ok(!index.includes('待发布草稿'));
+  assert.ok(index.endsWith('## [0.1.0] - 2026-01-20\n- 旧版本的改动\n'));
+  assert.equal(await readFile(join(root, 'dist/release-notes.md'), 'utf8'), result.body);
+  const en = await readFile(join(root, 'changelog/1.2.4/en.md'), 'utf8');
+  const zh = await readFile(join(root, 'changelog/1.2.4/zh-CN.md'), 'utf8');
+  assert.ok(en.startsWith('# 1.2.4 - 2026-10-12'));
+  assert.equal(releaseNotes({ en, 'zh-CN': zh }, '1.2.4', 'owner/repo'), result.body);
+  assert.equal(await readFile(join(root, 'changelog/unreleased/zh-CN.md'), 'utf8'), '# Unreleased\n');
+});
+
+test('failed preparation preserves drafts and does not overwrite a version directory', async (t) => {
+  const root = await preparationFixture(t);
+  const options = { root, date: '2026-10-12', repository: 'owner/repo' };
+  await assert.rejects(prepareRelease(VERSION, options), /不覆盖/);
+  assert.equal(await readFile(join(root, 'changelog', VERSION, 'en.md'), 'utf8'), NOTES.en);
+  await assert.rejects(prepareRelease('../unsafe', options), /无效/);
+  await assert.rejects(prepareRelease('1.2.4', { ...options, date: '2026-02-30' }), /发布日期/);
+  await rm(join(root, 'changelog/unreleased/en.md'));
+  await assert.rejects(prepareRelease('1.2.4', options), /更新日志缺失/);
+  assert.equal(await readFile(join(root, 'changelog/unreleased/zh-CN.md'), 'utf8'), NOTES['zh-CN']);
+  await writeFile(join(root, 'changelog/unreleased/en.md'), NOTES.en);
+  await rm(join(root, 'Cargo.lock'));
+  await assert.rejects(prepareRelease('1.2.4', options), /ENOENT/);
+  assert.equal(await readFile(join(root, 'changelog/unreleased/en.md'), 'utf8'), NOTES.en);
+  await assert.rejects(readFile(join(root, 'changelog/1.2.4/en.md')), /ENOENT/);
+});
+
+test('output write failure leaves both preparation drafts intact', async (t) => {
+  const root = await preparationFixture(t);
+  const manifest = await readFile(join(root, 'package.json'), 'utf8');
+  await mkdir(join(root, 'dist/release-notes.md'));
+  await assert.rejects(prepareRelease('1.2.4', { root, date: '2026-10-12', repository: 'owner/repo' }));
+  for (const [language, text] of Object.entries(NOTES)) {
+    assert.equal(await readFile(join(root, 'changelog/unreleased', `${language}.md`), 'utf8'), text);
+  }
+  assert.equal(await readFile(join(root, 'package.json'), 'utf8'), manifest);
+  assert.equal(await readFile(join(root, 'CHANGELOG.md'), 'utf8'), INDEX);
+});
+
+test('repository identity prefers the environment and otherwise reads GitHub origin', async (t) => {
+  const { root } = await fixture(t);
+  assert.equal(releaseRepository(root, { GITHUB_REPOSITORY: 'fork/project' }), 'fork/project');
+  execFileSync('git', ['init', root]);
+  execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'git@github.com:owner/project.git']);
+  assert.equal(releaseRepository(root, {}), 'owner/project');
 });
 
 test('a failed release listing never creates another draft', async (t) => {

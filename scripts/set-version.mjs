@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+export const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![\s\S])/;
 
 function replaceOnce(text, pattern, replacement, label) {
   if ([...text.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))].length !== 1) {
@@ -12,8 +12,8 @@ function replaceOnce(text, pattern, replacement, label) {
   return text.replace(pattern, replacement);
 }
 
-/** Only edit version values; keep formatting and dependency resolutions intact. */
-export function setVersion(version, root = ROOT) {
+/** Plan version edits without writing; preserve formatting and dependency resolutions. */
+export function versionChanges(version, root = ROOT) {
   if (!VERSION_PATTERN.test(version)) {
     throw new Error('版本号必须为 X.Y.Z（非负整数，不含前导零），例如 0.2.2');
   }
@@ -88,14 +88,14 @@ export function setVersion(version, root = ROOT) {
   if (missing.length) throw new Error(`Cargo.lock 缺少工作区包：${missing.join(', ')}，请先运行 cargo metadata`);
   update('Cargo.lock', cargoAfter);
 
-  // Validate every input before writing, so invalid versions/manifests leave files untouched.
-  const changed = [];
-  for (const [rel, { before, after }] of files) {
-    if (before === after) continue;
-    writeFileSync(resolve(root, rel), after);
-    changed.push(rel);
-  }
-  return changed;
+  return new Map([...files].filter(([, { before, after }]) => before !== after));
+}
+
+/** Validate all inputs before writing, so invalid manifests leave files untouched. */
+export function setVersion(version, root = ROOT) {
+  const changes = versionChanges(version, root);
+  for (const [rel, { after }] of changes) writeFileSync(resolve(root, rel), after);
+  return [...changes.keys()];
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

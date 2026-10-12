@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # witrn-hid
 
 Read and decode the HID stream from a WITRN USB power meter.

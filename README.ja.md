@@ -84,7 +84,7 @@ Windows 上の **0.2.3** の画面です。独立した開発ツールで生成�
 
 - uPlot で **8 曲線・4 本の Y 軸**（電流 A、電圧 V、電力 W、温度 °C）を描画します。4 軸の目盛りを厳密に揃え、2 段階の細かい補助グリッドを備えます。
 - 密なデータは増分 min/max ピクセルバケットで描画し、**100 万点でもドラッグ可能**です。履歴表示はキャンバスの実ピクセル解像度に沿って詳細を保持し、遅いフレームでもバケットを粗くせず、拡大すると元の点に戻ります。完全なデータは列形式で保持し、ホバー時は二分探索で元のサンプルを参照します。記録中もホイールで横方向にズームできます。
-- 毎秒 1000 回の取得では自動描画を約 10–20 fps にし、ドラッグ・ズームは独立して更新します。取得・保存は全サンプルを保持します。記録中と停止後の履歴表示で極値インデックスを共有し、縮小・移動時の全履歴スキャンを避けます。検証範囲と限界は[性能説明](docs/PERFORMANCE.md#2026-10-04-高采样率窗口交互验收)（簡体字中国語）を参照してください。
+- 毎秒 1000 回の取得では自動描画を約 10–20 fps にし、ドラッグ・ズームは独立して更新します。取得・保存は全サンプルを保持します。記録中と停止後の履歴表示で極値インデックスを共有し、縮小・移動時の全履歴スキャンを避けます。検証範囲と限界は[性能説明](docs/en/PERFORMANCE.md#2026-10-04-high-rate-window-interaction-acceptance)（英語）を参照してください。
 - ツールチップに 8 チャンネルすべてを表示し、凡例で個別表示を切り替え、下部のタイムラインで範囲選択・移動ができます。
 - 各曲線の塗りつぶしは不透明度で直接制御します（0 = 無効、1–100 = 有効）。
 
@@ -123,7 +123,7 @@ WITRN はベンダー VID `0x0716` で列挙するため、**表にないモデ�
 
 Windows インストーラーには現在証明書署名がなく、初回起動時に SmartScreen が表示される場合があります。
 
-**macOS 12+** — Intel Mac は `macos-x64`、Apple Silicon（M1 以降）は `macos-arm64` の `.dmg` を選び、開いて `laPower.app` を Applications へドラッグします。ad-hoc 署名のみで Developer ID 署名・Apple 公証はありません。Gatekeeper が初回起動をブロックした場合は「システム設定 → プライバシーとセキュリティ」で開くことを許可してください。macOS 12 はビルド対象であり、旧 OS の互換性には実機検証が必要です。過去の検証範囲は [macOS ARM64 ビルド記録](docs/MACOS_BUILD.md)（簡体字中国語）を参照してください。
+**macOS 12+** — Intel Mac は `macos-x64`、Apple Silicon（M1 以降）は `macos-arm64` の `.dmg` を選び、開いて `laPower.app` を Applications へドラッグします。ad-hoc 署名のみで Developer ID 署名・Apple 公証はありません。Gatekeeper が初回起動をブロックした場合は「システム設定 → プライバシーとセキュリティ」で開くことを許可してください。macOS 12 はビルド対象であり、旧 OS の互換性には実機検証が必要です。ビルド手順と検証範囲は [macOS でのビルド](docs/ja/DEVELOPMENT.md#macos-でのビルド)を参照してください。
 
 **Linux（x64）** — `linux-x64` の `.deb`、`.rpm`、`.AppImage` を選びます。Debian／Ubuntu は `sudo apt install ./laPower_<version>_linux-x64.deb`、Fedora などは `sudo dnf install ./laPower_<version>_linux-x64.rpm` でインストールできます。AppImage は `chmod +x ./laPower_<version>_linux-x64.AppImage` の後に実行します。ディストリビューションによって FUSE 2 ランタイムが必要です。Ubuntu 22.04 でビルドしており、すべてのディストリビューションへの対応は保証しません。
 
@@ -143,12 +143,10 @@ Linux パッケージはデバイス権限を自動設定しません。接続�
 | ドキュメント | 内容 |
 | --- | --- |
 | [使用ガイド](docs/ja/USAGE.md) | 各操作・全設定、CSV／PD キャプチャ形式、よくある質問 |
-| [技術アーキテクチャ](docs/ARCHITECTURE.md)（簡体字中国語） | スレッドモデル、Tauri コマンド、データフロー、HID 構造、テスト・セキュリティ境界 |
-| [開発とビルド](docs/ja/DEVELOPMENT.md) | 環境、ビルドコマンド、CI、Linux／macOS ビルド、貢献方法 |
-| [macOS ARM64 ビルド記録](docs/MACOS_BUILD.md)（簡体字中国語） | Apple Silicon パッケージ化、ad-hoc 署名、DMG、検証範囲 |
-| [性能ベンチマークと限界](docs/PERFORMANCE.md)（簡体字中国語） | グラフスケジューリング、データ完全性、性能測定、実機検証記録 |
-| [外部温度サービス](docs/ja/TEMPERATURE.md) | TCP プロトコル、アプリの設定、Python サーバー例 |
-| [変更履歴](CHANGELOG.md)（簡体字中国語） | 全バージョンの履歴 |
+| [技術アーキテクチャ](docs/en/ARCHITECTURE.md)（英語） | スレッドモデル、Tauri コマンド、データフロー、HID 構造、テスト・セキュリティ境界 |
+| [開発とビルド](docs/ja/DEVELOPMENT.md) | 環境、ビルドコマンド、CI、Linux／macOS ビルド、外部温度サービス、貢献方法 |
+| [性能ベンチマークと限界](docs/en/PERFORMANCE.md)（英語） | グラフスケジューリング、データ完全性、性能測定、実機検証記録 |
+| [変更履歴](CHANGELOG.md)（英語／簡体字中国語） | 2 言語のリリースノートと過去の中国語履歴 |
 
 ## 🙏 謝辞と関連プロジェクト
 

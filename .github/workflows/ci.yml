@@ -56,6 +56,10 @@ jobs:
           fi
           echo "tag ${GITHUB_REF_NAME} 与清单版本 ${manifest} 一致"
 
+      - name: Read bilingual release notes before packaging
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run release:notes
+
       - name: Type check JavaScript
         run: npm run typecheck
 

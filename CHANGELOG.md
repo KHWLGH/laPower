@@ -1,49 +1,22 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+New releases provide English and Simplified Chinese notes. Earlier history remains in Simplified Chinese.
+新版本提供英文、简体中文更新说明；早期历史保留简体中文。
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+During development, edit the Chinese draft only. Before a release, review both languages and use the preparation command in the [development guide](docs/en/DEVELOPMENT.md#release-process).
+开发期间只维护中文草稿；发布前校对双语内容，按[开发指南](docs/DEVELOPMENT.md#发布流程)准备版本。
+
+<!-- releases:start -->
 
 ## [Unreleased]
 
-### Changed
-
-- 完整常量数据块共享存储，降低空通道、稳定信号线、记录段号和采样间隔的内存占用；CSV 导入收尾逐块补齐，保留精确值与全部历史数据。
-- 窗口风格移除「跟随平台」，Windows / Linux 默认 Windows 风格，旧自动配置随加载迁移；macOS 继续使用原生红绿灯。
-
-### Fixed
-
-- 「跟随系统」括号内显示检测到的系统语言，手动切换界面语言不会改变它；未支持的系统语种保留真实名称，界面回退英文。
-- Windows 繁体中文与简体中文统一优先使用微软雅黑 UI，改善正黑体在小字号下笔画偏细、发虚的问题；正黑体保留为缺字回退，表单与图表字体同步切换。
+[简体中文草稿](changelog/unreleased/zh-CN.md) · [English draft](changelog/unreleased/en.md)
 
 ## [0.2.3] - 2026-10-09
 
-### Added
+[English](changelog/0.2.3/en.md) · [简体中文](changelog/0.2.3/zh-CN.md)
 
-- 保留简体中文，新增繁体中文、英文和日文界面；默认跟随系统语言，不支持的语言回退英文。Linux 按 `LC_ALL → LC_MESSAGES → LANG` 检测，Windows / macOS 使用系统 locale。
-- 设置页新增语言选择，立即切换并保存偏好，保留设备连接、记录、数据、图表范围、PD 筛选和选中报文；恢复默认配置回到自动模式。
-- 新增四语言离线词典、结构化后端消息、语言解析与持久化测试，以及使用模拟设备的多语言验证工具。
-- README、使用指南、外部温度服务和开发构建指南提供完整四语版本，并配套四语言浅深主题截图。
-- macOS 应用菜单新增「Settings…」（⌘,），打开设置页，与标题栏齿轮按钮相同。
-
-### Changed
-
-- GitHub 首页默认显示英文。
-- 图表、菜单、弹窗、通知、恢复记录、窗口控件、无障碍标签及应用提供的文件对话框标题和过滤器跟随所选语言；PD 标准字段、设备原始回复、单位和 CSV / PD 文件格式保持兼容。
-- 调整字体回退与长文案布局，适配四语言及窄窗口。
-
-- macOS 改用系统原生红绿灯：标题栏布局不变，窗口按钮、全屏、窗口平铺、圆角与阴影由系统提供；双击标题栏空白处按「系统设置 › 桌面与程序坞」缩放或最小化。原生按钮不能换皮肤，设置中的「窗口风格」只在 Windows / Linux 显示。
-
-### Fixed
-
-- 校对四语言界面与使用文档，修正日文暂停与恢复提示、统一繁中文案术语，并澄清仪表温度源、PD 跟随采集和记录上限后的操作；更新 0.2.3 四语言深浅主题截图，按语言子目录存放并移除根目录中的重复图片。
-- 修正文档中的旧 PD 列名、独立模式暂停行为和温度服务换行说明，补齐外观设置中的语言选项。
-- macOS 27 + Xcode 27.0（beta）上 release 构建在第一个过程宏处失败：继承 release 的 `strip` 后，dylib 被 dyld 以 LINKEDIT 字符串池未对齐为由拒绝加载。构建脚本与过程宏不进安装包，不再 strip。
-- macOS 上主窗口隐藏、最小化或被遮挡时，WKWebView 默认的后台策略会节流并约 5 分钟后挂起页面，前端不再确认样本，未确认量达到 8192 后采集停止（1 ms 采样约 8 秒）。主窗口改为关闭 WebView 后台节流（macOS 14+ 生效，Windows / Linux 忽略该项）。
-- macOS 上读线程存活期间退出 App Nap 并要求最高定时器精度（`LatencyCritical`），窗口不可见时 HID 读取与合批定时器不再被系统合并、降级；hidapi 在 macOS 上每台设备只缓存 30 份报告，迟醒即丢点。WITRN K2 100 次/秒、最小化 3 分钟实测：只退出 App Nap 时样本间隔最大 36 ms、约 0.2–1% 的点被合并；加上 `LatencyCritical` 后最大 18.8 ms、全部保留。
-- macOS 上记录期间阻止系统空闲睡眠（相当于 `caffeinate -i`），无人值守的长时间记录不再因 Mac 自动睡眠而中断；屏幕照常熄灭，暂停或停止记录后恢复，只采集不记录时不阻止睡眠。
-- 修复 macOS 新增模块在 Windows / Linux 上触发未使用代码与 `drop_non_drop` 检查、导致 Clippy CI 失败的问题。
+<!-- releases:end -->
 
 ## [0.2.2] - 2026-10-04
 

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "version:set": "node scripts/set-version.mjs",
+    "release:prepare": "node scripts/changelog.mjs",
+    "release:notes": "node scripts/release.mjs notes",
     "test": "node --test",
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "lint": "biome check --error-on-warnings .",

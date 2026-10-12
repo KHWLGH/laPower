@@ -1,3 +1,5 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # km003c
 
 POWER-Z KM003C / KM002C protocol support for laPower.

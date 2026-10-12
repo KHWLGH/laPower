@@ -14,6 +14,7 @@
 - [CI gates](#ci-gates)
 - [Building on Linux](#building-on-linux)
 - [Building on macOS](#building-on-macos)
+- [External temperature service](#external-temperature-service)
 - [Contributing](#contributing)
 
 ## Language selection
@@ -44,7 +45,7 @@ npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
 
 Check all four languages, both themes, 900×600/1280×800, connection and recording/PDM states, PD selection and filters, CSV/PD round trips, errors, file-dialog entry points and accessibility labels. AppImage startup with Linux LANG/LC_* must be checked on Linux; browser simulation does not replace native or hardware acceptance.
 
-[The i18n validation record](../I18N_VALIDATION.md) lists completed checks and the real-machine acceptance scope.
+Simulated-device/browser checks do not replace Linux AppImage, macOS GUI, native file-dialog or physical-meter acceptance. On the relevant machines, manually check system locale, saved language overrides, recording/PDM, dialogs and CSV/PD round trips as needed. Historical acceptance results are not a guarantee for the current build.
 
 ## Requirements
 
@@ -73,7 +74,25 @@ Without an explicit target, local release output is in `target/release/bundle/`;
 
 ## Release process
 
-Use the shared version command instead of editing individual files:
+During development, edit only `changelog/unreleased/zh-CN.md`. Before a release, ask the development assistant to merge duplicates and prepare user-facing Chinese notes, generate `en.md`, and review both languages manually. Notes are bilingual; sentence-by-sentence or item-by-item parity is not required. No translation API is used.
+
+```bash
+npm run release:prepare -- 0.2.4 --date 2026-10-12 --dry-run
+npm run release:prepare -- 0.2.4 --date 2026-10-12
+npm run release:notes
+```
+
+Replace the example version and date. Preparation requires both language files with non-empty bodies and refuses an existing version directory. It archives notes to `changelog/<version>/`, synchronizes product versions, updates the root index and writes `dist/release-notes.md`; drafts are cleared only on completion. `--dry-run` prints the plan and preview without writing. Failure preserves drafts: inspect the error and `git diff`, fix the problem and retry; manually reconcile any partially generated release files first.
+
+Release notes expand English and collapse Simplified Chinese, with installation instructions in both languages. Preview and publication use the same renderer. `GITHUB_REPOSITORY` takes precedence; locally, the repository is otherwise read from `origin`. Commands do not commit, create/push tags or publish a Release. Review the preview and run quality checks before committing and pushing a new tag.
+
+### Documentation maintenance
+
+README, User guide, and Development and build are maintained in English, Simplified Chinese, Traditional Chinese and Japanese. Architecture, performance, protocol-crate READMEs and changelogs are bilingual English/Simplified Chinese. The external temperature service is maintained here. Main documents link to their own language where possible; Traditional Chinese pages use Simplified Chinese secondary documents, and Japanese pages use English, labeling the language. Do not add translation hashes, item-parity checks or documentation-only CI.
+
+### Setting the version separately
+
+To synchronize versions without archiving release notes, the existing command remains available:
 
 ```bash
 npm run version:set -- 0.2.3
@@ -91,7 +110,7 @@ Replace `0.2.3` with the target version. The command accepts `X.Y.Z` without lea
 
 Rust member crates inherit through `version.workspace = true`. About reads the version from Tauri; the showcase reads `package.json`. Rebuild after changing it so executables and installers use the new version.
 
-`test/version-sync.test.js` checks manifest/lock consistency, semantic versions, workspace inheritance, the shared update command and macOS private API configuration. For a release, organize `CHANGELOG.md` (Simplified Chinese) by moving the relevant `Unreleased` entries under the new version.
+`test/version-sync.test.js` checks manifest/lock consistency, semantic versions, workspace inheritance, the shared update command and macOS private API configuration.
 
 ### Manual builds and initial acceptance
 
@@ -115,15 +134,15 @@ macOS explicitly uses `--bundles app,dmg`. Tauri removes the temporary `.app` wh
 After initial acceptance, update the version, organize the changelog, run checks, commit and push a tag matching the manifests, for example:
 
 ```bash
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 Tags must be `vX.Y.Z` and match manifest versions, or packaging fails before it starts. CI uses Node.js 24, Rust stable, Tauri CLI 2.12.1 and `tauri-apps/tauri-action@v1`. npm uses `npm ci`, Cargo uses `--locked`, and per-target Rust caches point to the workspace root `target/`. Linux stays on Ubuntu 22.04 to limit dependence on newer glibc.
 
 Only after all quality checks and four builds succeed does CI collect seven installers and generate checksums. The release job uses the running repository's `GITHUB_TOKEN` to create a temporary draft, upload packages/checksums, verify remote asset count, sizes and SHA-256, then publish the Release automatically. No manual Publish or additional PAT is needed. Only this job receives `contents: write`; organizational policy must permit it.
 
-`scripts/release.mjs` generates Chinese release notes from the exact matching version section of `CHANGELOG.md`, translating category headings to Chinese and adding installation/checksum instructions for all three platforms. Relative documentation links point to the tag's files; GitHub-generated commit/PR summaries are not used. Missing, duplicate or empty version sections fail before GitHub API calls. Draft retries also update notes. Set `GITHUB_REPOSITORY=KHWLGH/laPower` and run `node scripts/release.mjs notes` to preview `dist/release-notes.md`.
+`scripts/release.mjs` reads bilingual Markdown from the current version directory instead of parsing the root historical changelog. Tag runs before packaging and the publisher reuse the same reader, requiring only both files and non-empty bodies. Relative links point to that version tag, not the default branch; GitHub-generated commit/PR summaries are not used. `npm run release:notes` regenerates a local preview without changing source documents.
 
 Runs for the same ref are serialized without canceling an active upload. Upload/verification failure leaves a draft; rerun failed Actions jobs to reuse it and replace this release's same-name assets. If the draft contains other assets, inspect it before retrying. Already public Releases are never overwritten automatically. Changes to published binaries require a new version and tag.
 
@@ -175,6 +194,8 @@ done
 - Keep CI's core checks fixed; individual features should not add dedicated regression workflows.
 
 ## Development showcase
+
+`npm run bench:memory` compares long-recording memory against pre-change snapshots of `state.js`, `csv-codec.js`, `csv-import-core.js` and `measurement.js` in `bench/results/memory-before/`, or a directory passed with `-- --baseline <directory>`. It covers continuous appends at one/five million points, appends with retained export snapshots, streaming CSV imports and repeated clears. Per-column SHA-256 must match; column buffers must save at least 20%. Results in `bench/results/memory.json` distinguish unique column buffers, sampled Node RSS peaks and OS peaks; they do not measure the complete Tauri/WebView2 process tree.
 
 `tools/showcase/` is a separate browser development tool with virtual WITRN K2 and POWER-Z KM003C devices, deterministic measurements, PD messages and protocol-control results. Data uses the app's existing ingestion/rendering logic. The full title bar uses decorum-style control structure and the app's icons/styles with virtual window behavior. It does not connect hardware, enter `src/`, `out/` or installers, or join browser CI.
 
@@ -236,7 +257,7 @@ The `perf-shape` CI job enforces only shipping shape and baseline structure. Alg
 | Job | Contents |
 | --- | --- |
 | `validate` | Linux dependencies, frontend build, JS tests, typecheck, lint, Rust fmt, Clippy and workspace tests |
-| `backend-other-platforms` | Windows workspace tests; macOS workspace check |
+| `backend-other-platforms` | Windows workspace tests; macOS workspace test |
 | `crate-features` | Clippy/tests for non-default protocol-crate feature combinations |
 | `perf-shape` | `bench/packaging.mjs`, `core.mjs --verify-baseline` and reporting benchmarks |
 | `package` | Version-tag pushes/manual runs only; depends on the four checks above, packages four targets in parallel without canceling others on one failure |
@@ -286,7 +307,105 @@ npx --no-install tauri build
 
 The macOS private API Cargo feature and Tauri configuration must match. Platform configuration uses `signingIdentity: "-"` and `minimumSystemVersion: "12.0"`. CI sets `MACOSX_DEPLOYMENT_TARGET=12.0` to preserve the deployment target, plus `CI=true` and `TAURI_BUNDLER_DMG_IGNORE_CI=false` to skip Finder styling. There is no Developer ID signature or Apple notarization. See [README installation](../../README.md#-download-and-installation) for first launch.
 
-Ordinary macOS CI performs workspace check; version-tag/manual builds also generate and verify DMGs, without GUI or hardware checks.
+Ordinary macOS CI runs workspace tests; version-tag/manual builds also generate and verify DMGs, without GUI or hardware checks.
+
+Native build checks do not establish GUI or hardware acceptance. Before shipping, verify startup, windows/settings, file dialogs, recording and real-meter connections on Intel and Apple Silicon Macs; verify macOS 12 separately. One-off build reports for the former WITRN-RS product remain in Git history, not in current laPower instructions.
+
+## External temperature service
+
+laPower supports two temperature sources: **the meter's sensor** or **an external sensor over TCP**. WITRN temperature comes from HID reports; POWER-Z uses ADC snapshots. External sources let you record, chart and export thermocouple, infrared or other sensor readings alongside voltage/current.
+
+### Selecting a source
+
+In the `Monitor` command bar, click the gear beside `Temperature service` to open configuration:
+
+| Field | Description | Default |
+| --- | --- | --- |
+| `Source` | `Device` = meter sensor; `External` = TCP temperature service | `External` |
+| `IP` | Server address (external source only) | `127.0.0.1` |
+| `Port` | Server port (external source only) | `1573` |
+
+Use the command-bar `Temperature service` toggle to connect/disconnect. Connection controls are not in the flyout. **Source selection is locked while connected**; disconnect before changing it.
+
+`Device` requires no external program and uses the meter's temperature field. This field is verified on only some models. The parser treats untrustworthy values as missing, displayed as `--`.
+
+A `Device` source follows the meter lifecycle: disconnecting/unplugging removes it, clears live readings to `--`, resets the `Temperature service` toggle and unlocks `Source`. The backend emits `temp-disconnected` only for TCP, since the device source has no separate session to close; the frontend handles its removal when meter connection state changes. Recorded temperature curves and the temperature-data flag remain intact. The `External` TCP session is independent of the HID stream and survives unplugging the meter.
+
+Once connected, the card shows the current temperature and `Average` / `Min` / `Max`; the chart uses its fourth Y axis. `Export CSV` → `With temperature` writes it to `Temp(°C)`.
+
+### Protocol
+
+The protocol is deliberately minimal; a server takes only a few lines in any language.
+
+- **Transport:** TCP, with the server listening and laPower connecting as a client.
+- **Format:** one plain decimal number per line, ending in `\n`, in degrees Celsius.
+- **No handshake, heartbeat or frame header.**
+
+```
+25.125\n
+25.250\n
+24.875\n
+```
+
+#### Behavior details
+
+- **Five-second connection timeout.** Addresses are fully resolved; IPv4 is tried before IPv6.
+- **No fixed sending interval.** Reads use a 250 ms timeout loop; a timeout continues waiting instead of disconnecting. **Intervals over ten seconds are valid**, and the connection stays open while idle.
+- **Partial lines are retained.** A read timeout can return partial data. The buffer is cleared only after a complete line is processed, so TCP fragmentation does not produce invalid values.
+- **Lines exceeding 256 bytes are discarded** to prevent an unterminated stream from growing the buffer indefinitely.
+- **Server close/EOF** notifies the application and updates connection state.
+
+### Example servers
+
+The repository includes two Python examples with no third-party dependencies:
+
+| File | Purpose |
+| --- | --- |
+| [`temperature-example/network_server.py`](../../temperature-example/network_server.py) | Sends a random temperature between 0 and 100 once per second |
+| [`temperature-example/network_client.py`](../../temperature-example/network_client.py) | Standalone client for checking the server |
+
+Start the server (its console messages are in Simplified Chinese):
+
+```bash
+python temperature-example/network_server.py
+```
+
+```
+温度服务器启动，监听 127.0.0.1:1573
+等待客户端连接...
+```
+
+In the app, select `Source` → `External`, keep the default `127.0.0.1:1573`, and connect with the command-bar `Temperature service` toggle.
+
+#### Implementing your own server
+
+Replace the sample generator with a real sensor read. The core is just:
+
+```python
+import socket
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", 1573))
+server.listen(1)
+
+conn, addr = server.accept()
+while True:
+    temperature = read_your_sensor()      # returns a float
+    conn.sendall(f"{temperature}\n".encode())
+```
+
+For a remote server, bind to `0.0.0.0` and enter the server's actual IP in the app.
+
+### Troubleshooting
+
+**Connection timeout** — Check address/port. On another machine, bind the server to `0.0.0.0` rather than `127.0.0.1` and allow the port through its firewall.
+
+**Connected but temperature stays `--`** — Send only a number followed by a newline. Units (`25.1°C`), JSON wrappers or values without newline separation are invalid. Both LF and CRLF line endings work.
+
+**Jumping or clearly incorrect values** — Check for several numbers on one line without a newline. Lines over 256 bytes are discarded entirely.
+
+**Cannot change `Source`** — It is locked while the temperature service is connected. Disconnect first.
 
 ## Contributing
 

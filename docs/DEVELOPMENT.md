@@ -14,6 +14,7 @@
 - [CI 门禁](#ci-门禁)
 - [Linux 自行编译](#linux-自行编译)
 - [macOS 自行编译](#macos-自行编译)
+- [外部温度服务](#外部温度服务)
 - [参与贡献](#参与贡献)
 
 ## 语言选择
@@ -44,7 +45,7 @@ npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
 
 检查四语、浅深主题、900×600／1280×800、连接和记录／PDM 状态、PD 选择和筛选、CSV／PD 往返、错误、文件入口及无障碍标签。Linux AppImage 的 LANG／LC_* 实机启动验收需在 Linux 完成，浏览器模拟不替代原生或硬件验收。
 
-[本次 i18n 验证记录（英文）](I18N_VALIDATION.md)列出已完成检查及实机验收范围。
+模拟设备与浏览器检查不能代替 Linux AppImage、macOS GUI、原生文件对话框或真实仪表验收。按需在对应机器检查系统语言、手动语言持久化、记录/PDM、文件对话框和 CSV/PD 往返；历史验收结果不能当作当前构建的保证。
 
 
 ## 环境要求
@@ -74,7 +75,25 @@ npx --no-install tauri build
 
 ## 发布流程
 
-开发时统一使用以下命令设置版本号，无需逐个文件手改：
+日常只维护 `changelog/unreleased/zh-CN.md`。发布前由开发助手合并重复项、整理面向用户的中文说明，再生成 `en.md` 并人工校对。更新日志只提供中英双语，不要求逐条或逐句对应，不使用翻译 API。
+
+```bash
+npm run release:prepare -- 0.2.4 --date 2026-10-12 --dry-run
+npm run release:prepare -- 0.2.4 --date 2026-10-12
+npm run release:notes
+```
+
+将示例版本和日期换成实际值。准备命令检查双语文件存在且正文非空，拒绝覆盖已有版本目录，然后归档到 `changelog/<version>/`、同步产品版本、更新根目录入口并生成 `dist/release-notes.md`；完成后才清空草稿。`--dry-run` 只展示计划和预览，不写文件。失败时草稿保留；检查错误和 `git diff`，修复后再试，若已生成部分版本文件需先人工整理。
+
+Release 默认展开英文，简体中文在折叠区，两种语言均包含安装说明。预览与正式发布使用同一渲染逻辑。`GITHUB_REPOSITORY` 优先提供仓库名，本地未设置时从 `origin` 解析。命令不会提交、创建或推送 Tag，也不会公开 Release；校对预览和运行质量检查后再提交及推送新 Tag。
+
+### 文档维护范围
+
+README、使用指南、开发与构建维护英文、简体中文、繁体中文和日文；架构、性能、协议库 README 和更新日志维护中英双语。外部温度服务统一在本指南维护。主要文档优先使用同语言链接，次要文档在繁体页面优先链接简中，在日文页面优先链接英文并注明语言。不增加翻译哈希、逐条同步检查或文档专用 CI。
+
+### 单独设置版本
+
+只需同步版本而不归档发布文案时，仍可使用：
 
 ```bash
 npm run version:set -- 0.2.3
@@ -92,7 +111,7 @@ npm run version:set -- 0.2.3
 
 Rust 成员 crate 继续通过 `version.workspace = true` 继承版本；关于页从 Tauri 读取版本，开发展示工具从 `package.json` 读取版本。更新后重新构建，才能让可执行文件和安装包使用新版本。
 
-`test/version-sync.test.js` 会检查清单与锁文件一致、语义版本格式、workspace 继承关系、统一更新命令和 macOS private API 配置。正式发布时整理 `CHANGELOG.md`，将对应的 `Unreleased` 内容归入新版本。
+`test/version-sync.test.js` 会检查清单与锁文件一致、语义版本格式、workspace 继承关系、统一更新命令和 macOS private API 配置。
 
 ### 手动构建与首次验收
 
@@ -116,15 +135,15 @@ macOS 构建显式使用 `--bundles app,dmg`：Tauri 在仅构建 DMG 时会清�
 完成上述首次验收后，更新版本、整理更新日志、运行质量检查并提交，再推送与清单一致的 Tag，例如：
 
 ```bash
-git tag v0.2.3
-git push origin v0.2.3
+git tag v0.2.4
+git push origin v0.2.4
 ```
 
 Tag 必须为 `vX.Y.Z`，且与清单版本一致；不一致会在打包前失败。CI 使用 Node.js 24、Rust stable、固定的 Tauri CLI 2.12.1 和 `tauri-apps/tauri-action@v1`。npm 通过 `npm ci` 安装，Cargo 使用 `--locked`；Rust 缓存按目标区分并指向工作区根目录 `target/`。Linux 固定 Ubuntu 22.04，以减少对较新 glibc 的依赖。
 
 只有全部质量检查与四目标打包成功，才会汇总七个安装包并生成校验和。发布任务使用运行仓库的 `GITHUB_TOKEN` 创建临时草稿，上传七个包与校验文件，再核对远端附件数量、大小和 SHA-256，最后自动公开正式 Release。无需人工点击 Publish，也不需要另设 PAT；只有发布任务获得 `contents: write`，仓库的组织策略需允许这项权限。
 
-中文发布说明由 `scripts/release.mjs` 提取 `CHANGELOG.md` 中与当前版本完全匹配的章节，将分类标题转为中文，补充三平台安装说明和校验和说明。相对文档链接自动指向该 Tag 的文件，不使用 GitHub 自动生成的提交/PR 摘要。版本章节缺失、重复或为空时，发布在调用 GitHub API 前失败；草稿重跑时也会更新发布说明。可设置 `GITHUB_REPOSITORY=KHWLGH/laPower` 后运行 `node scripts/release.mjs notes`，在 `dist/release-notes.md` 预览。
+`scripts/release.mjs` 从当前版本目录读取中英 Markdown，而不是解析根目录历史长文。Tag 打包前与发布前都复用文案读取逻辑，仅检查双语文件存在且正文非空；相对链接固定到该版本 Tag，不使用 GitHub 自动生成的提交/PR 摘要。`npm run release:notes` 可重新生成本地预览，不修改源文档。
 
 同一 ref 的运行串行处理，不取消正在上传的发布。上传或验证失败时 Release 保持草稿；在 Actions 重跑失败任务即可复用该草稿并替换本次发布的同名附件。草稿若包含其他附件，须人工检查后再重跑；同名 Release 已公开时，任务拒绝自动覆盖。若需修改已发布的二进制，应更新版本并推送新 Tag。
 
@@ -241,7 +260,7 @@ npm run showcase:capture -- --help
 | Job | 内容 |
 | --- | --- |
 | `validate` | Linux 依赖、前端构建、JS 测试、typecheck、lint、Rust fmt、Clippy、workspace test |
-| `backend-other-platforms` | Windows workspace test；macOS workspace check |
+| `backend-other-platforms` | Windows workspace test；macOS workspace test |
 | `crate-features` | 协议 crate 的非默认 feature 组合 Clippy 与 test |
 | `perf-shape` | `bench/packaging.mjs`、`core.mjs --verify-baseline`，以及报告型 benchmark |
 | `package` | 仅版本 Tag push / 手动触发；依赖以上四项检查，四目标并行打包，单个平台失败不会取消其他目标 |
@@ -291,7 +310,105 @@ npx --no-install tauri build
 
 macOS private API 的 Cargo feature 与 Tauri 配置必须保持一致。平台配置使用 `signingIdentity: "-"` 和 `minimumSystemVersion: "12.0"`；CI 同时设置 `MACOSX_DEPLOYMENT_TARGET=12.0`，保留旧系统部署目标，并通过 `CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` 跳过 Finder 美化。当前没有 Developer ID 签名或 Apple 公证；首次打开方式见 [README 下载与安装](../README.zh-CN.md#-下载与安装)。
 
-普通 macOS CI 做 workspace check；版本 Tag / 手动构建还会生成并验证 DMG，不运行 GUI 或真机检查。
+普通 macOS CI 做 workspace test；版本 Tag / 手动构建还会生成并验证 DMG，不运行 GUI 或真机检查。
+
+CI 的原生构建检查不代表完成 GUI 或硬件验收。首次发货仍需在 Intel / Apple Silicon Mac 检查应用启动、窗口和设置、文件对话框、记录及真实仪表连接；macOS 12 兼容性单独验证。旧版 WITRN-RS 的一次性构建报告保留于 Git 历史，不作为当前 laPower 操作步骤。
+
+## 外部温度服务
+
+laPower 的温度可以有两个来源：**仪表自带的温度**，或**通过 TCP 连接的外部温度传感器**。WITRN 从 HID 报告读取温度，POWER-Z 从 ADC 快照补齐。外部来源适合把外置热电偶、红外测温模块或其它测温设备的数据接进来，与电压电流一起记录、绘图并导出。
+
+### 选择温度来源
+
+在「监控」Tab 的命令栏点击 `温度服务` 旁的齿轮，打开配置浮出面板：
+
+| 字段 | 说明 | 默认 |
+| --- | --- | --- |
+| `来源` | `仪表` = 仪表温度；`外部` = TCP 温度服务 | `外部` |
+| `IP` | 温度服务器地址（仅 `外部` 时可用） | `127.0.0.1` |
+| `端口` | 温度服务器端口（仅 `外部` 时可用） | `1573` |
+
+连接与断开走命令栏上的 `温度服务` 开关按钮，不在浮出面板里。**连接期间来源不可切换** —— 先断开再改。
+
+选 `仪表` 时不需要任何外部程序，直接使用仪表报文里的温度字段。注意该字段只在部分型号上验证过；数值不可信时解析器会当作「无温度」处理，界面显示 `--`。
+
+`仪表` 温度源的生命周期跟着仪表走：断开或拔出仪表时一并注销，读数回 `--`、`温度服务` 按钮复位、`来源` 重新可选 —— 后端只为 TCP 源发 `temp-disconnected`，仪表源没有可关闭的会话，所以这一步在前端连接状态变化里做。已记录的温度曲线与 `有温度数据` 标记不受影响，只有实时读数会被清掉。`外部` 的 TCP 会话与 HID 流相互独立，拔表不会断开它。
+
+温度接入后即可在读数卡上看到当前值与 `平均` / `最低` / `最高`，在图表里作为第四条 Y 轴曲线，并可通过 `导出CSV` → `带温度` 写进 CSV 的 `Temp(°C)` 列。
+
+### 协议
+
+刻意做得极简，任何语言几行就能实现服务端。
+
+- **传输**：TCP，服务端监听，laPower 作为客户端连入。
+- **格式**：每行一个纯十进制数值，以 `\n` 结束。单位为摄氏度。
+- **无握手、无心跳、无帧头。**
+
+```
+25.125\n
+25.250\n
+24.875\n
+```
+
+#### 行为细节
+
+- **连接超时 5 秒。** 地址会做完整解析，IPv4 优先于 IPv6 依次尝试。
+- **发送间隔不限。** 读取侧使用 250 ms 的读超时循环，超时只是继续等待而不断开，因此**发送间隔超过 10 秒也没问题**，连接会在空闲期间保持。
+- **半行会被正确续接。** 读超时可能带着半行数据返回，实现上只在整行处理完成后才清空缓冲区，所以数据被 TCP 分片切开不会产生坏值。
+- **单行超过 256 字节视为坏数据**并丢弃该行，防止没有换行符的数据流把缓冲区撑爆。
+- **服务端关闭连接**（读到 EOF）时，应用会收到断开通知并更新界面状态。
+
+### 示例服务器
+
+仓库里带了一对 Python 示例，不需要任何第三方库：
+
+| 文件 | 用途 |
+| --- | --- |
+| [`temperature-example/network_server.py`](../temperature-example/network_server.py) | 温度服务器示例，每秒发送一个 0–100 之间的随机值 |
+| [`temperature-example/network_client.py`](../temperature-example/network_client.py) | 客户端示例，用于单独验证服务器 |
+
+启动服务器：
+
+```bash
+python temperature-example/network_server.py
+```
+
+```
+温度服务器启动，监听 127.0.0.1:1573
+等待客户端连接...
+```
+
+然后在应用里把 `来源` 设为 `外部`、地址保持默认的 `127.0.0.1:1573`，点击命令栏的 `温度服务` 连接即可。
+
+#### 自己实现服务端
+
+参照示例改成读取真实传感器即可，核心只有这几行：
+
+```python
+import socket
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", 1573))
+server.listen(1)
+
+conn, addr = server.accept()
+while True:
+    temperature = read_your_sensor()      # 返回 float
+    conn.sendall(f"{temperature}\n".encode())
+```
+
+如果服务器不在本机，记得把绑定地址改为 `0.0.0.0`，并在应用里填写服务器的实际 IP。
+
+### 故障排查
+
+**连接超时** —— 检查 IP 与端口；服务器若在另一台机器上，确认它绑定的是 `0.0.0.0` 而不是 `127.0.0.1`，以及防火墙是否放行该端口。
+
+**连上了但温度一直是 `--`** —— 确认服务器发送的是纯数字加换行。带单位（`25.1°C`）、带 JSON 包装、或不用换行分隔数值都会被判为无效行。LF 和 CRLF 换行均可使用。
+
+**数值跳变或出现明显错误的值** —— 检查是否有多个数值挤在一行里没有换行符。单行超过 256 字节会被整行丢弃。
+
+**切不动 `来源` 单选** —— 温度服务处于连接状态时来源被锁定，先点 `温度服务` 断开。
 
 ## 参与贡献
 
