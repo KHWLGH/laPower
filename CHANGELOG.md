@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- 采样间隔长于仪表自身节拍时（例如默认的 4 次/秒），每个点改为这段时间内全部仪表帧的平均值（电压、电流、功率、D+ / D−；时间戳、CC 与温度取最后一帧），不再只保留电流绝对值最大的那一帧。峰值保持会让平均值与累计能量系统性偏高：用一份 70 分钟、100 次/秒的 WITRN K2 无线充电记录逐帧回放，累计能量在 100 ms / 250 ms（默认）/ 1 s / 10 s 档分别偏高 0.90% / 1.18% / 1.71% / 2.84%，改为平均后偏差在 ±0.11% 以内。`100 次/秒` 与 POWER-Z `1000 次/秒` 不受影响；比采样间隔短的尖峰会被平均掉。
+
 ## [0.2.3] - 2026-10-09
 
 ### Added
