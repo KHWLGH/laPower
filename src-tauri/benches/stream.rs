@@ -89,8 +89,8 @@ fn selection_churn(c: &mut Criterion) {
             |(mut selection, mut drained)| {
                 let (tx, rx) = mpsc::sync_channel(stream::CHANNEL_CAP);
                 for i in 0..64u64 {
-                    // Two offers per window exercise the peak-retention rule, which is the
-                    // branch that decides what actually reaches the channel.
+                    // Two offers per window exercise the window averaging, which decides what
+                    // actually reaches the channel.
                     selection.offer(sample_at(i * 10_000, 1.0));
                     selection.offer(sample_at(i * 10_000 + 5_000, -4.0));
                     selection.select().unwrap();

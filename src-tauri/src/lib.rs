@@ -1124,7 +1124,7 @@ impl acquire::Source for HidSource {
         let read = self
             .device
             .read_timeout(&mut self.buf, rate_ms.min(20) as i32);
-        // Stamp immediately after host reception, before parsing or peak selection.
+        // Stamp immediately after host reception, before parsing or window selection.
         let received_at = Instant::now();
         let received_us = received_at.duration_since(self.epoch).as_micros() as u64;
         match read {
@@ -1155,14 +1155,6 @@ impl acquire::Source for HidSource {
             Err(_) => return Err(acquire::Stop::Unplugged),
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-fn retain_pending_sample(pending: Option<DeviceData>, sample: DeviceData) -> DeviceData {
-    match pending {
-        Some(prev) if prev.current.abs() > sample.current.abs() => prev,
-        _ => sample,
     }
 }
 
@@ -1332,7 +1324,7 @@ mod tests {
 
     #[test]
     fn decode_to_transport_pipeline_is_lossless_and_bit_exact() {
-        // Exercises the real HID decode -> peak selection -> channel -> batch emitter chain
+        // Exercises the real HID decode -> window selection -> channel -> batch emitter chain
         // at volume: every decoded frame must survive in order, gapless, with bit-exact f32
         // channels. Timing is informational (debug profile); WebView/HID latency not covered.
         let decoded = parse_device_data(&valid_frame()).expect("valid frame decodes");
@@ -1390,11 +1382,11 @@ mod tests {
             assert_eq!(
                 p.received_us,
                 (i as u64) * 10_000,
-                "peak keeps its own receive time"
+                "a one-frame window keeps its own receive time"
             );
         }
         eprintln!(
-            "native decode->transport: {N} frames in {:.1} ms = {:.0} pts/s (real HID decode + peak + channel + batch emitter)",
+            "native decode->transport: {N} frames in {:.1} ms = {:.0} pts/s (real HID decode + window + channel + batch emitter)",
             secs * 1000.0,
             N as f64 / secs
         );
@@ -1592,31 +1584,6 @@ mod tests {
         let mut frame = valid_frame();
         frame[50..54].copy_from_slice(&20.1f32.to_le_bytes());
         assert!(parse_device_data(&frame).is_none());
-    }
-
-    #[test]
-    fn throttle_keeps_the_higher_current_sample() {
-        let mild = DeviceData {
-            voltage: 5.0,
-            current: 0.2,
-            power: 1.0,
-            dp: None,
-            dn: None,
-            cc1: 0.0,
-            cc2: 0.0,
-            temperature: None,
-            ah: Some(0.0),
-            wh: Some(0.0),
-        };
-        let spike = DeviceData {
-            current: 3.5,
-            power: 17.5,
-            ..mild.clone()
-        };
-        let kept = retain_pending_sample(Some(mild.clone()), spike.clone());
-        assert_eq!(kept.current, 3.5);
-        let kept = retain_pending_sample(Some(spike.clone()), mild);
-        assert_eq!(kept.current, 3.5);
     }
 
     #[test]

@@ -112,17 +112,58 @@ pub enum Outgoing {
     End(End),
 }
 
-/// Strictly the previous peak rule: larger absolute current wins; ties keep newest.
-pub fn retain_pending_sample(pending: Option<Sample>, sample: Sample) -> Sample {
-    match pending {
-        Some(prev) if prev.data.current.abs() > sample.data.current.abs() => prev,
-        _ => sample,
+/// Running sums of the frames offered since the last selection.
+///
+/// A selected point stands for its whole window. Voltage, current, power and D+/D- are the
+/// arithmetic mean of every frame the device delivered in it, so statistics and the energy
+/// integral match a recording at the device's own rate; keeping one frame per window (formerly
+/// the largest |I|) biased them by the window's ripple. Everything else is taken from the
+/// newest frame, the right end of the window: its timestamp (which the right-endpoint energy
+/// integral pairs with the mean), CC (0.1 V steps), temperature and the meter's own
+/// accumulators. A window of one frame passes through bit for bit.
+#[derive(Default)]
+struct Window {
+    frames: u32,
+    voltage: f64,
+    current: f64,
+    power: f64,
+    dp: (f64, u32),
+    dn: (f64, u32),
+}
+
+impl Window {
+    fn add(&mut self, data: &DeviceData) {
+        self.frames += 1;
+        self.voltage += f64::from(data.voltage);
+        self.current += f64::from(data.current);
+        self.power += f64::from(data.power);
+        for (sum, value) in [(&mut self.dp, data.dp), (&mut self.dn, data.dn)] {
+            if let Some(value) = value {
+                sum.0 += f64::from(value);
+                sum.1 += 1;
+            }
+        }
+    }
+
+    fn apply(&self, data: &mut DeviceData) {
+        if self.frames < 2 {
+            return;
+        }
+        let mean = |sum: f64, count: u32| (sum / f64::from(count)) as f32;
+        data.voltage = mean(self.voltage, self.frames);
+        data.current = mean(self.current, self.frames);
+        data.power = mean(self.power, self.frames);
+        data.dp = (self.dp.1 > 0).then(|| mean(self.dp.0, self.dp.1));
+        data.dn = (self.dn.1 > 0).then(|| mean(self.dn.0, self.dn.1));
     }
 }
 
 /// Normal window selection and already-selected backlog never share storage.
 pub struct Selection {
+    /// The newest frame of the open window; `None` when nothing was offered since the last
+    /// selection.
     pub pending: Option<Sample>,
+    window: Window,
     selected: VecDeque<Sample>,
     cap: usize,
     pub seq: u64,
@@ -133,6 +174,7 @@ impl Selection {
     pub fn new(cap: usize, produced: Arc<AtomicU64>) -> Self {
         Self {
             pending: None,
+            window: Window::default(),
             selected: VecDeque::with_capacity(cap + 1),
             cap,
             seq: 0,
@@ -141,11 +183,14 @@ impl Selection {
     }
 
     pub fn offer(&mut self, sample: Sample) {
-        self.pending = Some(retain_pending_sample(self.pending.take(), sample));
+        self.window.add(&sample.data);
+        self.pending = Some(sample);
     }
 
+    /// Seal the open window into one point: its mean, stamped at its newest frame.
     pub fn select(&mut self) -> Result<(), String> {
         if let Some(mut sample) = self.pending.take() {
+            std::mem::take(&mut self.window).apply(&mut sample.data);
             self.seq += 1;
             sample.seq = self.seq;
             self.produced.store(self.seq, Ordering::Release);
@@ -181,7 +226,7 @@ impl Selection {
             tx.send(Outgoing::Sample(sample))
                 .map_err(|_| "stream emitter disconnected")?;
         }
-        // Drain first so the final normal-window peak always fits.
+        // Drain first so the final open window always fits.
         self.select()?;
         while let Some(sample) = self.selected.pop_front() {
             tx.send(Outgoing::Sample(sample))
@@ -254,8 +299,8 @@ fn quantile_ms(values: &[u64], fraction: f64) -> String {
 /// carries a half-period grace, because the K2's gap measured 10.00ms against a 10ms request: with
 /// zero slack any negative jitter rejects the point, each rejection costs a whole period, and the
 /// delivered rate collapses to ~56% of the bus. The grace cannot raise the long-run rate -- the grid
-/// still steps by exactly one period per selection -- it only shifts which point a peak-hold window
-/// opens on. A deadline stale by more than one period means the bus stalled, so resync there instead
+/// still steps by exactly one period per selection -- it only shifts which frame a window opens
+/// with. A deadline stale by more than one period means the bus stalled, so resync there instead
 /// of letting the backlog drain at bus rate.
 pub fn selection_deadline(
     arrival_us: u64,
@@ -391,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn segment_barrier_preserves_old_peak_and_new_segment_under_backpressure() {
+    fn segment_barrier_seals_the_old_window_and_keeps_the_new_segment_under_backpressure() {
         let (tx, rx) = mpsc::sync_channel(1);
         let produced = Arc::new(AtomicU64::new(0));
         let mut q = Selection::new(2, Arc::clone(&produced));
@@ -420,10 +465,11 @@ mod tests {
         worker.join().unwrap();
         let mut first = sample(0, 1.0);
         first.seq = 1;
-        let mut peak = sample(10, -4.0);
-        peak.seq = 2;
+        // The sealed window is the mean of its two frames, stamped at the newer one.
+        let mut window = sample(20, -1.75);
+        window.seq = 2;
         next.seq = 3;
-        assert_eq!(points, [first, peak, next]);
+        assert_eq!(points, [first, window, next]);
         assert_eq!(after_seq, 2);
         assert_eq!(produced.load(Ordering::Acquire), 3);
     }
@@ -447,13 +493,73 @@ mod tests {
         assert_eq!(error, "event delivery failed");
     }
 
+    fn sealed(q: &mut Selection) -> Sample {
+        q.select().unwrap();
+        q.selected.pop_back().expect("a point was selected")
+    }
+
     #[test]
-    fn peak_retains_its_own_timestamp_and_ties_keep_latest() {
-        let peak = retain_pending_sample(Some(sample(10, -4.0)), sample(20, 1.0));
-        assert_eq!(peak.received_us, 10);
+    fn a_window_is_the_mean_of_its_frames_stamped_at_the_newest() {
+        let mut q = Selection::new(4, Arc::new(AtomicU64::new(0)));
+        for (at, current) in [(10, -4.0), (20, 1.0), (30, 4.0)] {
+            q.offer(sample(at, current));
+        }
+        let point = sealed(&mut q);
+        assert_eq!(point.received_us, 30);
+        assert_eq!(point.data.voltage, 5.0);
+        assert_eq!(point.data.current, (1.0f64 / 3.0) as f32);
+        // Power is the mean of the per-frame products, not mean V times mean I.
+        assert_eq!(point.data.power, (5.0f64 / 3.0) as f32);
+    }
+
+    #[test]
+    fn a_one_frame_window_passes_through_bit_for_bit() {
+        let mut q = Selection::new(4, Arc::new(AtomicU64::new(0)));
+        let mut frame = sample(10, 0.1);
+        frame.data.dp = Some(0.61);
+        frame.data.temperature = Some(31.5);
+        q.offer(frame.clone());
+        let point = sealed(&mut q);
+        assert_eq!(point.data, frame.data);
+    }
+
+    #[test]
+    fn line_voltages_average_the_frames_that_carried_them_and_the_rest_is_newest() {
+        let mut q = Selection::new(4, Arc::new(AtomicU64::new(0)));
+        let mut older = sample(10, 1.0);
+        older.data.dp = Some(0.6);
+        older.data.cc1 = 0.3;
+        older.data.temperature = Some(30.0);
+        let mut newer = sample(20, 1.0);
+        newer.data.dp = None;
+        newer.data.cc1 = 0.4;
+        newer.data.temperature = Some(31.0);
+        newer.data.wh = Some(2.5);
+        q.offer(older);
+        q.offer(newer);
+        let point = sealed(&mut q);
         assert_eq!(
-            retain_pending_sample(Some(peak), sample(30, 4.0)).received_us,
-            30
+            point.data.dp,
+            Some(0.6),
+            "a missing reading does not drag the mean"
+        );
+        assert_eq!(point.data.dn, None, "no frame carried D-");
+        assert_eq!(point.data.cc1, 0.4);
+        assert_eq!(point.data.temperature, Some(31.0));
+        assert_eq!(point.data.wh, Some(2.5));
+    }
+
+    #[test]
+    fn each_selection_starts_a_fresh_window() {
+        let mut q = Selection::new(4, Arc::new(AtomicU64::new(0)));
+        q.offer(sample(0, 1.0));
+        q.offer(sample(5, 2.0));
+        assert_eq!(sealed(&mut q).data.current, 1.5);
+        q.offer(sample(10, 3.0));
+        assert_eq!(sealed(&mut q).data.current, 3.0);
+        assert!(
+            q.select().is_ok() && q.selected.is_empty(),
+            "nothing offered, nothing sealed"
         );
     }
     #[test]
@@ -504,8 +610,8 @@ mod tests {
             .collect();
         worker.join().unwrap();
         assert_eq!(points.len(), 2);
-        assert_eq!(points[1].received_us, 10_000);
-        assert_eq!(points[1].data.current, -3.0);
+        assert_eq!(points[1].received_us, 11_000);
+        assert_eq!(points[1].data.current, -1.25);
     }
     #[test]
     fn batches_preserve_values_pd_first_last_at_all_budgets() {
@@ -586,7 +692,7 @@ mod tests {
             q.drain(&tx).expect("emitter still attached");
             max_backlog = max_backlog.max(q.selected.len());
         }
-        // Seal the final window peak, then block until everything is emitted.
+        // Seal the final window, then block until everything is emitted.
         q.select().expect("final select");
         q.finish(&tx).expect("finish drains to the consumer");
         drop(tx); // close so emit_loop returns after flushing the last partial batch
@@ -613,7 +719,7 @@ mod tests {
             assert_eq!(
                 s.received_us,
                 (i as u64) * 10_000,
-                "peak keeps its own time"
+                "a one-frame window keeps its own time"
             );
             assert_eq!(
                 s.data.current,
