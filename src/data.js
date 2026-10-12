@@ -28,6 +28,7 @@ deviceStream.configure({
 });
 
 import { t } from './i18n.js';
+import { markersOf } from './markers.js';
 import { describeLimit, formatPoints, pointsForLimit, remainingInfo, WARN_FRACTION } from './recording-limit.js';
 import {
   configureSpool,
@@ -38,7 +39,7 @@ import {
 } from './recording-spool.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
-import { syncRecordUI } from './ui/controlbar.js';
+import { syncMarkerControls, syncRecordUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 import { formatRelativeHMS, formatSampleRateLabel } from './utils.js';
 
@@ -249,12 +250,14 @@ function stopDurationTicker() {
 
 /** 按当前状态刷新命令栏的记录按钮（开始 / 继续 / 暂停）。 */
 export function refreshRecordButton() {
+  const hasData = state.chartSeries.timestamps.length > 0;
   syncRecordUI({
     connected: state.isConnected,
     recording: state.isRecording,
-    hasData: state.chartSeries.timestamps.length > 0,
+    hasData,
     followPd: state.settings.pdFollowRecording,
   });
+  syncMarkerControls({ canMark: state.isRecording || hasData, count: markersOf(state.chartSeries).length });
 }
 
 // ─── Data ingestion ──────────────────────────────────────────────────────────

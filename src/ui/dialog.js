@@ -13,6 +13,8 @@ import { onLanguageChange, t } from '../i18n.js';
 
 /** @typedef {string|(() => string)} DialogText */
 /** @typedef {{ title?: DialogText, kind?: 'info'|'warning'|'error', okLabel?: DialogText, cancelLabel?: DialogText }} DialogOptions */
+/** @typedef {DialogOptions & { defaultValue?: string, maxLength?: number }} PromptOptions */
+/** @typedef {{ value: string, maxLength?: number }} DialogField */
 /** @param {DialogText} value */
 const textValue = (value) => (typeof value === 'function' ? value() : value);
 /** @type {(() => void)|null} */
@@ -29,6 +31,8 @@ let titleEl = null;
 let iconEl = null;
 /** @type {HTMLElement|null} */
 let bodyEl = null;
+/** @type {HTMLInputElement|null} */
+let inputEl = null;
 /** @type {HTMLButtonElement|null} */
 let okBtn = null;
 /** @type {HTMLButtonElement|null} */
@@ -57,6 +61,7 @@ function ensureDialog() {
     '  <h2 id="fluent-dialog-title" class="fluent-dialog-title"></h2>',
     '</div>',
     '<div id="fluent-dialog-body" class="fluent-dialog-body"></div>',
+    '<input type="text" class="ribbon-input fluent-dialog-input" spellcheck="false" autocomplete="off" hidden />',
     '<div class="fluent-dialog-actions">',
     '  <button type="button" class="btn btn-accent fluent-dialog-ok"></button>',
     '  <button type="button" class="btn fluent-dialog-cancel"></button>',
@@ -67,6 +72,7 @@ function ensureDialog() {
   titleEl = dialogEl.querySelector('.fluent-dialog-title');
   iconEl = dialogEl.querySelector('.fluent-dialog-icon');
   bodyEl = dialogEl.querySelector('.fluent-dialog-body');
+  inputEl = dialogEl.querySelector('.fluent-dialog-input');
   okBtn = dialogEl.querySelector('.fluent-dialog-ok');
   cancelBtn = dialogEl.querySelector('.fluent-dialog-cancel');
 }
@@ -76,9 +82,10 @@ function ensureDialog() {
  * @param {DialogText} text
  * @param {DialogOptions} options
  * @param {boolean} withCancel - false = 仅"确定"（message 语义）
+ * @param {DialogField|null} [field] 带一个单行输入框；确定时把输入写回 field.value
  * @returns {Promise<boolean>}
  */
-function show(text, options, withCancel) {
+function show(text, options, withCancel, field = null) {
   const run = () =>
     new Promise((/** @type {(v: boolean) => void} */ resolve) => {
       ensureDialog();
@@ -103,6 +110,13 @@ function show(text, options, withCancel) {
       if (cancelBtn) {
         cancelBtn.hidden = !withCancel;
       }
+      const input = field ? inputEl : null;
+      if (inputEl) {
+        inputEl.hidden = !field;
+        inputEl.value = field?.value ?? '';
+        if (field?.maxLength) inputEl.maxLength = field.maxLength;
+        else inputEl.removeAttribute('maxlength');
+      }
 
       const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       let settled = false;
@@ -112,6 +126,8 @@ function show(text, options, withCancel) {
         if (settled) return;
         settled = true;
         refreshOpenDialog = null;
+        if (field && input && result) field.value = input.value;
+        input?.removeEventListener('keydown', onInputKeydown);
         okBtn?.removeEventListener('click', onOk);
         cancelBtn?.removeEventListener('click', onCancel);
         dialog.removeEventListener('cancel', onNativeCancel);
@@ -135,7 +151,14 @@ function show(text, options, withCancel) {
         finish(false);
       };
       const onClose = () => finish(false);
+      /** 输入框里回车即确定；输入法组合中的回车用于上屏，不算确定。 @param {KeyboardEvent} e */
+      const onInputKeydown = (e) => {
+        if (e.key !== 'Enter' || e.isComposing) return;
+        e.preventDefault();
+        finish(true);
+      };
 
+      input?.addEventListener('keydown', onInputKeydown);
       okBtn?.addEventListener('click', onOk);
       cancelBtn?.addEventListener('click', onCancel);
       dialog.addEventListener('cancel', onNativeCancel);
@@ -143,7 +166,10 @@ function show(text, options, withCancel) {
 
       dialog.showModal();
       // 破坏性操作默认焦点放在"取消"上，避免回车误确认
-      if (withCancel && kind === 'error') cancelBtn?.focus();
+      if (input) {
+        input.focus();
+        input.select();
+      } else if (withCancel && kind === 'error') cancelBtn?.focus();
       else okBtn?.focus();
     });
 
@@ -173,4 +199,21 @@ export async function ask(text, options = {}) {
     });
   }
   return show(text, options, true);
+}
+
+/**
+ * 单行文本输入对话框（确定 / 取消）。
+ * @param {DialogText} text 输入框上方的说明
+ * @param {PromptOptions} [options]
+ * @returns {Promise<string|null>} 确定时为输入内容，取消为 null
+ */
+export async function promptText(text, options = {}) {
+  if (!supportsDialog) {
+    console.warn('[dialog] HTMLDialogElement 不可用，回退到 window.prompt');
+    return window.prompt(textValue(text), options.defaultValue ?? '');
+  }
+  /** @type {DialogField} */
+  const field = { value: options.defaultValue ?? '', maxLength: options.maxLength };
+  const ok = await show(text, options, true, field);
+  return ok ? field.value : null;
 }

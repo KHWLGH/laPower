@@ -148,6 +148,21 @@
   margin-bottom: var(--space-6);
 }
 
+/* promptText 的输入框：说明与输入框贴近，与按钮之间保持原有间距 */
+.fluent-dialog-body:has(+ .fluent-dialog-input:not([hidden])) {
+  margin-bottom: var(--space-2);
+}
+
+/* 比 .ribbon-input 的固定宽度更具体，样式表合并顺序变化也不受影响 */
+.fluent-dialog .fluent-dialog-input {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 4px 8px;
+  font: var(--type-body);
+  margin-bottom: var(--space-6);
+}
+
 .fluent-dialog-actions {
   display: flex;
   justify-content: flex-end;

@@ -23,6 +23,7 @@ worker.onmessage = (/** @type {MessageEvent} */ event) => {
       startTime: 0,
       withTemp: !!message.withTemp,
       recordingSegments: segments,
+      markers: Array.isArray(message.markers) ? new Map(message.markers) : null,
     });
     const text = formatCsvRange(snapshot, 0, message.length);
     worker.postMessage({ type: 'result', id: message.id, text });

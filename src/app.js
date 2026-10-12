@@ -47,6 +47,7 @@ import {
 import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
 import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
+import { initMarkerUI } from './marker-ui.js';
 import { clampLimitMb } from './recording-limit.js';
 import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
@@ -1059,6 +1060,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupChartToggles();
   setupControls();
   setupShell();
+  initMarkerUI();
   fillUiScaleHint();
   applyPdSplitLayout();
   window.addEventListener('resize', applyPdSplitLayout);

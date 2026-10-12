@@ -70,6 +70,7 @@ globalThis.document = { getElementById: () => null };
 const { parseCsv, SPOOL_PATCH_BYTES } = await import('../src/csv-codec.js');
 const { emptyChartColumns, state } = await import('../src/state.js');
 const spool = await import('../src/recording-spool.js');
+const { addMarker } = await import('../src/markers.js');
 const { toast } = await import('../src/ui/toast.js');
 
 const START = new Date(2026, 8, 28, 14, 30, 0).getTime();
@@ -243,4 +244,22 @@ test('a large backfill snapshots once, checkpoints within the backlog and never 
     F64Col.prototype.snapshot = original;
     await spool.finalizeSpool();
   }
+});
+
+test('markers reach the spool on their rows, including one waiting for the next row', async () => {
+  const cols = prepare(3);
+  addMarker(cols, 1, '25%');
+  // Marked while recording: the row it belongs to has not arrived yet.
+  addMarker(cols, 3, '50%');
+  spool.spoolRecordingStarted();
+  await spool.spoolRecordingPaused();
+  addRows(cols, 3, 5);
+  spool.spoolRowsAppended();
+  await spool.finalizeSpool();
+  const file = onlyFile();
+  assert.match(file.text, /SampleInterval\(ms\),Marker,\n/);
+  assert.deepEqual(parseCsv(file.text, { fallbackStartTime: 0 }).markers, [
+    { index: 1, label: '25%' },
+    { index: 3, label: '50%' },
+  ]);
 });

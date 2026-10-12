@@ -91,6 +91,7 @@ These images show version **0.2.3** on Windows and use simulated devices and dat
 ### Recording and interoperability
 
 - **CSV export**, with or without temperature, and **import**. Import matches column names and accepts legacy files without signal-voltage columns.
+- **Markers**: click `Mark` or press `M` to label the current moment (for example a 50% battery level), or press `M` over the chart to mark the point under the pointer. Markers show as lines on the chart and travel with CSV files in the `Marker` column.
 - **PD capture export/import** uses a versioned JSON envelope and still reads older formats.
 - Select 0.1–100 samples/s; POWER-Z also supports 1000 samples/s. The backend accepts 1–60000 ms intervals, subject to device limits.
 

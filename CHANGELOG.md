@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- 新增打点标注：记录时点击 `打点` 或按 `M` 给当前时刻写标签（例如电量 50%），标记落在点击之后到达的下一个点上；鼠标停在主图上时按 `M` 标记光标下的点，便于回看时补标。主图显示竖线和标签（挨得近的最多错开三行），时间线导航器显示刻度；标记列表可改名、删除。导出的 CSV 增加可选的 `Marker` 列，没有标记时不写这一列，旧文件照常导入；临时恢复文件固定带这一列。标签去掉分隔符、引号与换行，开头的 `=`、`+`、`-`、`@` 换成全角字符，避免被电子表格当成公式。
+- 应用内对话框支持单行输入（`promptText`），回车确认、输入法组合中的回车不算确认。
+
 ## [0.2.3] - 2026-10-09
 
 ### Added

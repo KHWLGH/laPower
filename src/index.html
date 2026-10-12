@@ -50,6 +50,21 @@
             <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
               <i class="fi fi-record" aria-hidden="true"></i><span data-i18n="startRecording">Start recording</span>
             </button>
+            <div class="cmd-action-group" id="marker-actions">
+              <button type="button" class="cmd-btn" id="btn-add-marker" disabled title="Add a marker (M)" data-i18n-title="addMarkerHint">
+                <i class="fi fi-flag" aria-hidden="true"></i><span data-i18n="addMarker">Mark</span>
+              </button>
+              <button
+                type="button"
+                class="cmd-btn cmd-btn-icon cmd-settings-btn"
+                id="btn-flyout-markers"
+                disabled
+                aria-label="Markers" data-i18n-aria-label="markerList"
+                title="Markers" data-i18n-title="markerList"
+              >
+                <i class="fi fi-list" aria-hidden="true"></i>
+              </button>
+            </div>
             <span class="cmd-sep"></span>
             <span class="cmd-label"><span data-i18n="samplingRate">Sample rate</span></span>
             <select id="sample-rate" class="ribbon-select" title="Choose how many samples to record per second" data-i18n-title="sampleRateHint">
@@ -914,6 +929,11 @@
         </div>
       </div>
       <div class="card-hint" id="temp-source-hint"><span data-i18n="temperatureExternalHint">External TCP temperature service, one value per line. Use the command bar to connect or disconnect.</span></div>
+    </div>
+
+    <div id="flyout-markers" class="marker-flyout" hidden>
+      <ol class="marker-list"></ol>
+      <div class="card-hint"><span data-i18n="markerListHint">Click a label to rename it. Exported CSV files keep markers in the Marker column.</span></div>
     </div>
 
     <div class="toast-region" id="toast-region" aria-live="polite"></div>
