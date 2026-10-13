@@ -872,7 +872,7 @@ test('large follow statistics coalesce appends, label completed bounds and avoid
     updateStatsDisplay();
     assert.match(document.getElementById('stats-snapshot-label').textContent, /updating/);
     assert.equal(ModuleWorker.instances.length, workers, 'latest bounds wait for adaptive refresh');
-    assert.equal(snapshots, 7, 'cache and active-task checks capture no additional references');
+    assert.equal(snapshots, 8, 'cache and active-task checks capture no additional references');
     suspendMonitorDisplay();
     state.chartWindow = { mode: 'frozen', duration: 6000, min: 1000, max: 7000 };
     const replacement = await getRangeStatsAsync();

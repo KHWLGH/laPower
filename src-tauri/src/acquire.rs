@@ -114,6 +114,10 @@ pub(crate) trait Source: Send {
         Ok(())
     }
 
+    /// The old queue has been ingested and its window sealed at this session timestamp.
+    /// Sources that reconstruct receive times must fence their next batch at this boundary.
+    fn seal_boundary(&mut self, _received_us: u64) {}
+
     /// The selection interval changed.
     fn set_rate(&mut self, _rate_ms: u64) {}
 }
@@ -170,6 +174,8 @@ impl Loop<'_> {
                     self.bus_probe.offer(arrival.received_us);
                     self.selection.offer(stream::Sample {
                         data,
+                        current_abs: None,
+                        power_abs: None,
                         generation: self.generation,
                         seq: 0,
                         segment: self.segment,
@@ -329,6 +335,7 @@ pub(crate) fn run_reader<S: Source>(mut source: S, ctx: ReaderCtx) {
                     reply
                 }
             };
+            source.seal_boundary(at);
             state.next_selection_at = None;
             let _ = reply.send(Ok(stream::Boundary {
                 generation,
@@ -409,6 +416,7 @@ mod tests {
         steps: VecDeque<Result<Vec<Arrival>, Stop>>,
         rates: Arc<Mutex<Vec<u64>>>,
         barriers: Arc<AtomicU64>,
+        boundaries: Arc<Mutex<Vec<u64>>>,
     }
 
     impl Source for Script {
@@ -429,6 +437,10 @@ mod tests {
         fn barrier(&mut self, _out: &mut Vec<Arrival>) -> Result<(), Stop> {
             self.barriers.fetch_add(1, Ordering::Relaxed);
             Ok(())
+        }
+
+        fn seal_boundary(&mut self, received_us: u64) {
+            self.boundaries.lock().unwrap().push(received_us);
         }
 
         fn set_rate(&mut self, rate_ms: u64) {
@@ -466,6 +478,7 @@ mod tests {
         pd_log: Arc<Mutex<PdLog>>,
         rates: Arc<Mutex<Vec<u64>>>,
         barriers: Arc<AtomicU64>,
+        boundaries: Arc<Mutex<Vec<u64>>>,
         join: std::thread::JoinHandle<()>,
     }
 
@@ -477,6 +490,7 @@ mod tests {
         let pd_log = Arc::new(Mutex::new(PdLog::default()));
         let rates = Arc::new(Mutex::new(Vec::new()));
         let barriers = Arc::new(AtomicU64::new(0));
+        let boundaries = Arc::new(Mutex::new(Vec::new()));
         let ctx = ReaderCtx {
             generation: 3,
             epoch: Instant::now(),
@@ -496,6 +510,7 @@ mod tests {
             steps: steps.into(),
             rates: Arc::clone(&rates),
             barriers: Arc::clone(&barriers),
+            boundaries: Arc::clone(&boundaries),
         };
         let join = std::thread::spawn(move || run_reader(source, ctx));
         Harness {
@@ -506,6 +521,7 @@ mod tests {
             pd_log,
             rates,
             barriers,
+            boundaries,
             join,
         }
     }
@@ -699,6 +715,10 @@ mod tests {
             .unwrap();
         let boundary = rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
         assert_eq!((boundary.generation, boundary.rate_ms), (3, 1));
+        assert_eq!(
+            *harness.boundaries.lock().unwrap(),
+            vec![boundary.received_us]
+        );
         let (reply, rx) = mpsc::channel();
         harness
             .controls
@@ -730,6 +750,11 @@ mod tests {
         );
         assert_eq!(*harness.rates.lock().unwrap(), vec![250, 1]);
         assert!(harness.barriers.load(Ordering::Relaxed) >= 2);
+        assert_eq!(
+            harness.boundaries.lock().unwrap().len(),
+            2,
+            "invalid controls do not move the fence"
+        );
         harness.running.store(false, Ordering::Release);
         let (_, _, end, harness) = collect(harness);
         harness.join.join().unwrap();

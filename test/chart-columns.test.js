@@ -116,7 +116,7 @@ test('shared import buffers transfer once and retain sharing after structured cl
   const cols = emptyChartColumns();
   for (const col of Object.values(cols)) col.set(new Float64Array(3 * F64_CHUNK_SIZE).fill(NaN));
   const transfer = columnTransferBuffers(cols);
-  assert.equal(transfer.length, 12);
+  assert.equal(transfer.length, 13);
   const received = structuredClone(cols, { transfer });
   assert.equal(received.temp._chunks[0], received.temp._chunks[2]);
   assert.ok(Number.isNaN(received.temp._chunks[1][123]));

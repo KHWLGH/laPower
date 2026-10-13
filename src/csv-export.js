@@ -43,7 +43,20 @@ function failWorker(error) {
 export function formatCsvRangeAsync(snapshot, from, to) {
   const current = getWorker();
   if (!current) return Promise.resolve(formatCsvRange(snapshot, from, to));
-  const keys = ['x', 'timestamps', 'voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2', 'sampleIntervals'];
+  const keys = [
+    'x',
+    'timestamps',
+    'voltage',
+    'current',
+    'power',
+    'temp',
+    'dp',
+    'dn',
+    'cc1',
+    'cc2',
+    'sampleIntervals',
+    'currentMagnitudes',
+  ];
   /** @type {Record<string, Float64Array>} */
   const columns = {};
   const transfer = [];
@@ -70,6 +83,7 @@ export function formatCsvRangeAsync(snapshot, from, to) {
           columns,
           recordingSegments: segments,
           withTemp: snapshot.withTemp,
+          withCurrentMagnitudes: snapshot.withCurrentMagnitudes,
         },
         transfer,
       );

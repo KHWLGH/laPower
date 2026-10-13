@@ -45,6 +45,7 @@ function summarize(imported) {
     cols.recordingSegments,
     imported.intervalMs,
     cols.sampleIntervals,
+    cols.currentMagnitudes,
   );
   return { ...imported, stats, energy, hasTempData };
 }

@@ -115,7 +115,8 @@ function stem() {
 function snapshotOf(target) {
   return snapshotCsvColumns(target.columns, {
     withTemp: true,
-    // 表头固定带段号列：即使这份数据还没有任何点，也要按同样的列写。
+    withCurrentMagnitudes: true,
+    // 表头固定带段号与电流幅值列：即使这份数据还没有任何点，也要按同样的列写。
     recordingSegments: target.columns.recordingSegments,
     sampleRate: target.sampleRate,
     startTime: target.startTime,

@@ -14,7 +14,7 @@ import {
 } from './chart-window.js';
 import { deviceStream } from './device-stream.js';
 import { displayFrames } from './frame-scheduler.js';
-import { energyMaxStepS, nextRecordingX, niceCeiling, streamSampleTime } from './measurement.js';
+import { currentMagnitude, energyMaxStepS, nextRecordingX, niceCeiling, streamSampleTime } from './measurement.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
 import { captureRangeStatsSnapshot, computeRangeStatsSync, rangeStatsRevision } from './range-stats.js';
 import { computeRangeStatsBackground } from './range-stats-background.js';
@@ -53,6 +53,7 @@ const RECORD_COLUMNS = /** @type {(keyof import('./state.js').ChartSeriesColumns
   'timestamps',
   'voltage',
   'current',
+  'currentMagnitudes',
   'power',
   'temp',
   'dp',
@@ -270,10 +271,11 @@ export function addDataPoint(data, segment) {
   const nowMs = time?.wallMs ?? Date.now();
   const record = native ? !!segment : state.isRecording;
 
-  // 有符号电流：开启后保留方向（正=正向 / 负=反向）；关闭时按旧行为记录绝对值。
-  // 功率恒取绝对值（电压非负，功率符号与电流一致，不损失信息）。
-  const currentValue = state.settings.signedCurrent ? data.current : Math.abs(data.current);
-  const powerAbs = Math.abs(data.power);
+  // Directional means describe net current; capacity and energy count both directions.
+  // Older streams and one-frame windows need no separate magnitude metadata.
+  const currentAbs = currentMagnitude(data.current, data.current_abs);
+  const currentValue = state.settings.signedCurrent ? data.current : currentAbs;
+  const powerAbs = currentMagnitude(data.power, data.power_abs);
   const hidTemp = Number.isFinite(data.temperature) ? /** @type {number} */ (data.temperature) : Number.NaN;
   let tempValue = Number.NaN;
   if (state.isTempConnected) {
@@ -331,6 +333,7 @@ export function addDataPoint(data, segment) {
   cols.sampleIntervals.push(sampleInterval);
   cols.voltage.push(data.voltage);
   cols.current.push(currentValue);
+  cols.currentMagnitudes.push(currentAbs > Math.abs(currentValue) ? currentAbs : Number.NaN);
   cols.power.push(powerAbs);
   cols.temp.push(tempValue);
   cols.dp.push(dpValue);
@@ -349,7 +352,6 @@ export function addDataPoint(data, segment) {
   // 能量累计用相对秒（与范围统计同口径）；暂停空档不在 x 里。
   // 与 integrateEnergy 一致：跳过非有限值，避免单个缺失样本把整条累计污染成 NaN。
   const lastX = segment ? segment.lastX : state.energy.lastX;
-  const currentAbs = Math.abs(currentValue);
   if (lastX !== null) {
     const stepS = relSeconds - lastX;
     const dt = stepS / 3600;
@@ -378,7 +380,7 @@ export function addDataPoint(data, segment) {
     if (state.autoPauseSettings.basis === 'voltage') {
       value = data.voltage;
     } else if (state.autoPauseSettings.basis === 'current') {
-      value = Math.abs(currentValue);
+      value = currentAbs;
     } else {
       value = powerAbs;
     }

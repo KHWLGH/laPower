@@ -7,7 +7,7 @@
 import { estimateIntervalMsFromX, mapCsvColumns, parseRelativeTime } from './measurement.js';
 import { emptyChartColumns, F64Col } from './state.js';
 
-/** @typedef {'x'|'timestamps'|'voltage'|'current'|'power'|'temp'|'dp'|'dn'|'cc1'|'cc2'|'sampleIntervals'} ColumnKey */
+/** @typedef {'x'|'timestamps'|'voltage'|'current'|'power'|'temp'|'dp'|'dn'|'cc1'|'cc2'|'sampleIntervals'|'currentMagnitudes'} ColumnKey */
 /** @type {ColumnKey[]} */
 const COLUMN_KEYS = [
   'x',
@@ -21,6 +21,7 @@ const COLUMN_KEYS = [
   'cc1',
   'cc2',
   'sampleIntervals',
+  'currentMagnitudes',
 ];
 const TIME_HEADER = 'Time(D.hh:mm:ss.ms)';
 /** 摘要行里声明采样间隔的前缀，导入时用它决定能量积分的空档阈值。 */
@@ -33,6 +34,7 @@ export const CSV_CHUNK_ROWS = 1024;
  * @property {number} length
  * @property {number} sampleRate
  * @property {number} startTime
+ * @property {boolean} withCurrentMagnitudes
  * @property {boolean} withTemp
  * @property {import('./state.js').F64Snapshot|null} recordingSegments
  */
@@ -44,7 +46,7 @@ export const CSV_CHUNK_ROWS = 1024;
  * 段列由 ingest 逐点写入（每次录制段递增、预览/暂停边界不猜测），此处不重新推断段号，
  * 也不为缺失段元数据的旧文件生成 0。
  * @param {import('./state.js').ChartSeriesColumns} columns
- * @param {{sampleRate: number, startTime: number, withTemp?: boolean, recordingSegments?: F64Col|null}} options
+ * @param {{sampleRate: number, startTime: number, withTemp?: boolean, withCurrentMagnitudes?: boolean, recordingSegments?: F64Col|null}} options
  * @returns {CsvSnapshot}
  */
 export function snapshotCsvColumns(columns, options) {
@@ -61,6 +63,9 @@ export function snapshotCsvColumns(columns, options) {
     sampleRate: nominalIntervalMs(columns, options.sampleRate),
     startTime: options.startTime,
     withTemp: options.withTemp ?? false,
+    withCurrentMagnitudes:
+      options.withCurrentMagnitudes ??
+      [...columns.currentMagnitudes.chunks()].some(({ values }) => values.some(Number.isFinite)),
     recordingSegments: segments ? segments.snapshot() : null,
   };
 }
@@ -91,9 +96,9 @@ export function formatExcelTime(seconds) {
   return day > 0 ? `="${day}.${hms}"` : `="${hms}"`;
 }
 
-/** 数据区列标题。温度列与段号列可选，其余列位置固定。 @param {boolean} withTemp @param {boolean} withSegments */
-function columnHeader(withTemp, withSegments) {
-  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),`;
+/** 数据区列标题：温度、段号和电流幅值可选，原有列位置不变。 @param {boolean} withTemp @param {boolean} withSegments @param {boolean} [withCurrentMagnitudes=false] */
+function columnHeader(withTemp, withSegments, withCurrentMagnitudes = false) {
+  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),${withCurrentMagnitudes ? 'CurrentMagnitude(A),' : ''}`;
 }
 
 /** 本地时间的 `YYYY-MM-DD HH:MM:SS`。 @param {number} ms */
@@ -111,7 +116,7 @@ function formatDateTime(ms) {
  * @param {number} to
  */
 export function formatCsvRange(snapshot, from, to) {
-  const { columns: c, withTemp, recordingSegments } = snapshot;
+  const { columns: c, withTemp, recordingSegments, withCurrentMagnitudes } = snapshot;
   const start = Math.max(0, Math.min(snapshot.length, from));
   const end = Math.max(start, Math.min(snapshot.length, to));
   if (end === start) return '';
@@ -119,15 +124,15 @@ export function formatCsvRange(snapshot, from, to) {
   for (let i = start; i < end; i++) {
     const signals = `${numericCell(c.dp.valueAt(i))},${numericCell(c.dn.valueAt(i))},${numericCell(c.cc1.valueAt(i))},${numericCell(c.cc2.valueAt(i))}`;
     lines[i - start] =
-      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},`;
+      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},${withCurrentMagnitudes ? `${numericCell(c.currentMagnitudes.valueAt(i))},` : ''}`;
   }
   return `${lines.join('\n')}\n`;
 }
 
 /** Fixed header used by both the main-thread and Worker streaming exporters. @param {CsvSnapshot} snapshot */
 export function formatCsvHeader(snapshot) {
-  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments } = snapshot;
-  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n\n${columnHeader(withTemp, !!recordingSegments)}\n`;
+  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments, withCurrentMagnitudes } = snapshot;
+  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n\n${columnHeader(withTemp, !!recordingSegments, withCurrentMagnitudes)}\n`;
 }
 
 /**
@@ -179,11 +184,11 @@ export function formatSpoolHeaderPatch(summary) {
 export const SPOOL_PATCH_BYTES = formatSpoolHeaderPatch({ length: 0, lastX: 0, sampleRate: 0 }).length;
 
 /**
- * 落盘文件的完整表头。列固定带温度与段号：落盘开始时还不知道之后会不会用到它们。
+ * 落盘文件的完整表头。列固定带温度、段号与电流幅值：落盘开始时还不知道之后会不会用到它们。
  * @param {SpoolSummary & { startTime: number }} summary
  */
 export function formatSpoolHeader(summary) {
-  return `${formatSpoolHeaderPatch(summary)}DateTime,${formatDateTime(summary.startTime)}\n\n${columnHeader(true, true)}\n`;
+  return `${formatSpoolHeaderPatch(summary)}DateTime,${formatDateTime(summary.startTime)}\n\n${columnHeader(true, true, true)}\n`;
 }
 
 /**
@@ -281,6 +286,7 @@ export function createCsvParser(options) {
   let timestampIndex = -1;
   let segmentIndex = -1;
   let intervalIndex = -1;
+  let magnitudeIndex = -1;
   let precise = false;
   let readCell = optionalCell;
   const columns = emptyChartColumns();
@@ -298,6 +304,7 @@ export function createCsvParser(options) {
     timestampIndex = headers.indexOf('Timestamp(ms)');
     segmentIndex = headers.indexOf('RecordingSegment');
     intervalIndex = headers.indexOf('SampleInterval(ms)');
+    magnitudeIndex = headers.indexOf('CurrentMagnitude(A)');
     precise = relativeIndex !== -1 && timestampIndex !== -1;
     readCell = precise ? exactCell : optionalCell;
   }
@@ -328,6 +335,10 @@ export function createCsvParser(options) {
     columns.timestamps.push(timestamp);
     columns.voltage.push(voltage);
     columns.current.push(current);
+    const magnitude = exactCell(parts, magnitudeIndex);
+    columns.currentMagnitudes.push(
+      Number.isFinite(magnitude) && magnitude >= Math.abs(current) ? magnitude : Number.NaN,
+    );
     columns.power.push(power);
     columns.temp.push(readCell(parts, map.tempIdx));
     columns.dp.push(readCell(parts, map.dpIdx));

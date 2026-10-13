@@ -36,6 +36,11 @@ pub struct Sample {
     // crate-private on purpose: `pub mod stream` exists for benches, which pass Samples around
     // and serialize them but must not have to make DeviceData public to do it.
     pub(crate) data: DeviceData,
+    /// Mean magnitudes, present only when averaging directions would lose throughput.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_abs: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub power_abs: Option<f32>,
     pub generation: u64,
     pub seq: u64,
     pub segment: u64,
@@ -96,6 +101,8 @@ pub fn sample_at(received_us: u64, current: f32) -> Sample {
             ah: Some(0.0),
             wh: Some(0.0),
         },
+        current_abs: None,
+        power_abs: None,
         generation: 1,
         seq: 0,
         segment: 1,
@@ -116,17 +123,22 @@ pub enum Outgoing {
 ///
 /// A selected point stands for its whole window. Voltage, current, power and D+/D- are the
 /// arithmetic mean of every frame the device delivered in it, so statistics and the energy
-/// integral match a recording at the device's own rate; keeping one frame per window (formerly
+/// integral can match a recording at the device's own rate; keeping one frame per window (formerly
 /// the largest |I|) biased them by the window's ripple. Everything else is taken from the
 /// newest frame, the right end of the window: its timestamp (which the right-endpoint energy
 /// integral pairs with the mean), CC (0.1 V steps), temperature and the meter's own
-/// accumulators. A window of one frame passes through bit for bit.
+/// accumulators. Directional current/power means describe net flow. Separate mean magnitudes
+/// preserve throughput before the frontend takes absolute values; they are emitted only when
+/// signed cancellation makes them larger than the net magnitude. A one-frame window passes
+/// through bit for bit.
 #[derive(Default)]
 struct Window {
     frames: u32,
     voltage: f64,
     current: f64,
     power: f64,
+    current_abs: f64,
+    power_abs: f64,
     dp: (f64, u32),
     dn: (f64, u32),
 }
@@ -137,6 +149,8 @@ impl Window {
         self.voltage += f64::from(data.voltage);
         self.current += f64::from(data.current);
         self.power += f64::from(data.power);
+        self.current_abs += f64::from(data.current.abs());
+        self.power_abs += f64::from(data.power.abs());
         for (sum, value) in [(&mut self.dp, data.dp), (&mut self.dn, data.dn)] {
             if let Some(value) = value {
                 sum.0 += f64::from(value);
@@ -145,14 +159,19 @@ impl Window {
         }
     }
 
-    fn apply(&self, data: &mut DeviceData) {
+    fn apply(&self, sample: &mut Sample) {
         if self.frames < 2 {
             return;
         }
+        let data = &mut sample.data;
         let mean = |sum: f64, count: u32| (sum / f64::from(count)) as f32;
         data.voltage = mean(self.voltage, self.frames);
         data.current = mean(self.current, self.frames);
         data.power = mean(self.power, self.frames);
+        let current_abs = mean(self.current_abs, self.frames);
+        let power_abs = mean(self.power_abs, self.frames);
+        sample.current_abs = (current_abs > data.current.abs()).then_some(current_abs);
+        sample.power_abs = (power_abs > data.power.abs()).then_some(power_abs);
         data.dp = (self.dp.1 > 0).then(|| mean(self.dp.0, self.dp.1));
         data.dn = (self.dn.1 > 0).then(|| mean(self.dn.0, self.dn.1));
     }
@@ -190,7 +209,7 @@ impl Selection {
     /// Seal the open window into one point: its mean, stamped at its newest frame.
     pub fn select(&mut self) -> Result<(), String> {
         if let Some(mut sample) = self.pending.take() {
-            std::mem::take(&mut self.window).apply(&mut sample.data);
+            std::mem::take(&mut self.window).apply(&mut sample);
             self.seq += 1;
             sample.seq = self.seq;
             self.produced.store(self.seq, Ordering::Release);
@@ -468,6 +487,8 @@ mod tests {
         // The sealed window is the mean of its two frames, stamped at the newer one.
         let mut window = sample(20, -1.75);
         window.seq = 2;
+        window.current_abs = Some(2.25);
+        window.power_abs = Some(11.25);
         next.seq = 3;
         assert_eq!(points, [first, window, next]);
         assert_eq!(after_seq, 2);
@@ -510,6 +531,90 @@ mod tests {
         assert_eq!(point.data.current, (1.0f64 / 3.0) as f32);
         // Power is the mean of the per-frame products, not mean V times mean I.
         assert_eq!(point.data.power, (5.0f64 / 3.0) as f32);
+        assert_eq!(point.current_abs, Some(3.0));
+        assert_eq!(point.power_abs, Some(15.0));
+    }
+
+    #[test]
+    fn opposite_directions_keep_net_readings_and_absolute_energy_at_every_cadence() {
+        let replay = |period_us| {
+            let mut q = Selection::new(200, Arc::new(AtomicU64::new(0)));
+            let mut deadline = None;
+            let mut out = Vec::new();
+            for i in 0..=100 {
+                let frame = sample(i * 10_000, if i % 2 == 0 { 1.0 } else { -1.0 });
+                q.offer(frame);
+                let (due, next) = selection_deadline(i * 10_000, deadline, period_us);
+                if due {
+                    out.push(sealed(&mut q));
+                    deadline = Some(next);
+                }
+            }
+            if q.pending.is_some() {
+                out.push(sealed(&mut q));
+            }
+            out
+        };
+        let integrate = |points: &[Sample]| {
+            points.windows(2).fold((0.0f64, 0.0f64), |(wh, mah), pair| {
+                let dt = (pair[1].received_us - pair[0].received_us) as f64 / 3_600_000_000.0;
+                let point = &pair[1];
+                (
+                    wh + f64::from(point.power_abs.unwrap_or(point.data.power.abs())) * dt,
+                    mah + f64::from(point.current_abs.unwrap_or(point.data.current.abs()))
+                        * 1000.0
+                        * dt,
+                )
+            })
+        };
+        let full = replay(10_000);
+        let expected = integrate(&full);
+        assert!(full
+            .iter()
+            .all(|point| point.current_abs.is_none() && point.power_abs.is_none()));
+        for period_us in [100_000, 250_000, 500_000, 1_000_000] {
+            let coarse = replay(period_us);
+            assert!(coarse
+                .iter()
+                .skip(1)
+                .any(|point| point.data.current.abs() < 1.0));
+            let actual = integrate(&coarse);
+            assert!(
+                (actual.0 - expected.0).abs() < 1e-10,
+                "Wh at {period_us} us: {actual:?}"
+            );
+            assert!(
+                (actual.1 - expected.1).abs() < 1e-10,
+                "mAh at {period_us} us: {actual:?}"
+            );
+            let encoded = serde_json::to_value(&coarse).unwrap();
+            assert!(encoded
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|point| point["current_abs"] == 1.0 && point["power_abs"] == 5.0));
+        }
+    }
+
+    #[test]
+    fn magnitude_metadata_is_sparse_and_resets_with_each_window() {
+        let mut q = Selection::new(4, Arc::new(AtomicU64::new(0)));
+        q.offer(sample(0, -1.0));
+        q.offer(sample(10, -3.0));
+        let negative = sealed(&mut q);
+        assert_eq!(negative.data.current, -2.0);
+        assert_eq!(negative.current_abs, None);
+        assert_eq!(negative.power_abs, None);
+        q.offer(sample(20, -1.0));
+        q.offer(sample(30, 1.0));
+        let opposite = sealed(&mut q);
+        assert_eq!(opposite.data.current, 0.0);
+        assert_eq!(opposite.current_abs, Some(1.0));
+        assert_eq!(opposite.power_abs, Some(5.0));
+        q.offer(sample(40, 0.25));
+        let lone = sealed(&mut q);
+        assert_eq!(lone.current_abs, None);
+        assert_eq!(lone.power_abs, None);
     }
 
     #[test]

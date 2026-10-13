@@ -65,6 +65,8 @@ HID reader ──── channel ────> IPC sender ──── emit ─�
 
 Because continued acquisition depends on frontend ACKs, the frontend must keep running when the window is invisible. macOS has two independent obstacles. WKWebView suspends invisible pages by default; the main window sets `backgroundThrottling: "disabled"` on macOS 14+. App Nap coalesces process timers and lowers thread priority, so the live reader holds an `NSProcessInfo` activity (`src-tauri/src/app_nap.rs`) that opts out of App Nap with `LatencyCritical`. Opting out alone still allowed occasional late wakeups while minimized (measured maximum 36 ms); reports stamped at host arrival were then merged in the 10 ms selection window. `HidSource` now drains the queued reports in one batch, and `acquire::stamp_drained` spreads its sample timestamps between the previous sample and the latest receive time, at most one device period (10 ms) apart. PD reports retain the drain time and do not affect the sample clock. Receiving a nonzero recording segment (`set_recording_segment`) switches to an activity that also prevents idle system sleep. Segment 0 (pause, stop, clear) restores the App-Nap-only activity; the new activity starts before the old one ends, leaving no gap. Display sleep, lid closure and manual sleep are unaffected. Windows WebView2 continues running while minimized and is not subject to these two mechanisms.
 
+Recording and rate boundaries first call the nonblocking `HidSource::barrier`, ingesting old reports under the old segment/rate. Exceeding its bounded queue drain stops explicitly rather than admitting leftovers into a new segment. After sealing the window, `seal_boundary` fences reconstructed timestamps at the control timestamp.
+
 `BackgroundTask::stop()` sets the stop flag before joining. **Producers always stop before consumers**; reversing that order leaves readers writing into an unconsumed channel.
 
 `shutdown` is marked `#[tauri::command(async)]` so it does not join emitting worker threads on the main thread, which would deadlock. Once threads stop, the main window is destroyed, not closed: Tauri v2 `close()` redispatches `close-requested`, causing an exit loop.
@@ -171,6 +173,8 @@ The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to 
 | Dependencies | `vendor/` | uPlot and Store-plugin shim; no runtime CDN requests |
 
 `measurement.js`, `pd-model.js` and `chart-window.js` deliberately contain **pure functions**, touching neither DOM nor Tauri, so Node can test them directly.
+
+Window means retain signed readings and per-frame magnitudes separately. Frontend power/Wh use mean power magnitude. Signed current curves keep net readings, while mAh uses the optional `currentMagnitudes` column. `CurrentMagnitude(A)` is exported when needed and is always included in recovery files; synchronous and Worker range statistics share the same magnitude-aware integration, with legacy cells falling back to `abs(current)`.
 
 ### Chart rendering
 

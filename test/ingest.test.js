@@ -229,3 +229,57 @@ test('updateChartEmptyState toggles has-data from series length', () => {
   updateChartEmptyState();
   assert.equal(classToggles.get('has-data'), true);
 });
+
+test('bidirectional window means retain gross energy through live, range and CSV paths', async () => {
+  const { captureRangeStatsSnapshot, computeRangeStatsSync } = await import('../src/range-stats.js');
+  const { snapshotCsvColumns, formatCsvChunks } = await import('../src/csv-codec.js');
+  const { computeCsvImport } = await import('../src/csv-import-core.js');
+  for (const signed of [false, true]) {
+    resetIngestState();
+    state.settings.signedCurrent = signed;
+    const segment = { id: 1, generation: 1, columns: state.chartSeries, baseSeconds: 0, lastX: null, first: true };
+    for (const received_us of [0, 100_000]) {
+      addDataPoint(
+        {
+          ...sample,
+          voltage: 5,
+          current: 0,
+          power: 0,
+          current_abs: 1,
+          power_abs: 5,
+          generation: 1,
+          seq: received_us / 100_000 + 1,
+          segment: 1,
+          received_us,
+          segment_start_us: 0,
+          wall_anchor_ms: 1700000000000,
+          rate_ms: 100,
+        },
+        segment,
+      );
+    }
+    assert.equal(state.chartSeries.current.at(-1), signed ? 0 : 1);
+    assert.equal(state.chartSeries.power.at(-1), 5);
+    const expected = { wh: 5 * (0.1 / 3600), mah: 1000 * (0.1 / 3600) };
+    assert.ok(Math.abs(state.energy.wh - expected.wh) < 1e-12);
+    assert.ok(Math.abs(state.energy.mah - expected.mah) < 1e-12);
+    const range = computeRangeStatsSync(captureRangeStatsSnapshot(state.chartSeries, 0, 1, 2));
+    assert.deepEqual({ wh: range.wh, mah: range.mah }, expected);
+    const text = [
+      ...formatCsvChunks(snapshotCsvColumns(state.chartSeries, { sampleRate: 100, startTime: 1700000000000 })),
+    ].join('');
+    assert.equal(text.includes('CurrentMagnitude(A)'), signed, 'ordinary unsigned files need no redundant column');
+    assert.deepEqual(computeCsvImport(text, { fallbackStartTime: 0, signedCurrent: true }).energy, expected);
+  }
+});
+
+test('invalid magnitude metadata cannot reduce measured current or poison energy', () => {
+  resetIngestState();
+  state.settings.signedCurrent = false;
+  addDataPoint({ ...sample, current_abs: -1, power_abs: Number.NaN });
+  assert.equal(state.chartSeries.current.at(-1), 2);
+  assert.equal(state.chartSeries.power.at(-1), 10);
+  addDataPoint({ ...sample, current_abs: 0.5, power_abs: Infinity });
+  assert.equal(state.chartSeries.current.at(-1), 2);
+  assert.equal(state.chartSeries.power.at(-1), 10);
+});

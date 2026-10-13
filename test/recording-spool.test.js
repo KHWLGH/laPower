@@ -230,7 +230,7 @@ test('a large backfill snapshots once, checkpoints within the backlog and never 
   try {
     spool.spoolRecordingStarted();
     await spool.spoolRecordingPaused();
-    assert.equal(snapshots, 24, 'one 12-column snapshot for the backlog and one for the frozen tail');
+    assert.equal(snapshots, 26, 'one 13-column snapshot for the backlog and one for the frozen tail');
     const file = onlyFile();
     assert.equal(parseCsv(file.text, { fallbackStartTime: 0 }).columns.x.length, 40001);
     const calls = backend.calls;
@@ -243,4 +243,21 @@ test('a large backfill snapshots once, checkpoints within the backlog and never 
     F64Col.prototype.snapshot = original;
     await spool.finalizeSpool();
   }
+});
+
+test('crash recovery preserves current magnitude when directional means cancel', async () => {
+  const cols = prepare(2);
+  cols.current.set([0, 0]);
+  cols.power.set([5, 5]);
+  cols.currentMagnitudes.set([NaN, 1]);
+  spool.spoolRecordingStarted();
+  await spool.finalizeSpool();
+  const text = onlyFile().text;
+  assert.ok(text.includes('CurrentMagnitude(A)'));
+  const parsed = parseCsv(text, { fallbackStartTime: 0 });
+  assert.deepEqual([...parsed.columns.currentMagnitudes.view()], [NaN, 1]);
+  const { computeCsvImport } = await import('../src/csv-import-core.js');
+  const energy = computeCsvImport(text, { fallbackStartTime: 0 }).energy;
+  assert.equal(energy.mah, 1000 * (0.001 / 3600));
+  assert.equal(energy.wh, 5 * (0.001 / 3600));
 });

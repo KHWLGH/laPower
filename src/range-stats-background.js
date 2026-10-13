@@ -48,6 +48,7 @@ export async function computeRangeStatsBackground(snapshot, options) {
       'x',
       'voltage',
       'current',
+      'currentMagnitudes',
       'power',
       'temp',
       'recordingSegments',
