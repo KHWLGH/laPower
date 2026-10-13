@@ -40,10 +40,15 @@ const INDEX = `# Changelog
 
 待发布草稿
 
-<!-- releases:end -->
+## [0.2.3] - 2026-10-09
+
+[English](changelog/0.2.3/en.md) · [简体中文](changelog/0.2.3/zh-CN.md)
 
 ## [0.1.0] - 2026-01-20
-- 旧版本的改动
+
+[简体中文](changelog/0.1.0/zh-CN.md) · Historical / 历史版本
+
+<!-- releases:end -->
 `;
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -295,6 +300,35 @@ test('release notes expand English, collapse Chinese and pin relative links to t
   assert.ok(!body.includes('旧版本的改动'));
 });
 
+test('release note links keep the version index, historical notes and language-file anchors usable', () => {
+  const body = releaseNotes(
+    {
+      en: `# ${VERSION}
+
+## Fixed
+- See [History](../../CHANGELOG.md), [Historical notes](../0.2.2/zh-CN.md#fixed), [This section](#fixed), and [简体中文](zh-CN.md#修复).
+`,
+      'zh-CN': `# ${VERSION}
+
+## 修复
+- 参见 [English](en.md#fixed)。
+`,
+    },
+    VERSION,
+    'owner/repo',
+  );
+  const base = 'https://github.com/owner/repo/blob/v1.2.3/';
+  for (const target of [
+    'CHANGELOG.md',
+    'changelog/0.2.2/zh-CN.md#fixed',
+    'changelog/1.2.3/en.md#fixed',
+    'changelog/1.2.3/zh-CN.md#修复',
+  ]) {
+    assert.ok(body.includes(`](${base}${target})`), target);
+  }
+  assert.ok(!body.includes('/../'));
+});
+
 test('missing or empty bilingual notes stop publication before any GitHub request', async (t) => {
   for (const language of ['en', 'zh-CN']) {
     for (const problem of ['missing', 'empty']) {
@@ -351,7 +385,14 @@ test('release preparation dry-run writes nothing; preparation archives notes and
   assert.ok(index.includes('## [1.2.4] - 2026-10-12'));
   assert.equal(index.match(/^## \[Unreleased\]/gm)?.length, 1);
   assert.ok(!index.includes('待发布草稿'));
-  assert.ok(index.endsWith('## [0.1.0] - 2026-01-20\n- 旧版本的改动\n'));
+  assert.ok(index.includes('## [0.1.0] - 2026-01-20\n\n[简体中文](changelog/0.1.0/zh-CN.md)'));
+  const history = INDEX.slice(INDEX.indexOf('## [0.2.3]'), INDEX.indexOf('<!-- releases:end -->'));
+  assert.ok(index.includes(history));
+  assert.deepEqual(
+    [...index.matchAll(/^## \[([^\]]+)\]/gm)].map((match) => match[1]),
+    ['Unreleased', '1.2.4', '0.2.3', '0.1.0'],
+  );
+  assert.ok(index.endsWith('<!-- releases:end -->\n'));
   assert.equal(await readFile(join(root, 'dist/release-notes.md'), 'utf8'), result.body);
   const en = await readFile(join(root, 'changelog/1.2.4/en.md'), 'utf8');
   const zh = await readFile(join(root, 'changelog/1.2.4/zh-CN.md'), 'utf8');

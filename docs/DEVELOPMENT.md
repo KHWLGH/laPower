@@ -78,8 +78,8 @@ npx --no-install tauri build
 日常只维护 `changelog/unreleased/zh-CN.md`。发布前由开发助手合并重复项、整理面向用户的中文说明，再生成 `en.md` 并人工校对。更新日志只提供中英双语，不要求逐条或逐句对应，不使用翻译 API。
 
 ```bash
-npm run release:prepare -- 0.2.4 --date 2026-10-12 --dry-run
-npm run release:prepare -- 0.2.4 --date 2026-10-12
+npm run release:prepare -- 0.2.4 --date 2026-10-13 --dry-run
+npm run release:prepare -- 0.2.4 --date 2026-10-13
 npm run release:notes
 ```
 
@@ -91,15 +91,19 @@ Release 默认展开英文，简体中文在折叠区，两种语言均包含安
 
 README、使用指南、开发与构建维护英文、简体中文、繁体中文和日文；架构、性能、协议库 README 和更新日志维护中英双语。外部温度服务统一在本指南维护。主要文档优先使用同语言链接，次要文档在繁体页面优先链接简中，在日文页面优先链接英文并注明语言。不增加翻译哈希、逐条同步检查或文档专用 CI。
 
+### 更新日志链接
+
+所有版本正文存放在 `changelog/<version>/`，根目录 `CHANGELOG.md` 只作为版本索引并保留原版本标题锚点。完整历史链接到索引，指定版本直接链接对应语言文件；0.2.2 及以前只有 `zh-CN.md`，不创建英文占位页。正文中的相对链接以文件所在目录为基准，例如中文使用 `../../docs/USAGE.md`、英文使用 `../../docs/en/USAGE.md`；GitHub Release 渲染时统一固定到该版本 Tag。
+
 ### 单独设置版本
 
 只需同步版本而不归档发布文案时，仍可使用：
 
 ```bash
-npm run version:set -- 0.2.3
+npm run version:set -- 0.2.4
 ```
 
-将 `0.2.3` 换成目标版本即可。命令接受不含前导零的 `X.Y.Z`，先校验所有文件，再同步以下位置；重复设置同一版本不会重复写入，也不会创建 Git 提交或 tag、更新依赖或修改更新日志：
+将 `0.2.4` 换成目标版本即可。命令接受不含前导零的 `X.Y.Z`，先校验所有文件，再同步以下位置；重复设置同一版本不会重复写入，也不会创建 Git 提交或 tag、更新依赖或修改更新日志：
 
 | 文件 | 字段 |
 | --- | --- |

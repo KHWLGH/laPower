@@ -2074,7 +2074,7 @@ dependencies = [
 
 [[package]]
 name = "km003c"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "aes",
  "anyhow",
@@ -2088,7 +2088,7 @@ dependencies = [
 
 [[package]]
 name = "lapower"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "criterion",
  "hidapi",
@@ -4601,7 +4601,7 @@ dependencies = [
 
 [[package]]
 name = "usbpd-parser"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -5413,7 +5413,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "witrn-hid"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "chrono",
  "hidapi",

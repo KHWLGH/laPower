@@ -77,8 +77,8 @@ Without an explicit target, local release output is in `target/release/bundle/`;
 During development, edit only `changelog/unreleased/zh-CN.md`. Before a release, ask the development assistant to merge duplicates and prepare user-facing Chinese notes, generate `en.md`, and review both languages manually. Notes are bilingual; sentence-by-sentence or item-by-item parity is not required. No translation API is used.
 
 ```bash
-npm run release:prepare -- 0.2.4 --date 2026-10-12 --dry-run
-npm run release:prepare -- 0.2.4 --date 2026-10-12
+npm run release:prepare -- 0.2.4 --date 2026-10-13 --dry-run
+npm run release:prepare -- 0.2.4 --date 2026-10-13
 npm run release:notes
 ```
 
@@ -90,15 +90,19 @@ Release notes expand English and collapse Simplified Chinese, with installation 
 
 README, User guide, and Development and build are maintained in English, Simplified Chinese, Traditional Chinese and Japanese. Architecture, performance, protocol-crate READMEs and changelogs are bilingual English/Simplified Chinese. The external temperature service is maintained here. Main documents link to their own language where possible; Traditional Chinese pages use Simplified Chinese secondary documents, and Japanese pages use English, labeling the language. Do not add translation hashes, item-parity checks or documentation-only CI.
 
+### Changelog links
+
+All release bodies live in `changelog/<version>/`; root `CHANGELOG.md` is only a version index and retains the original version-heading anchors. Link full history to that index and a specific release directly to its language file. Version 0.2.2 and earlier have only `zh-CN.md`, without English placeholder pages. Resolve relative links from the note directory, for example `../../docs/USAGE.md` for Chinese or `../../docs/en/USAGE.md` for English. GitHub Release rendering pins them to the corresponding version tag.
+
 ### Setting the version separately
 
 To synchronize versions without archiving release notes, the existing command remains available:
 
 ```bash
-npm run version:set -- 0.2.3
+npm run version:set -- 0.2.4
 ```
 
-Replace `0.2.3` with the target version. The command accepts `X.Y.Z` without leading zeros, validates all files before writing, and synchronizes these locations. Repeating the same version does not rewrite files, create commits/tags, update dependencies or edit the changelog:
+Replace `0.2.4` with the target version. The command accepts `X.Y.Z` without leading zeros, validates all files before writing, and synchronizes these locations. Repeating the same version does not rewrite files, create commits/tags, update dependencies or edit the changelog:
 
 | File | Field |
 | --- | --- |
