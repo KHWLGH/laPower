@@ -64,6 +64,7 @@ The bottom bar displays `Recording:` (current state, **click to start or pause**
 | Control | Description |
 | --- | --- |
 | `Start recording` / `Continue recording` / `Pause recording` | Starts or pauses recording. With no data, the label is `Start recording`; with existing or imported data, `Continue recording` appends to the current timeline without clearing it; while recording, it becomes `Pause recording` |
+| `Mark` / marker list | Adds a text marker at the current point (shortcut `M`); see [Markers](#markers) below. While recording, the marker lands on the next point to arrive after the click; with the pointer on the chart, `M` marks the point under it. The list button next to it opens the marker list for renaming and deleting |
 | `Sample rate` | Selector; see the table below |
 | `Export CSV` | Menu: `Without temperature` / `With temperature`. On narrow command bars, export, import and reset move into the right-hand `⋯` overflow menu |
 | `Import CSV` | Loads a previously exported CSV; recording can continue from its last time point |
@@ -92,6 +93,16 @@ The backend `set_sample_rate` accepts any interval from 1–60000 ms, subject to
 The meter reports on its own fixed cadence (about one frame every 10 ms on WITRN). With a longer interval, each point stands for the time since the previous one: voltage, current, power and D+ / D− are the mean of every meter frame in that span, and the timestamp, CC1 / CC2 and temperature come from the newest frame. Averages and integrated energy therefore match a `100 samples/s` recording; spikes shorter than the interval are averaged out and minimum/maximum narrow accordingly, so use `100 samples/s` (or `1000 samples/s` on POWER-Z) to see them. If the current reverses direction within one interval, the mean is the net of both directions.
 
 The rate also determines **which gaps energy integration excludes**: an interval between adjacent points greater than `max(2 seconds, 8 × sample interval)` is excluded (for example, sleep, NTP adjustments or missed samples). At 0.2/0.1 samples/s, the tolerance is therefore 40/80 seconds, so normal slow sampling is not mistaken for a gap.
+
+### Markers
+
+During long recordings such as charging tests, mark the moments that matter: the phone reaching 50%, lifting it and putting it back, the fan starting. Click `Mark` or press `M`, type a label in the dialog (the default is `Mark N`) and press Enter.
+
+- The position is fixed when you press: while recording, the marker lands on the next point to arrive, and recording continues while the dialog is open; otherwise it lands on the last point. With the pointer on the main chart, `M` marks the nearest point under it, which suits annotating a recording afterwards.
+- Each marker is a vertical line on the main chart with its label at the top; labels close together are staggered over up to three rows. The timeline navigator shows a thin tick for each marker.
+- The list button next to `Mark` lists every marker with its time. Click a label to rename it (an empty label deletes it), or × to delete it.
+- Labels are at most 40 characters. Commas, semicolons, quotes and line breaks become spaces, and a leading `=`, `+`, `-` or `@` becomes its full-width form so that spreadsheets do not read the label as a formula.
+- Markers belong to the current data: `Reset` and importing other data clear them. Exported CSV files keep them in the `Marker` column. Markers placed on new data while recording also reach the temporary recovery file; markers added to points already written there appear only in exported CSV files.
 
 ### Reading cards
 
@@ -271,6 +282,7 @@ Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),
 - `="HH:MM:SS.mmm"` makes Excel interpret time as text rather than a date. After a day, a day prefix appears: `="1.02:03:04.500"`.
 - Numeric columns use round-trip decimal text with original precision and current sign, without truncation to the UI's decimal places. Missing values are blank; actual device resolution varies by channel/model.
 - `RelativeTime(s)` stores precise relative seconds; `Timestamp(ms)` stores the absolute timestamp. Optional `RecordingSegment` distinguishes recording segments and excludes pauses from integration. `SampleInterval(ms)` stores per-point intervals for mixed rates. Legacy files lacking these trailing columns remain importable.
+- Optional `Marker` holds marker labels: each label sits on its own row and other rows leave the cell empty. The column is omitted when there are no markers; the temporary recovery file always includes it.
 - Missing signal values are blank; **older files without the four signal columns remain importable**. Import matches header names independently of column order.
 
 ### PD capture

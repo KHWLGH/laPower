@@ -57,6 +57,12 @@ export function formatCsvRangeAsync(snapshot, from, to) {
     segments = snapshot.recordingSegments.copyRange(from, to);
     transfer.push(segments.buffer);
   }
+  /** @type {[number, string][]|null} Worker 里的行号从 0 开始，按本段起点平移。 */
+  let markers = null;
+  if (snapshot.markers) {
+    markers = [];
+    for (const [index, label] of snapshot.markers) if (index >= from && index < to) markers.push([index - from, label]);
+  }
   const id = ++nextId;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
@@ -69,6 +75,7 @@ export function formatCsvRangeAsync(snapshot, from, to) {
           length: to - from,
           columns,
           recordingSegments: segments,
+          markers,
           withTemp: snapshot.withTemp,
         },
         transfer,

@@ -35,6 +35,7 @@ import { wheelZoomFactor } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { displayFrames } from './frame-scheduler.js';
 import { getResolvedLanguage, t } from './i18n.js';
+import { markersOf, onMarkersChange } from './markers.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
@@ -2093,6 +2094,103 @@ function drawYAxisLabels(u) {
   ctx.restore();
 }
 
+// ─── Markers ─────────────────────────────────────────────────────────────────
+
+/** 最多叠几行标签；更多的重叠标记只画竖线，标签可在标记列表里查看。 */
+const MARKER_LABEL_ROWS = 3;
+
+/**
+ * 打点：贯穿绘图区的竖线，顶部带标签。标签按行错开，靠右边缘时翻到线的左侧。
+ * 录制中刚打、还没等到下一行的点不画。
+ * @param {any} u
+ */
+function drawMarkers(u) {
+  const cols = state.chartSeries;
+  const list = markersOf(cols);
+  const { ctx, bbox } = u;
+  if (!list.length || !bbox || bbox.width <= 0 || bbox.height <= 0) return;
+  const min = u.scales.x?.min;
+  const max = u.scales.x?.max;
+  if (!(max >= min)) return;
+  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
+  const left = bbox.left;
+  const right = bbox.left + bbox.width;
+  const top = bbox.top;
+  const bottom = bbox.top + bbox.height;
+  const fontPx = Math.round(11 * pxRatio);
+  const padX = Math.round(4 * pxRatio);
+  const boxH = fontPx + Math.round(6 * pxRatio);
+  const gap = Math.round(3 * pxRatio);
+  /** 每一行标签已占用到的右边缘。 */
+  const rowEnds = new Array(MARKER_LABEL_ROWS).fill(Number.NEGATIVE_INFINITY);
+  const lineWidth = Math.max(1, Math.round(pxRatio));
+  const n = cols.x.length;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, bbox.width, bbox.height);
+  ctx.clip();
+  ctx.font = `${fontPx}px ${CHART_FONT}`;
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = lineWidth;
+  for (const marker of list) {
+    if (marker.index >= n) break;
+    const x = cols.x.valueAt(marker.index);
+    if (!(x >= min && x <= max)) continue;
+    // 奇数线宽落在半像素上才是一条实线
+    const px = Math.round(u.valToPos(x, 'x', true)) + (lineWidth % 2 ? 0.5 : 0);
+    // 线用坐标轴文字色，比标签文字浅一档：标注不该比数据更抢眼
+    ctx.strokeStyle = chartTheme.axisText;
+    ctx.beginPath();
+    ctx.moveTo(px, top);
+    ctx.lineTo(px, bottom);
+    ctx.stroke();
+
+    const width = Math.ceil(ctx.measureText(marker.label).width) + padX * 2;
+    let x0 = px + gap;
+    if (x0 + width > right) x0 = px - gap - width;
+    const row = rowEnds.findIndex((end) => x0 > end);
+    if (row === -1) continue;
+    rowEnds[row] = x0 + width + gap;
+    const y0 = top + gap + row * (boxH + gap);
+    ctx.fillStyle = chartTheme.markerBg;
+    ctx.fillRect(x0, y0, width, boxH);
+    ctx.fillStyle = chartTheme.marker;
+    ctx.textAlign = 'left';
+    ctx.fillText(marker.label, x0 + padX, y0 + boxH / 2);
+  }
+  ctx.restore();
+}
+
+/**
+ * 导航缩略图上的标记：只画细竖线，告诉用户哪里有点可以跳过去看。
+ * @param {any} u
+ */
+function drawNavigatorMarkers(u) {
+  const cols = state.chartSeries;
+  const list = markersOf(cols);
+  const { ctx, bbox } = u;
+  if (!list.length || !bbox || bbox.width <= 0 || bbox.height <= 0) return;
+  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
+  const lineWidth = Math.max(1, Math.round(pxRatio));
+  const n = cols.x.length;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+  ctx.clip();
+  ctx.strokeStyle = chartTheme.axisText;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  for (const marker of list) {
+    if (marker.index >= n) break;
+    const px = Math.round(u.valToPos(cols.x.valueAt(marker.index), 'x', true)) + (lineWidth % 2 ? 0.5 : 0);
+    ctx.moveTo(px, bbox.top);
+    ctx.lineTo(px, bbox.top + bbox.height);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 // ─── Legend ──────────────────────────────────────────────────────────────────
 
 /** 渲染顶部图例（仅列出当前可见的曲线，与旧版 generateLabels 过滤逻辑一致）。 */
@@ -2559,6 +2657,7 @@ export function initChart() {
     hooks: {
       drawAxes: [drawMinorGrid, drawYAxisChrome, drawYAxisLabels],
       drawSeries: [drawBucketFill, drawBucketRaster],
+      draw: [drawMarkers],
       setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],
@@ -2573,6 +2672,11 @@ export function initChart() {
   registerChartListeners();
 
   initNavigatorChart();
+  // 标记不改数据也不改量程，只需重绘两张图。
+  onMarkersChange(() => {
+    state.mainChart?.redraw();
+    state.navigatorChart?.redraw();
+  });
 
   // Canvas 不解析 CSS var()；与令牌对齐后再 load 一次，避免首帧用了回退栈。系统字体通常立刻 resolve。
   if (document.fonts?.load) {
@@ -2635,6 +2739,7 @@ function initNavigatorChart() {
       },
     ],
     axes: [{ show: false }, { show: false }],
+    hooks: { draw: [drawNavigatorMarkers] },
   };
 
   state.navigatorChart = new uPlot(opts, /** @type {any} */ (navData), host);

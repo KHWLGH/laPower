@@ -22,6 +22,7 @@ import {
 } from './csv-codec.js';
 import { formatCsvRangeAsync } from './csv-export.js';
 import { closeWriter, openSpool, patchText, syncFile, writeText } from './file-io.js';
+import { markersOf } from './markers.js';
 import { state } from './state.js';
 import { toast } from './ui/toast.js';
 
@@ -115,8 +116,9 @@ function stem() {
 function snapshotOf(target) {
   return snapshotCsvColumns(target.columns, {
     withTemp: true,
-    // 表头固定带段号列：即使这份数据还没有任何点，也要按同样的列写。
+    // 表头固定带段号列与标记列：即使这份数据还没有任何点，也要按同样的列写。
     recordingSegments: target.columns.recordingSegments,
+    markers: markersOf(target.columns),
     sampleRate: target.sampleRate,
     startTime: target.startTime,
   });

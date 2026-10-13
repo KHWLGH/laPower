@@ -213,6 +213,8 @@
   --chart-axis-text: var(--text-tertiary);
   --chart-grid: var(--stroke-control);
   --chart-grid-minor: var(--stroke-divider);
+  --chart-marker: var(--text-secondary); /* 打点标签文字：中性墨色，不占用通道色；竖线用 --chart-axis-text */
+  --chart-marker-bg: var(--surface-card); /* 标签底：与图表容器同色，压在曲线上仍可读 */
 
   /* 几何 */
   --radius-control: 4px; /* 按钮 / 输入框 / 下拉 / 菜单项 */

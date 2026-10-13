@@ -33,6 +33,7 @@ import {
   writeText,
 } from './file-io.js';
 import { errorText, t } from './i18n.js';
+import { markersOf, setMarkers } from './markers.js';
 import { F64_CHUNK_SIZE, F64Col, setChartColumns, state } from './state.js';
 import { updateTempUIVisibility } from './temperature.js';
 import { ask } from './ui/dialog.js';
@@ -78,10 +79,13 @@ export async function exportCSV(withTemp = false) {
     toast.warning(() => t('noDataToExport'));
     return;
   }
+  // 没有已落地的标记就不写 Marker 列，导出与旧版本逐字节一致。
+  const markers = markersOf(cols);
   const snapshot = snapshotCsvColumns(cols, {
     withTemp,
     sampleRate: state.dataIntervalMs ?? state.settings.sampleRate,
     startTime: state.lastRecordingStartTime ?? cols.timestamps.at(0) ?? Date.now(),
+    markers: markers.some((marker) => marker.index < cols.x.length) ? markers : null,
   });
   if (snapshot.length >= LARGE_EXPORT_ROWS) toast.info(() => t('csvExporting', { count: snapshot.length }));
   try {
@@ -241,6 +245,7 @@ async function importOpenedFile(
     clearAndResetStats();
     state.lastRecordingStartTime = imported.startTime;
     setChartColumns(cols);
+    setMarkers(cols, Array.isArray(imported.markers) ? imported.markers : null, n);
     state.dataIntervalMs = imported.intervalMs;
     state.stats = imported.stats;
     state.energy.wh = imported.energy.wh;

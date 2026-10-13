@@ -163,6 +163,7 @@ The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to 
 | Assembly | `app.js`, `shell.js`, `state.js` | Entry/events, view registry/Tab switching, shared state/types |
 | Charts | `chart.js`, `chart-buckets.js`, `chart-extrema.js`, `chart-pacing.js`, `chart-window.js`, `performance-diagnostics.js`, `theme.js` | uPlot scheduling, extrema buckets/index, automatic refresh/draw feedback, time windows, diagnostics/Canvas theme |
 | Data | `data.js`, `measurement.js`, `csv.js` | Acquisition/statistics, pure time parsing/integration, CSV I/O |
+| Markers | `markers.js`, `marker-ui.js` | Dataset-scoped labels, sanitization and row selection (pure functions); marker button, M shortcut and list |
 | PD | `pd-model.js`, `views/pd.js` | Pure summaries/filtering and workspace view |
 | Devices | `device.js`, `temperature.js` | Connections, VID/PID/SN settings and TCP temperature |
 | Settings | `settings.js`, `views/settings-view.js`, `ui-scale.js`, `theme-boot.js` | Debounced persistence, settings UI, 50–200% scaling, system-default/first-frame theme |
@@ -170,7 +171,7 @@ The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to 
 | Styles | `styles/` | Three-layer `tokens` → `base` → `components` → `app` → `views` → `compact` narrow-window layout |
 | Dependencies | `vendor/` | uPlot and Store-plugin shim; no runtime CDN requests |
 
-`measurement.js`, `pd-model.js` and `chart-window.js` deliberately contain **pure functions**, touching neither DOM nor Tauri, so Node can test them directly.
+`measurement.js`, `pd-model.js`, `chart-window.js` and `markers.js` deliberately contain **pure functions**, touching neither DOM nor Tauri, so Node can test them directly.
 
 ### Chart rendering
 

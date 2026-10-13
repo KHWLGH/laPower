@@ -58,6 +58,20 @@ export function syncRecordUI(s) {
   button.setAttribute('aria-pressed', String(s.recording));
 }
 
+/**
+ * 打点按钮镜像：录制中或已有数据才能打点；有标记才能打开标记列表。
+ * @param {{ canMark: boolean, count: number }} s
+ */
+export function syncMarkerControls(s) {
+  const add = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-add-marker'));
+  if (add) add.disabled = !s.canMark;
+  const list = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-flyout-markers'));
+  if (list) {
+    list.disabled = s.count === 0;
+    setTip(list, s.count > 0 ? t('markerListCount', { count: s.count }) : t('markerList'));
+  }
+}
+
 /** @param {boolean} enabled */
 export function syncAutoPauseUI(enabled) {
   const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-auto-pause-command'));

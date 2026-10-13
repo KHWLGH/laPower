@@ -31,6 +31,8 @@ const TOKEN_MAP = /** @type {const} */ ({
   axisText: '--chart-axis-text',
   grid: '--chart-grid',
   gridMinor: '--chart-grid-minor',
+  marker: '--chart-marker',
+  markerBg: '--chart-marker-bg',
 });
 
 /** 令牌缺失时的兜底值（与 tokens.css 暗色值一致，防止 CSS 加载异常时图表全黑）。 */
@@ -48,6 +50,8 @@ const FALLBACK = {
   axisText: '#adadad',
   grid: '#666666',
   gridMinor: '#3d3d3d',
+  marker: '#d6d6d6',
+  markerBg: '#333333',
 };
 
 /** 与 src/theme-boot.js 共用的 localStorage 键。 */

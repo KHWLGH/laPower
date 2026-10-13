@@ -491,3 +491,67 @@ test('a truncated last row of a precise file is dropped, a complete one is kept'
   const edited = text.replace(/,\n/g, '\n').trimEnd();
   assert.equal(decode(edited).columns.x.length, 2);
 });
+
+test('markers round-trip through the Marker column on their rows', () => {
+  const cols = makeColumns([
+    { x: 0, timestamps: START, voltage: 20, current: 1, power: 20 },
+    { x: 0.01, timestamps: START + 10, voltage: 20, current: 1.5, power: 30 },
+    { x: 0.02, timestamps: START + 20, voltage: 20, current: 1.6, power: 32 },
+  ]);
+  const markers = [
+    { index: 0, label: '3%' },
+    { index: 2, label: '50%' },
+  ];
+  const text = encode(cols, { markers });
+  assert.match(text, /SampleInterval\(ms\),Marker,\n/);
+  const lines = text.trimEnd().split('\n');
+  assert.ok(lines.at(-1).endsWith(',50%,'), 'the label sits in the last cell of its row');
+  assert.ok(lines.at(-2).endsWith(',,'), 'unmarked rows leave the cell empty');
+  assert.deepEqual(decode(text).markers, markers);
+});
+
+test('without markers the export has no Marker column and is unchanged', () => {
+  const cols = makeColumns([
+    { x: 0, timestamps: START, voltage: 5, current: 1, power: 5 },
+    { x: 1, timestamps: START + 1000, voltage: 5, current: 1, power: 5 },
+  ]);
+  const plain = encode(cols);
+  assert.equal(encode(cols, { markers: null }), plain);
+  assert.ok(!plain.includes('Marker'));
+  assert.deepEqual(decode(plain).markers, []);
+  // An empty list still asks for the column: the spool fixes its columns before any marker exists.
+  assert.match(encode(cols, { markers: [] }), /SampleInterval\(ms\),Marker,\n/);
+  assert.deepEqual(decode(encode(cols, { markers: [] })).markers, []);
+});
+
+test('a marker past the snapshot waits for the next one instead of breaking the rows', () => {
+  const cols = makeColumns([{ x: 0, timestamps: START, voltage: 5, current: 1, power: 5 }]);
+  const text = encode(cols, { markers: [{ index: 1, label: 'next row' }] });
+  assert.ok(!text.includes('next row'));
+  assert.equal(decode(text).columns.x.length, 1);
+});
+
+test('the spool header always carries the Marker column', () => {
+  const header = formatSpoolHeader({ length: 0, lastX: Number.NaN, sampleRate: 10, startTime: START });
+  assert.match(header, /RecordingSegment,SampleInterval\(ms\),Marker,\n$/);
+});
+
+test('sorting an out-of-order file keeps every marker on its own row', () => {
+  const header =
+    'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms),SampleInterval(ms),Marker,';
+  const row = (x, label) => `="00:00:0${x}.000",5,1,5,,,,,${x},${START + x * 1000},1000,${label},`;
+  const text = `SUM,3\n\n${header}\n${row(2, 'late')}\n${row(0, 'first')}\n${row(1, '')}\n`;
+  const parsed = decode(text);
+  assert.deepEqual([...parsed.columns.x.view()], [0, 1, 2]);
+  assert.deepEqual(parsed.markers, [
+    { index: 0, label: 'first' },
+    { index: 2, label: 'late' },
+  ]);
+});
+
+test('imported labels are cleaned like typed ones', () => {
+  const header =
+    'Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms),SampleInterval(ms),Marker,';
+  const text = `${header}\n="00:00:00.000",5,1,5,,,,,0,${START},1000,=1+2,\n`;
+  assert.deepEqual(decode(text).markers, [{ index: 0, label: '＝1+2' }]);
+});

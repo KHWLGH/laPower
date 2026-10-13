@@ -740,6 +740,60 @@ html[data-ui-scale-css] .app-shell {
   box-shadow: var(--shadow-16);
 }
 
+/* ── 标记列表（src/marker-ui.js） ── */
+.marker-flyout {
+  width: 300px;
+}
+
+.marker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.marker-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.marker-time {
+  font: var(--type-caption);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.marker-label {
+  min-width: 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: var(--type-body);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.marker-label:hover {
+  background: var(--fill-subtle-hover);
+}
+
+.marker-label:active {
+  background: var(--fill-subtle-pressed);
+}
+
+.marker-label:focus-visible {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: -2px;
+}
+
 .flyout-row {
   display: flex;
   align-items: center;

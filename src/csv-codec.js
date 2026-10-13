@@ -4,6 +4,7 @@
  * 复用列容器和 measurement 的旧格式规则，不创建 Worker 或转移 ArrayBuffer。
  */
 
+import { sanitizeMarkerLabel } from './markers.js';
 import { estimateIntervalMsFromX, mapCsvColumns, parseRelativeTime } from './measurement.js';
 import { emptyChartColumns, F64Col } from './state.js';
 
@@ -23,6 +24,8 @@ const COLUMN_KEYS = [
   'sampleIntervals',
 ];
 const TIME_HEADER = 'Time(D.hh:mm:ss.ms)';
+/** 标记列的表头名。单元格是清洗过的标签（不含逗号、换行与引号），空单元格表示该行没有标记。 */
+const MARKER_HEADER = 'Marker';
 /** 摘要行里声明采样间隔的前缀，导入时用它决定能量积分的空档阈值。 */
 const SAMP_TIME_HEADER = 'SampTime(ms),';
 export const CSV_CHUNK_ROWS = 1024;
@@ -35,6 +38,7 @@ export const CSV_CHUNK_ROWS = 1024;
  * @property {number} startTime
  * @property {boolean} withTemp
  * @property {import('./state.js').F64Snapshot|null} recordingSegments
+ * @property {Map<number, string>|null} markers 行号 → 标签；null 表示不写 `Marker` 列
  */
 
 /**
@@ -44,7 +48,9 @@ export const CSV_CHUNK_ROWS = 1024;
  * 段列由 ingest 逐点写入（每次录制段递增、预览/暂停边界不猜测），此处不重新推断段号，
  * 也不为缺失段元数据的旧文件生成 0。
  * @param {import('./state.js').ChartSeriesColumns} columns
- * @param {{sampleRate: number, startTime: number, withTemp?: boolean, recordingSegments?: F64Col|null}} options
+ * markers：传数组即写 `Marker` 列（空数组也写，临时恢复文件靠它固定列结构），null / 省略不写。
+ * 只收行号落在快照范围内的标记；录制中刚打、还没等到下一行的点留给下一次快照。
+ * @param {{sampleRate: number, startTime: number, withTemp?: boolean, recordingSegments?: F64Col|null, markers?: readonly import('./markers.js').Marker[]|null}} options
  * @returns {CsvSnapshot}
  */
 export function snapshotCsvColumns(columns, options) {
@@ -62,6 +68,9 @@ export function snapshotCsvColumns(columns, options) {
     startTime: options.startTime,
     withTemp: options.withTemp ?? false,
     recordingSegments: segments ? segments.snapshot() : null,
+    markers: options.markers
+      ? new Map(options.markers.filter((marker) => marker.index < length).map((marker) => [marker.index, marker.label]))
+      : null,
   };
 }
 
@@ -91,9 +100,12 @@ export function formatExcelTime(seconds) {
   return day > 0 ? `="${day}.${hms}"` : `="${hms}"`;
 }
 
-/** 数据区列标题。温度列与段号列可选，其余列位置固定。 @param {boolean} withTemp @param {boolean} withSegments */
-function columnHeader(withTemp, withSegments) {
-  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),`;
+/**
+ * 数据区列标题。温度列、段号列与标记列可选，其余列位置固定；标记列在最后，旧读取方按表头名找列不受影响。
+ * @param {boolean} withTemp @param {boolean} withSegments @param {boolean} [withMarkers=false]
+ */
+function columnHeader(withTemp, withSegments, withMarkers = false) {
+  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),${withMarkers ? `${MARKER_HEADER},` : ''}`;
 }
 
 /** 本地时间的 `YYYY-MM-DD HH:MM:SS`。 @param {number} ms */
@@ -111,7 +123,7 @@ function formatDateTime(ms) {
  * @param {number} to
  */
 export function formatCsvRange(snapshot, from, to) {
-  const { columns: c, withTemp, recordingSegments } = snapshot;
+  const { columns: c, withTemp, recordingSegments, markers } = snapshot;
   const start = Math.max(0, Math.min(snapshot.length, from));
   const end = Math.max(start, Math.min(snapshot.length, to));
   if (end === start) return '';
@@ -119,15 +131,15 @@ export function formatCsvRange(snapshot, from, to) {
   for (let i = start; i < end; i++) {
     const signals = `${numericCell(c.dp.valueAt(i))},${numericCell(c.dn.valueAt(i))},${numericCell(c.cc1.valueAt(i))},${numericCell(c.cc2.valueAt(i))}`;
     lines[i - start] =
-      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},`;
+      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},${markers ? `${markers.get(i) ?? ''},` : ''}`;
   }
   return `${lines.join('\n')}\n`;
 }
 
 /** Fixed header used by both the main-thread and Worker streaming exporters. @param {CsvSnapshot} snapshot */
 export function formatCsvHeader(snapshot) {
-  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments } = snapshot;
-  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n\n${columnHeader(withTemp, !!recordingSegments)}\n`;
+  const { columns: c, length, sampleRate, startTime, withTemp, recordingSegments, markers } = snapshot;
+  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n\n${columnHeader(withTemp, !!recordingSegments, !!markers)}\n`;
 }
 
 /**
@@ -179,11 +191,11 @@ export function formatSpoolHeaderPatch(summary) {
 export const SPOOL_PATCH_BYTES = formatSpoolHeaderPatch({ length: 0, lastX: 0, sampleRate: 0 }).length;
 
 /**
- * 落盘文件的完整表头。列固定带温度与段号：落盘开始时还不知道之后会不会用到它们。
+ * 落盘文件的完整表头。列固定带温度、段号与标记：落盘开始时还不知道之后会不会用到它们。
  * @param {SpoolSummary & { startTime: number }} summary
  */
 export function formatSpoolHeader(summary) {
-  return `${formatSpoolHeaderPatch(summary)}DateTime,${formatDateTime(summary.startTime)}\n\n${columnHeader(true, true)}\n`;
+  return `${formatSpoolHeaderPatch(summary)}DateTime,${formatDateTime(summary.startTime)}\n\n${columnHeader(true, true, true)}\n`;
 }
 
 /**
@@ -233,7 +245,9 @@ function exactCell(parts, index) {
 
 /**
  * 临时 F64 列内重排：仅乱序文件分配索引和一个共用的 F64 scratch，等时点保持原顺序。
+ * 返回新顺序（第 k 行来自原第 order[k] 行），供标记行号随之重映射。
  * @param {import('./state.js').ChartSeriesColumns} columns
+ * @returns {Uint32Array}
  */
 function stableSortColumns(columns) {
   const n = columns.x.length;
@@ -250,6 +264,7 @@ function stableSortColumns(columns) {
     for (let i = 0; i < n; i++) sorted.push(old.valueAt(order[i]));
     columns[key] = sorted;
   }
+  return order;
 }
 
 /** 超过这个长度仍没有换行，就不是本应用能读的 CSV（多半选错了文件）。 */
@@ -281,6 +296,9 @@ export function createCsvParser(options) {
   let timestampIndex = -1;
   let segmentIndex = -1;
   let intervalIndex = -1;
+  let markerIndex = -1;
+  /** @type {import('./markers.js').Marker[]} */
+  const markers = [];
   let precise = false;
   let readCell = optionalCell;
   const columns = emptyChartColumns();
@@ -298,6 +316,7 @@ export function createCsvParser(options) {
     timestampIndex = headers.indexOf('Timestamp(ms)');
     segmentIndex = headers.indexOf('RecordingSegment');
     intervalIndex = headers.indexOf('SampleInterval(ms)');
+    markerIndex = headers.indexOf(MARKER_HEADER);
     precise = relativeIndex !== -1 && timestampIndex !== -1;
     readCell = precise ? exactCell : optionalCell;
   }
@@ -324,6 +343,8 @@ export function createCsvParser(options) {
       }
     }
     if (!text.endsWith(',')) rowsEndWithComma = false;
+    const label = markerIndex >= 0 && markerIndex < parts.length ? sanitizeMarkerLabel(parts[markerIndex]) : '';
+    if (label) markers.push({ index: columns.x.length, label });
     columns.x.push(seconds);
     columns.timestamps.push(timestamp);
     columns.voltage.push(voltage);
@@ -392,7 +413,13 @@ export function createCsvParser(options) {
           Number.isNaN(value) ? startTime + columns.x.valueAt(i) * 1000 : value,
         );
       }
-      if (!sorted) stableSortColumns(columns);
+      if (!sorted) {
+        const order = stableSortColumns(columns);
+        const moved = new Uint32Array(order.length);
+        for (let k = 0; k < order.length; k++) moved[order[k]] = k;
+        for (const marker of markers) marker.index = moved[marker.index];
+        markers.sort((a, b) => a.index - b.index);
+      }
       const intervalMs = declaredIntervalMs ?? estimateIntervalMsFromX(columns.x);
       columns.sampleIntervals.mapValues((value) =>
         Number.isFinite(value) && value > 0 && value <= 60000 ? value : (intervalMs ?? NaN),
@@ -402,6 +429,7 @@ export function createCsvParser(options) {
         startTime,
         recordingSegments: segmentIndex === -1 ? null : columns.recordingSegments,
         intervalMs,
+        markers,
       };
     },
   };

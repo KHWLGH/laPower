@@ -26,6 +26,12 @@
 .fi-record {
   --fi: url("fluent-icons/record.svg");
 }
+.fi-flag {
+  --fi: url("fluent-icons/flag.svg");
+}
+.fi-list {
+  --fi: url("fluent-icons/list.svg");
+}
 .fi-pause {
   --fi: url("fluent-icons/pause.svg");
 }
