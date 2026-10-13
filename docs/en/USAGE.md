@@ -89,6 +89,8 @@ Selecting a POWER-Z KM003C/KM002C adds `1000 samples/s` (1 ms). This uses AdcQue
 
 The backend `set_sample_rate` accepts any interval from 1–60000 ms, subject to the device minimum. CSV import uses per-point intervals, the summary interval or an estimate from timestamps. It does not overwrite the persisted rate; the selector still shows the interval for the next live recording.
 
+The meter reports on its own fixed cadence (about one frame every 10 ms on WITRN). With a longer interval, each point stands for the time since the previous one: voltage, current, power and D+ / D− are the mean of every meter frame in that span, and the timestamp, CC1 / CC2 and temperature come from the newest frame. Averages and integrated energy therefore match a `100 samples/s` recording; spikes shorter than the interval are averaged out and minimum/maximum narrow accordingly, so use `100 samples/s` (or `1000 samples/s` on POWER-Z) to see them. If the current reverses direction within one interval, the mean is the net of both directions.
+
 The rate also determines **which gaps energy integration excludes**: an interval between adjacent points greater than `max(2 seconds, 8 × sample interval)` is excluded (for example, sleep, NTP adjustments or missed samples). At 0.2/0.1 samples/s, the tolerance is therefore 40/80 seconds, so normal slow sampling is not mistaken for a gap.
 
 ### Reading cards

@@ -1,8 +1,8 @@
 //! The per-connection read loop, shared by every device family.
 //!
 //! A [`Source`] only reports what arrived. Everything the stream contract depends on stays
-//! here, in one place and one order: segment and rate controls sealed between reads, peak
-//! selection on the cadence grid, the PD log, the unacknowledged-capacity guard, and the
+//! here, in one place and one order: segment and rate controls sealed between reads, window
+//! averaging on the cadence grid, the PD log, the unacknowledged-capacity guard, and the
 //! End receipt written after the last point.
 
 use std::collections::VecDeque;
@@ -206,7 +206,7 @@ impl Loop<'_> {
         Ok(offered)
     }
 
-    /// Select the pending peak once its window has closed at `now_us`.
+    /// Seal the open window into one point once it has closed at `now_us`.
     fn gate(&mut self, now_us: u64) -> Result<(), String> {
         let (due, next_deadline) = stream::selection_deadline(
             now_us,
@@ -654,9 +654,11 @@ mod tests {
     }
 
     #[test]
-    fn a_coarse_interval_keeps_the_peak_of_each_window() {
-        // 100 ms interval over samples 10 ms apart. The half-period grace closes windows at
-        // 50/150/250 ms, each keeping its largest |I|; `finish` seals the open tail.
+    fn a_coarse_interval_averages_each_window() {
+        // 100 ms interval over samples 10 ms apart, one -9 A frame in every ten. The half-period
+        // grace closes windows at 50/150/250 ms; each point is its window's mean, stamped at the
+        // window's newest frame, and `finish` seals the open tail. (Keeping the largest |I|
+        // instead reported -9 A three times and inflated the energy integral.)
         let mut steps = Vec::new();
         for i in 0..30u64 {
             let current = if i % 10 == 4 { -9.0 } else { 1.0 };
@@ -670,7 +672,7 @@ mod tests {
                 .iter()
                 .map(|s| (s.received_us / 1000, s.data.current))
                 .collect::<Vec<_>>(),
-            [(0, 1.0), (40, -9.0), (140, -9.0), (240, -9.0), (290, 1.0)]
+            [(0, 1.0), (50, -1.0), (150, 0.0), (250, 0.0), (290, 1.0)]
         );
         assert_eq!(end.last_seq, 5);
     }
