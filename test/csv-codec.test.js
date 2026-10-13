@@ -555,3 +555,28 @@ test('imported labels are cleaned like typed ones', () => {
   const text = `${header}\n="00:00:00.000",5,1,5,,,,,0,${START},1000,=1+2,\n`;
   assert.deepEqual(decode(text).markers, [{ index: 0, label: '＝1+2' }]);
 });
+
+test('source lines sit between DateTime and the column header and come back on import', () => {
+  const cols = makeColumns([
+    { x: 0, timestamps: START, voltage: 20, current: 1, power: 20 },
+    { x: 0.01, timestamps: START + 10, voltage: 20, current: 1, power: 20 },
+  ]);
+  const source = { software: 'laPower 0.2.4', devices: ['WITRN K2 (0716:5060)'], points: 'mean' };
+  const text = encode(cols, { source });
+  const lines = text.split('\n');
+  assert.ok(lines[3].startsWith('DateTime,'));
+  assert.deepEqual(lines.slice(4, 8), ['Software,laPower 0.2.4', 'Device,WITRN K2 (0716:5060)', 'Points,mean', '']);
+  assert.ok(lines[8].startsWith('Time(D.hh:mm:ss.ms),'));
+  const parsed = decode(text);
+  assert.deepEqual(parsed.source, source);
+  assert.equal(parsed.columns.x.length, 2, 'the extra lines are not data');
+});
+
+test('missing source items are left out and old files report no source', () => {
+  const cols = makeColumns([{ x: 0, timestamps: START, voltage: 5, current: 1, power: 5 }]);
+  const partial = encode(cols, { source: { software: 'laPower', devices: [], points: null } });
+  assert.match(partial, /DateTime,[^\n]*\nSoftware,laPower\n\nTime/);
+  assert.ok(!partial.includes('Device,') && !partial.includes('Points,'));
+  assert.equal(encode(cols, { source: null }), encode(cols), 'no source, unchanged output');
+  assert.deepEqual(decode(encode(cols)).source, { software: null, devices: [], points: null });
+});

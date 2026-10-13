@@ -71,6 +71,7 @@ const { parseCsv, SPOOL_PATCH_BYTES } = await import('../src/csv-codec.js');
 const { emptyChartColumns, state } = await import('../src/state.js');
 const spool = await import('../src/recording-spool.js');
 const { addMarker } = await import('../src/markers.js');
+const { noteRecordedSource } = await import('../src/provenance.js');
 const { toast } = await import('../src/ui/toast.js');
 
 const START = new Date(2026, 8, 28, 14, 30, 0).getTime();
@@ -262,4 +263,18 @@ test('markers reach the spool on their rows, including one waiting for the next 
     { index: 1, label: '25%' },
     { index: 3, label: '50%' },
   ]);
+});
+
+test('the spool header names the meter that is recording', async () => {
+  const cols = prepare(2);
+  state.connectedDevice = /** @type {any} */ ({ model_name: 'POWER-Z KM003C', vid: 0x5fc9, pid: 0x0063 });
+  noteRecordedSource(cols, state.connectedDevice);
+  spool.spoolRecordingStarted();
+  await spool.finalizeSpool();
+  const file = onlyFile();
+  assert.match(
+    file.text,
+    /\nDateTime,[^\n]*\nSoftware,laPower[^\n]*\nDevice,POWER-Z KM003C \(5FC9:0063\)\nPoints,mean\n\nTime/,
+  );
+  assert.deepEqual(parseCsv(file.text, { fallbackStartTime: 0 }).source.devices, ['POWER-Z KM003C (5FC9:0063)']);
 });

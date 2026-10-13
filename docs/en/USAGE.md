@@ -266,13 +266,16 @@ The icon appears above the version, followed by `Version` / `License` / `Reposit
 
 ### CSV
 
-Export has four metadata lines, one blank line, a header and data rows:
+Export has metadata lines, one blank line, a header and data rows. The first four metadata lines are fixed; source lines follow them:
 
 ```csv
 SUM,1
 TotalTime,="00:00:00.000"
 SampTime(ms),250
 DateTime,2026-08-23 00:15:42
+Software,laPower 0.2.4
+Device,WITRN K2 (0716:5060)
+Points,mean
 
 Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms),RecordingSegment,SampleInterval(ms),
 ="00:00:00.000",9.0991,0.0646,0.58820186,31.5,0.61,0.02,0.5,1.6,0,1787415342000,1,250,
@@ -283,6 +286,7 @@ Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),
 - Numeric columns use round-trip decimal text with original precision and current sign, without truncation to the UI's decimal places. Missing values are blank; actual device resolution varies by channel/model.
 - `RelativeTime(s)` stores precise relative seconds; `Timestamp(ms)` stores the absolute timestamp. Optional `RecordingSegment` distinguishes recording segments and excludes pauses from integration. `SampleInterval(ms)` stores per-point intervals for mixed rates. Legacy files lacking these trailing columns remain importable.
 - Optional `Marker` holds marker labels: each label sits on its own row and other rows leave the cell empty. The column is omitted when there are no markers; the temporary recovery file always includes it.
+- `Software`, `Device` and `Points` are source lines: the program and version that wrote the file; the meter that recorded the data (model and USB VID:PID, with another meter appended after ` / ` if recording continues on it); and how each point is derived from meter frames (`mean` is the mean of every frame in the sampling interval, which is the frame itself when the interval equals the meter's cadence). `Points` is omitted when sources are mixed or unknown, for example when recording continues an older file. Import reads them and keeps them on the next export; older files without them import as before.
 - Missing signal values are blank; **older files without the four signal columns remain importable**. Import matches header names independently of column order.
 
 ### PD capture

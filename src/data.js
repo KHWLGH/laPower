@@ -29,6 +29,7 @@ deviceStream.configure({
 
 import { t } from './i18n.js';
 import { markersOf } from './markers.js';
+import { noteRecordedSource } from './provenance.js';
 import { describeLimit, formatPoints, pointsForLimit, remainingInfo, WARN_FRACTION } from './recording-limit.js';
 import {
   configureSpool,
@@ -1416,6 +1417,8 @@ export async function startRecording() {
     const el = document.getElementById('record-status');
     if (el) el.textContent = t('recording');
 
+    // 来源先于临时恢复文件的表头登记：表头里要写明这份数据由哪台仪表采集。
+    noteRecordedSource(state.chartSeries, state.connectedDevice);
     spoolRecordingStarted();
     startDurationTicker();
     updateChartEmptyState();

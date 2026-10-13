@@ -162,7 +162,7 @@ The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to 
 | --- | --- | --- |
 | Assembly | `app.js`, `shell.js`, `state.js` | Entry/events, view registry/Tab switching, shared state/types |
 | Charts | `chart.js`, `chart-buckets.js`, `chart-extrema.js`, `chart-pacing.js`, `chart-window.js`, `performance-diagnostics.js`, `theme.js` | uPlot scheduling, extrema buckets/index, automatic refresh/draw feedback, time windows, diagnostics/Canvas theme |
-| Data | `data.js`, `measurement.js`, `csv.js` | Acquisition/statistics, pure time parsing/integration, CSV I/O |
+| Data | `data.js`, `measurement.js`, `csv.js`, `provenance.js` | Acquisition/statistics, pure time parsing/integration, CSV I/O and data provenance (meters, point rule, software version) |
 | Markers | `markers.js`, `marker-ui.js` | Dataset-scoped labels, sanitization and row selection (pure functions); marker button, M shortcut and list |
 | PD | `pd-model.js`, `views/pd.js` | Pure summaries/filtering and workspace view |
 | Devices | `device.js`, `temperature.js` | Connections, VID/PID/SN settings and TCP temperature |
