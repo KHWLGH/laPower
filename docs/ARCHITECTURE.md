@@ -65,6 +65,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 
 因为采集能否继续取决于前端 ACK，窗口不可见时前端也必须照常运行。macOS 上两件事会破坏这一点，因此分别处理：WKWebView 默认挂起不可见的页面，主窗口配置 `backgroundThrottling: "disabled"`（macOS 14+）；App Nap 会合并整个进程的定时器并降低线程优先级，读线程存活期间持有 `NSProcessInfo` activity（`src-tauri/src/app_nap.rs`）退出 App Nap，并带 `LatencyCritical`：只退出 App Nap 时，最小化窗口下读线程仍偶尔迟醒（实测最大 36 ms）。迟醒无法完全避免（系统负载高时窗口可见也会出现，70 分钟实测最长 89.9 ms），所以 WITRN 读取源（`HidSource`）在每次读到报告后用非阻塞读排空 hidapi 队列，再由 `acquire::stamp_drained` 把这批样本的时间戳均匀回推到上一个样本与当前时刻之间（相邻不超过设备节拍 10 ms，最新一个仍是接收时刻）。否则积压报告会全部打上同一个接收时刻、落进同一个 10 ms 选择窗口，被同一个选择窗口合并成一个点。PD 报告按事件到达，不参与回推。读线程收到非零的录制段（`set_recording_segment`）时换成同时阻止系统空闲睡眠的 activity，收到 0（暂停、停止、清空）时换回只退出 App Nap 的那个；先开始新的再结束旧的，切换时不留空档。屏幕熄灭、合盖和手动睡眠不受影响。Windows 的 WebView2 最小化时仍在运行，不受这两项影响。
 
+录制段和采样率边界先由 `HidSource::barrier` 非阻塞排空旧队列，旧报告仍按旧段／旧采样率处理；队列超过有界排空容量时明确停止，而不是把残留报告带入新段。窗口封口后通过 `seal_boundary` 将下一批回推时间戳限制在屏障之后。
+
 `BackgroundTask::stop()` 先置停止标志再 `join`，且**顺序固定为先生产者后消费者** —— 反过来会让读线程写入一个没人消费的通道。
 
 `shutdown` 命令标注 `#[tauri::command(async)]`，这样它不会在主线程上 join 那些正在 `emit` 的工作线程（否则互相等待会死锁）。停完线程后 `destroy` 主窗口，而不是 `close` —— Tauri v2 的 `close()` 会重新派发 `close-requested`，造成退出回环。
@@ -179,6 +181,8 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 | 依赖 | `vendor/` | uPlot 与 Store 插件 shim，运行时无 CDN 请求 |
 
 `measurement.js`、`pd-model.js`、`chart-window.js` 与 `markers.js` 是刻意抽出来的**纯函数模块** —— 不接触 DOM 也不接触 Tauri，因此可以在 Node 里直接单元测试。
+
+窗口平均同时保留有符号读数和逐帧幅值均值。前端的功率／Wh 使用功率幅值；有符号电流曲线保持净值，而 mAh 使用可选的 `currentMagnitudes` 列。`CurrentMagnitude(A)` 在需要时进入 CSV，恢复文件固定携带该列；范围统计与 Worker 复用同一幅值积分规则，缺省值回退至原有 `abs(current)`。
 
 ### 图表渲染
 

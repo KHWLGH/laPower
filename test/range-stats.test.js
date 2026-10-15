@@ -209,7 +209,7 @@ test('the real Worker preserves exact folds across mixed cadence, segment and tr
     assert.equal(cols.x._chunks[0].byteLength, 4096 * 8, 'source buffers remain attached');
     const worker = ModuleWorker.instances.at(-1);
     assert.ok(
-      worker.messages.filter((m) => m.type === 'chunk').every((m) => m.rows <= 4096 && m.bytes <= 4096 * 7 * 8),
+      worker.messages.filter((m) => m.type === 'chunk').every((m) => m.rows <= 4096 && m.bytes <= 4096 * 8 * 8),
     );
     assert.ok(worker.closed);
     const seed = computeRangeStatsSync(captureRangeStatsSnapshot(cols, 0, 4095, 2));
@@ -251,6 +251,37 @@ test('Worker cancellation returns no partial result and initialization failure u
       signal: new AbortController().signal,
     });
     assertExact(fallback, reference(snapshot));
+  } finally {
+    globalThis.Worker = previousWorker;
+  }
+});
+
+test('magnitude-aware capacity matches across synchronous, cooperative and real Worker folds', async () => {
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = ModuleWorker;
+  try {
+    const count = 8201;
+    const cols = columnsOf(count);
+    cols.x.set(Float64Array.from({ length: count }, (_, i) => i / 1000));
+    cols.current.set(new Float64Array(count));
+    cols.currentMagnitudes.set(new Float64Array(count).fill(1));
+    cols.power.set(new Float64Array(count).fill(5));
+    cols.recordingSegments.set(new Float64Array(count).fill(1));
+    cols.sampleIntervals.set(new Float64Array(count).fill(1));
+    const snapshot = captureRangeStatsSnapshot(cols, 13, count - 1, 2);
+    const sync = computeRangeStatsSync(snapshot);
+    assert.ok(Math.abs(sync.mah - (count - 1 - 13) / 3600) < 1e-10);
+    assert.ok(Math.abs(sync.wh - (5 * (count - 1 - 13)) / 3600000) < 1e-12);
+    for (const result of [
+      await computeRangeStatsAsync(snapshot),
+      await computeRangeStatsBackground(snapshot, { isCancelled: () => false, signal: new AbortController().signal }),
+    ]) {
+      assert.equal(result.mah, sync.mah);
+      assert.equal(result.wh, sync.wh);
+      assert.equal(result.sumC, 0, 'current statistics remain directional net means');
+    }
+    cols.currentMagnitudes.setAt(4096, 2);
+    assert.notEqual(rangeStatsRevision(cols), snapshot.revision, 'magnitude edits invalidate cached energy');
   } finally {
     globalThis.Worker = previousWorker;
   }

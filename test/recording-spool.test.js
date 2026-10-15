@@ -232,7 +232,7 @@ test('a large backfill snapshots once, checkpoints within the backlog and never 
   try {
     spool.spoolRecordingStarted();
     await spool.spoolRecordingPaused();
-    assert.equal(snapshots, 24, 'one 12-column snapshot for the backlog and one for the frozen tail');
+    assert.equal(snapshots, 26, 'one 13-column snapshot for the backlog and one for the frozen tail');
     const file = onlyFile();
     assert.equal(parseCsv(file.text, { fallbackStartTime: 0 }).columns.x.length, 40001);
     const calls = backend.calls;
@@ -258,7 +258,7 @@ test('markers reach the spool on their rows, including one waiting for the next 
   spool.spoolRowsAppended();
   await spool.finalizeSpool();
   const file = onlyFile();
-  assert.match(file.text, /SampleInterval\(ms\),Marker,\n/);
+  assert.match(file.text, /SampleInterval\(ms\),CurrentMagnitude\(A\),Marker,\n/);
   assert.deepEqual(parseCsv(file.text, { fallbackStartTime: 0 }).markers, [
     { index: 1, label: '25%' },
     { index: 3, label: '50%' },
@@ -277,4 +277,21 @@ test('the spool header names the meter that is recording', async () => {
     /\nDateTime,[^\n]*\nSoftware,laPower[^\n]*\nDevice,POWER-Z KM003C \(5FC9:0063\)\nPoints,mean\n\nTime/,
   );
   assert.deepEqual(parseCsv(file.text, { fallbackStartTime: 0 }).source.devices, ['POWER-Z KM003C (5FC9:0063)']);
+});
+
+test('crash recovery preserves current magnitude when directional means cancel', async () => {
+  const cols = prepare(2);
+  cols.current.set([0, 0]);
+  cols.power.set([5, 5]);
+  cols.currentMagnitudes.set([NaN, 1]);
+  spool.spoolRecordingStarted();
+  await spool.finalizeSpool();
+  const text = onlyFile().text;
+  assert.ok(text.includes('CurrentMagnitude(A)'));
+  const parsed = parseCsv(text, { fallbackStartTime: 0 });
+  assert.deepEqual([...parsed.columns.currentMagnitudes.view()], [NaN, 1]);
+  const { computeCsvImport } = await import('../src/csv-import-core.js');
+  const energy = computeCsvImport(text, { fallbackStartTime: 0 }).energy;
+  assert.equal(energy.mah, 1000 * (0.001 / 3600));
+  assert.equal(energy.wh, 5 * (0.001 / 3600));
 });

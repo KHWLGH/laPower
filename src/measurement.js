@@ -128,6 +128,13 @@ export function isRecordingBoundary(segments, index) {
   return Number.isFinite(current) && current !== valueAt(segments, index - 1);
 }
 
+/** @param {number} current @param {number|undefined} magnitude */
+export function currentMagnitude(current, magnitude) {
+  return Number.isFinite(magnitude) && /** @type {number} */ (magnitude) >= Math.abs(current)
+    ? /** @type {number} */ (magnitude)
+    : Math.abs(current);
+}
+
 /**
  * @param {ArrayLike<number>|import('./state.js').F64Col} timestamps 毫秒时间戳
  * @param {ArrayLike<number>|import('./state.js').F64Col} current
@@ -135,6 +142,7 @@ export function isRecordingBoundary(segments, index) {
  * @param {ArrayLike<number>|import('./state.js').F64Col|null} [segments=null]
  * @param {number|null} [intervalMs=null] 标称采样间隔，决定空档阈值；null 用绝对 2 秒
  * @param {ArrayLike<number>|import('./state.js').F64Col|null} [sampleIntervals=null]
+ * @param {ArrayLike<number>|import('./state.js').F64Col|null} [currentMagnitudes=null]
  */
 export function calculateEnergy(
   timestamps,
@@ -143,6 +151,7 @@ export function calculateEnergy(
   segments = null,
   intervalMs = null,
   sampleIntervals = null,
+  currentMagnitudes = null,
 ) {
   return integrateEnergy(
     timestamps,
@@ -154,6 +163,7 @@ export function calculateEnergy(
     segments,
     energyMaxStepS(intervalMs),
     sampleIntervals,
+    currentMagnitudes,
   );
 }
 
@@ -166,6 +176,7 @@ export function calculateEnergy(
  * @param {ArrayLike<number>|import('./state.js').F64Col|null} [segments=null]
  * @param {number|null} [intervalMs=null] 标称采样间隔，决定空档阈值；null 用绝对 2 秒
  * @param {ArrayLike<number>|import('./state.js').F64Col|null} [sampleIntervals=null]
+ * @param {ArrayLike<number>|import('./state.js').F64Col|null} [currentMagnitudes=null]
  */
 export function calculateEnergyInRange(
   seconds,
@@ -176,6 +187,7 @@ export function calculateEnergyInRange(
   segments = null,
   intervalMs = null,
   sampleIntervals = null,
+  currentMagnitudes = null,
 ) {
   return integrateEnergy(
     seconds,
@@ -187,6 +199,7 @@ export function calculateEnergyInRange(
     segments,
     energyMaxStepS(intervalMs),
     sampleIntervals,
+    currentMagnitudes,
   );
 }
 
@@ -200,8 +213,20 @@ export function calculateEnergyInRange(
  * @param {ArrayLike<number>|import('./state.js').F64Col|null} segments
  * @param {number} maxStepS 空档阈值（秒）
  * @param {ArrayLike<number>|import('./state.js').F64Col|null} sampleIntervals
+ * @param {ArrayLike<number>|import('./state.js').F64Col|null} currentMagnitudes
  */
-function integrateEnergy(times, current, power, perHour, startIndex, endIndex, segments, maxStepS, sampleIntervals) {
+function integrateEnergy(
+  times,
+  current,
+  power,
+  perHour,
+  startIndex,
+  endIndex,
+  segments,
+  maxStepS,
+  sampleIntervals,
+  currentMagnitudes,
+) {
   let wh = 0;
   let mah = 0;
   const from = Math.max(0, startIndex) + 1;
@@ -213,6 +238,10 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex, s
       const amps = current.chunks(chunkStart, chunkEnd).next().value?.values;
       const watts = power.chunks(chunkStart, chunkEnd).next().value?.values;
       const ids = segments?.chunks(chunkStart, chunkEnd).next().value?.values;
+      const magnitudes =
+        currentMagnitudes && 'chunks' in currentMagnitudes
+          ? currentMagnitudes.chunks(chunkStart, chunkEnd).next().value?.values
+          : null;
       const intervals =
         sampleIntervals && 'chunks' in sampleIntervals
           ? sampleIntervals.chunks(chunkStart, chunkEnd).next().value?.values
@@ -229,7 +258,10 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex, s
         previousX = x;
         previousSegment = segment;
         if (boundary) continue;
-        const currentValue = Math.abs(amps[offset]);
+        const currentValue = currentMagnitude(
+          amps[offset],
+          magnitudes?.[offset] ?? (currentMagnitudes ? valueAt(currentMagnitudes, chunkStart + offset) : NaN),
+        );
         const powerValue = Math.abs(watts[offset]);
         if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
         const interval = intervals
@@ -257,7 +289,7 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex, s
     for (let i = from; i <= to; i++) {
       if (ids && Number.isFinite(ids[i]) && ids[i] !== ids[i - 1]) continue;
       const dt = (xs[i] - xs[i - 1]) / perHour;
-      const currentValue = Math.abs(amps[i]);
+      const currentValue = currentMagnitude(amps[i], currentMagnitudes ? valueAt(currentMagnitudes, i) : NaN);
       const powerValue = Math.abs(watts[i]);
       if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
       if (dt * 3600 > pointEnergyMaxStepS(sampleIntervals ? valueAt(sampleIntervals, i) : NaN, maxStepS)) continue;
@@ -269,7 +301,7 @@ function integrateEnergy(times, current, power, perHour, startIndex, endIndex, s
   for (let i = from; i <= to; i++) {
     if (isRecordingBoundary(segments, i)) continue;
     const dt = (valueAt(times, i) - valueAt(times, i - 1)) / perHour;
-    const currentValue = Math.abs(valueAt(current, i));
+    const currentValue = currentMagnitude(valueAt(current, i), currentMagnitudes ? valueAt(currentMagnitudes, i) : NaN);
     const powerValue = Math.abs(valueAt(power, i));
     if (dt < 0 || !Number.isFinite(dt) || !Number.isFinite(currentValue) || !Number.isFinite(powerValue)) continue;
     if (dt * 3600 > pointEnergyMaxStepS(sampleIntervals ? valueAt(sampleIntervals, i) : NaN, maxStepS)) continue;

@@ -1101,9 +1101,20 @@ const WITRN_REPORT_SPACING_US: u64 = 10_000;
 /// 单次最多排空的报告数：hidapi 在 macOS 上每台设备最多缓存 30 份，Windows HID 默认环形缓冲 32 份。
 const BACKLOG_DRAIN_CAP: usize = 64;
 
+/// The small transport interface also lets boundary tests replay a real HID report queue.
+trait HidReader: Send {
+    fn read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, hidapi::HidError>;
+}
+
+impl HidReader for hidapi::HidDevice {
+    fn read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, hidapi::HidError> {
+        hidapi::HidDevice::read_timeout(self, buf, timeout_ms)
+    }
+}
+
 /// 维简 HID 仪表：阻塞读 64 字节报告，再非阻塞排空主机已经排队的报告，统一打时间戳。
-struct HidSource {
-    device: hidapi::HidDevice,
+struct HidSource<D = hidapi::HidDevice> {
+    device: D,
     epoch: Instant,
     buf: [u8; 64],
     last_report_at: Instant,
@@ -1113,8 +1124,8 @@ struct HidSource {
     drained: Vec<acquire::Payload>,
 }
 
-impl HidSource {
-    fn new(device: hidapi::HidDevice, epoch: Instant) -> Self {
+impl<D: HidReader> HidSource<D> {
+    fn new(device: D, epoch: Instant) -> Self {
         Self {
             device,
             epoch,
@@ -1135,16 +1146,14 @@ fn report_payload(report: &[u8]) -> Option<acquire::Payload> {
     }
 }
 
-impl acquire::Source for HidSource {
-    fn min_rate_ms(&self) -> u64 {
-        10
-    }
-
-    fn read(&mut self, rate_ms: u64, out: &mut Vec<acquire::Arrival>) -> Result<(), acquire::Stop> {
-        let read = self
-            .device
-            .read_timeout(&mut self.buf, rate_ms.min(20) as i32);
-        // Stamp immediately after host reception, before parsing or window selection.
+impl<D: HidReader> HidSource<D> {
+    fn read_batch(
+        &mut self,
+        timeout_ms: i32,
+        require_empty: bool,
+        out: &mut Vec<acquire::Arrival>,
+    ) -> Result<(), acquire::Stop> {
+        let read = self.device.read_timeout(&mut self.buf, timeout_ms);
         let received_at = Instant::now();
         match read {
             Ok(0) => {
@@ -1157,19 +1166,44 @@ impl acquire::Source for HidSource {
                 self.saw_report = true;
                 self.drained
                     .extend(report_payload(&self.buf[..read_len.min(self.buf.len())]));
-                // Whatever the host queued behind this report arrived while the reader was away
-                // (a late wake). Collect it now so the batch is stamped across that stall instead
-                // of at one instant, where the cadence gate would merge it into a single peak.
                 let mut newest_at = received_at;
+                let mut empty = false;
                 for _ in 1..BACKLOG_DRAIN_CAP {
                     match self.device.read_timeout(&mut self.buf, 0) {
                         Ok(len) if len > 0 => {
                             newest_at = Instant::now();
+                            self.last_report_at = newest_at;
                             self.drained
                                 .extend(report_payload(&self.buf[..len.min(self.buf.len())]));
                         }
-                        // Queue empty. A read error here resurfaces on the next blocking read.
-                        _ => break,
+                        Ok(_) => {
+                            empty = true;
+                            break;
+                        }
+                        Err(_) if require_empty => {
+                            self.drained.clear();
+                            return Err(acquire::Stop::Unplugged);
+                        }
+                        // A normal read error resurfaces on the next blocking read.
+                        Err(_) => break,
+                    }
+                }
+                // A boundary must not leave older reports for the new segment or rate.
+                // Probe once at the cap; fail explicitly rather than seal an incomplete drain.
+                if require_empty && !empty {
+                    match self.device.read_timeout(&mut self.buf, 0) {
+                        Ok(0) => {}
+                        Ok(_) => {
+                            self.drained.clear();
+                            return Err(acquire::Stop::Failed(
+                                "HID report queue exceeds the recording boundary drain capacity"
+                                    .into(),
+                            ));
+                        }
+                        Err(_) => {
+                            self.drained.clear();
+                            return Err(acquire::Stop::Unplugged);
+                        }
                     }
                 }
                 self.last_sample_us = acquire::stamp_drained(
@@ -1180,10 +1214,29 @@ impl acquire::Source for HidSource {
                     out,
                 );
             }
-            // A failed HID read is how Windows reports a pulled cable.
             Err(_) => return Err(acquire::Stop::Unplugged),
         }
         Ok(())
+    }
+}
+
+impl<D: HidReader> acquire::Source for HidSource<D> {
+    fn min_rate_ms(&self) -> u64 {
+        10
+    }
+
+    fn read(&mut self, rate_ms: u64, out: &mut Vec<acquire::Arrival>) -> Result<(), acquire::Stop> {
+        self.read_batch(rate_ms.min(20) as i32, false, out)
+    }
+
+    fn barrier(&mut self, out: &mut Vec<acquire::Arrival>) -> Result<(), acquire::Stop> {
+        self.read_batch(0, true, out)
+    }
+
+    fn seal_boundary(&mut self, received_us: u64) {
+        // The control timestamp is taken after ingesting the old queue. Reports that arrive
+        // while it is being sealed must never be backdated before the new boundary.
+        self.last_sample_us = Some(self.last_sample_us.unwrap_or(0).max(received_us));
     }
 }
 
@@ -1330,6 +1383,209 @@ mod tests {
         frame
     }
 
+    struct QueuedHid {
+        reports: Mutex<VecDeque<Option<[u8; 64]>>>,
+        timeouts: Mutex<Vec<i32>>,
+    }
+
+    impl QueuedHid {
+        fn new(reports: impl IntoIterator<Item = Option<[u8; 64]>>) -> Self {
+            Self {
+                reports: Mutex::new(reports.into_iter().collect()),
+                timeouts: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl HidReader for QueuedHid {
+        fn read_timeout(&self, buf: &mut [u8], timeout_ms: i32) -> Result<usize, hidapi::HidError> {
+            self.timeouts.lock().unwrap().push(timeout_ms);
+            match self.reports.lock().unwrap().pop_front().flatten() {
+                Some(report) => {
+                    buf[..report.len()].copy_from_slice(&report);
+                    Ok(report.len())
+                }
+                None => Ok(0),
+            }
+        }
+    }
+
+    #[test]
+    fn hid_boundary_drains_old_reports_and_fences_the_next_backdated_batch() {
+        use crate::acquire::Source;
+        // Four old reports, empty queue, then three reports arriving during boundary work.
+        let queue = QueuedHid::new(
+            std::iter::repeat_n(Some(valid_frame()), 4)
+                .chain([None])
+                .chain(std::iter::repeat_n(Some(valid_frame()), 3))
+                .chain([None]),
+        );
+        let epoch = Instant::now() - Duration::from_millis(150);
+        let mut source = HidSource::new(queue, epoch);
+        source.last_sample_us = Some(100_000);
+        let mut old = Vec::new();
+        assert!(source.barrier(&mut old).is_ok());
+        assert_eq!(old.len(), 4, "the old segment owns every queued report");
+        assert!(old
+            .windows(2)
+            .all(|pair| pair[0].received_us < pair[1].received_us));
+        assert!(source
+            .device
+            .timeouts
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|&ms| ms == 0));
+        let boundary = epoch.elapsed().as_micros() as u64;
+        source.seal_boundary(boundary);
+        let mut new = Vec::new();
+        assert!(source.read(10, &mut new).is_ok());
+        assert_eq!(new.len(), 3);
+        assert!(new.iter().all(|arrival| arrival.received_us >= boundary));
+        assert!(new
+            .windows(2)
+            .all(|pair| pair[0].received_us <= pair[1].received_us));
+    }
+
+    #[test]
+    fn empty_hid_boundary_still_fences_pause_resume_and_rate_changes() {
+        use crate::acquire::Source;
+        let queue = QueuedHid::new([None, Some(valid_frame()), Some(valid_frame()), None]);
+        let epoch = Instant::now() - Duration::from_millis(150);
+        let mut source = HidSource::new(queue, epoch);
+        source.last_sample_us = Some(100_000);
+        let mut old = Vec::new();
+        assert!(source.barrier(&mut old).is_ok());
+        assert!(old.is_empty());
+        let boundary = epoch.elapsed().as_micros() as u64;
+        source.seal_boundary(boundary);
+        let mut new = Vec::new();
+        assert!(source.read(10, &mut new).is_ok());
+        assert_eq!(new.len(), 2);
+        assert!(new.iter().all(|arrival| arrival.received_us >= boundary));
+    }
+
+    #[test]
+    fn reader_hid_boundaries_keep_old_backlogs_in_their_original_segments() {
+        use crate::acquire::{Arrival, ReaderCtx, Source, Stop};
+        struct Once {
+            hid: HidSource<QueuedHid>,
+            read: bool,
+        }
+        impl Source for Once {
+            fn min_rate_ms(&self) -> u64 {
+                10
+            }
+            fn read(&mut self, rate: u64, out: &mut Vec<Arrival>) -> Result<(), Stop> {
+                if self.read {
+                    return Err(Stop::Unplugged);
+                }
+                self.read = true;
+                self.hid.read(rate, out)
+            }
+            fn barrier(&mut self, out: &mut Vec<Arrival>) -> Result<(), Stop> {
+                self.hid.barrier(out)
+            }
+            fn seal_boundary(&mut self, at: u64) {
+                self.hid.seal_boundary(at);
+            }
+        }
+        let queue = QueuedHid::new(
+            (0..4).flat_map(|_| std::iter::repeat_n(Some(valid_frame()), 3).chain([None])),
+        );
+        let epoch = Instant::now() - Duration::from_millis(150);
+        let mut hid = HidSource::new(queue, epoch);
+        hid.last_sample_us = Some(100_000);
+        let (tx, rx) = mpsc::sync_channel(4096);
+        let (control_tx, controls) = mpsc::sync_channel(8);
+        let replies = [1, 0, 2].map(|segment| {
+            let (reply, rx) = mpsc::channel();
+            control_tx
+                .send(stream::Control::Segment {
+                    segment,
+                    pd_enabled: false,
+                    reply,
+                })
+                .unwrap();
+            rx
+        });
+        acquire::run_reader(
+            Once { hid, read: false },
+            ReaderCtx {
+                generation: 1,
+                epoch,
+                wall_anchor_ms: 1000,
+                running: Arc::new(AtomicBool::new(true)),
+                sample_rate: Arc::new(AtomicU64::new(10)),
+                pd_log: Arc::new(Mutex::new(PdLog::default())),
+                pd_capture: Arc::new(AtomicBool::new(false)),
+                device_info: Arc::new(Mutex::new(None)),
+                tx,
+                controls,
+                produced: Arc::new(AtomicU64::new(0)),
+                consumed: Arc::new(AtomicU64::new(0)),
+                end: Arc::new(Mutex::new(None)),
+            },
+        );
+        let boundaries = replies.map(|rx| rx.recv().unwrap().unwrap());
+        let points: Vec<_> = rx
+            .into_iter()
+            .filter_map(|item| match item {
+                DeviceOutgoing::Sample(point) => Some(point),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            boundaries[0].after_seq > 0,
+            "preview backlog is drained before recording starts"
+        );
+        for (start, end, segment) in [
+            (0, boundaries[0].after_seq, 0),
+            (boundaries[0].after_seq, boundaries[1].after_seq, 1),
+            (boundaries[1].after_seq, boundaries[2].after_seq, 0),
+        ] {
+            assert!(end > start, "the old backlog was not dropped");
+            assert!(points
+                .iter()
+                .filter(|point| point.seq > start && point.seq <= end)
+                .all(|point| point.segment == segment));
+        }
+        let resumed: Vec<_> = points
+            .iter()
+            .filter(|point| point.seq > boundaries[2].after_seq)
+            .collect();
+        assert!(!resumed.is_empty());
+        assert!(resumed
+            .iter()
+            .all(|point| point.segment == 2 && point.received_us >= boundaries[2].received_us));
+        assert!(points
+            .iter()
+            .filter(|point| point.segment != 0)
+            .all(|point| point.received_us >= point.segment_start_us));
+    }
+
+    #[test]
+    fn hid_boundary_rejects_a_queue_that_exceeds_the_bounded_drain() {
+        use crate::acquire::Source;
+        for count in [BACKLOG_DRAIN_CAP, BACKLOG_DRAIN_CAP + 1] {
+            let queue =
+                QueuedHid::new(std::iter::repeat_n(Some(valid_frame()), count).chain([None]));
+            let mut source = HidSource::new(queue, Instant::now());
+            let mut out = Vec::new();
+            let result = source.barrier(&mut out);
+            if count == BACKLOG_DRAIN_CAP {
+                assert!(result.is_ok());
+                assert_eq!(out.len(), count);
+            } else {
+                assert!(matches!(result, Err(acquire::Stop::Failed(_))));
+                assert!(
+                    out.is_empty(),
+                    "a failed barrier publishes no partial batch"
+                );
+            }
+        }
+    }
+
     fn device_info(path: &str, interface_number: i32, usage_page: u16) -> DeviceInfo {
         DeviceInfo {
             path: path.to_string(),
@@ -1378,6 +1634,8 @@ mod tests {
         for i in 0..N {
             selection.offer(stream::Sample {
                 data: decoded.clone(),
+                current_abs: None,
+                power_abs: None,
                 generation: 1,
                 seq: 0,
                 segment: 1,
@@ -1433,6 +1691,8 @@ mod tests {
         for received_us in [10, 20, 30] {
             selection.offer(stream::Sample {
                 data: parse_device_data(&valid_frame()).unwrap(),
+                current_abs: None,
+                power_abs: None,
                 generation: 7,
                 seq: 0,
                 segment: 1,

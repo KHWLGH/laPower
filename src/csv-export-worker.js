@@ -22,6 +22,7 @@ worker.onmessage = (/** @type {MessageEvent} */ event) => {
       sampleRate: 0,
       startTime: 0,
       withTemp: !!message.withTemp,
+      withCurrentMagnitudes: !!message.withCurrentMagnitudes,
       recordingSegments: segments,
       markers: Array.isArray(message.markers) ? new Map(message.markers) : null,
     });

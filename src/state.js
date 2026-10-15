@@ -15,6 +15,8 @@
  * @property {number} voltage  - 电压 (V)
  * @property {number} current  - 电流 (A)，可为负值
  * @property {number} power    - 功率 (W)，可为负值
+ * @property {number} [current_abs] - 窗口内逐帧电流幅值的均值（方向相抵时提供）
+ * @property {number} [power_abs] - 窗口内逐帧功率幅值的均值（方向相抵时提供）
  * @property {number} [dp]     - D+ 电压
  * @property {number} [dn]     - D- 电压
  * @property {number} [cc1]    - CC1 电压
@@ -272,6 +274,7 @@ export function columnTransferBuffers(columns) {
  * @property {F64Col} timestamps
  * @property {F64Col} voltage
  * @property {F64Col} current
+ * @property {F64Col} currentMagnitudes 窗口电流幅值；NaN 表示使用 abs(current)
  * @property {F64Col} power
  * @property {F64Col} temp
  * @property {F64Col} dp
@@ -289,6 +292,7 @@ export function emptyChartColumns(capacity = 4096) {
     timestamps: new F64Col(capacity),
     voltage: new F64Col(capacity),
     current: new F64Col(capacity),
+    currentMagnitudes: new F64Col(capacity),
     power: new F64Col(capacity),
     temp: new F64Col(capacity),
     dp: new F64Col(capacity),

@@ -1,6 +1,6 @@
 // @ts-check
 import { yieldToMainThread } from './cooperative.js';
-import { pointEnergyMaxStepS } from './measurement.js';
+import { currentMagnitude, pointEnergyMaxStepS } from './measurement.js';
 
 /**
  * @typedef {{
@@ -20,6 +20,7 @@ export function rangeStatsRevision(columns) {
     columns.x.revision +
     columns.voltage.revision +
     columns.current.revision +
+    columns.currentMagnitudes.revision +
     columns.power.revision +
     columns.temp.revision +
     columns.recordingSegments.revision +
@@ -47,6 +48,7 @@ export function captureRangeStatsSnapshot(columns, startIndex, endIndex, maxStep
     x: columns.x.snapshot(),
     voltage: columns.voltage.snapshot(),
     current: columns.current.snapshot(),
+    currentMagnitudes: columns.currentMagnitudes.snapshot(),
     power: columns.power.snapshot(),
     temp: columns.temp.snapshot(),
     recordingSegments: columns.recordingSegments.snapshot(),
@@ -93,6 +95,7 @@ export function initialStats(snapshot, seed) {
  * @param {Float64Array} currents @param {Float64Array} powers @param {Float64Array} temps
  * @param {Float64Array} segments
  * @param {number} previousX @param {number} previousSegment @param {number} interval
+ * @param {number|undefined} magnitude
  */
 function foldPoint(
   stats,
@@ -107,6 +110,7 @@ function foldPoint(
   previousX,
   previousSegment,
   interval,
+  magnitude,
 ) {
   const v = voltages[offset];
   const c = currents[offset];
@@ -139,7 +143,7 @@ function foldPoint(
   if (i <= stats.startIndex) return;
   if (Number.isFinite(segments[offset]) && segments[offset] !== previousSegment) return;
   const dt = (xValues[offset] - previousX) / 3600;
-  const currentAbs = Math.abs(c);
+  const currentAbs = currentMagnitude(c, magnitude);
   const powerAbs = Math.abs(p);
   if (
     dt < 0 ||
@@ -167,6 +171,7 @@ function foldBlock(stats, snapshot, from, end) {
     const xs = read(snapshot.x);
     const voltages = read(snapshot.voltage);
     const currents = read(snapshot.current);
+    const magnitudes = snapshot.currentMagnitudes.chunks(chunkStart, chunkEnd).next().value?.values;
     const powers = read(snapshot.power);
     const temps = read(snapshot.temp);
     const segments = read(snapshot.recordingSegments);
@@ -186,6 +191,7 @@ function foldBlock(stats, snapshot, from, end) {
         offset ? xs[offset - 1] : snapshot.x.valueAt(i - 1),
         offset ? segments[offset - 1] : snapshot.recordingSegments.valueAt(i - 1),
         intervals?.[offset] ?? NaN,
+        magnitudes?.[offset],
       );
     }
   }
@@ -194,7 +200,7 @@ function foldBlock(stats, snapshot, from, end) {
 /**
  * The Worker and synchronous paths use the same ordered arithmetic kernel.
  * @param {RangeStats} stats @param {number} from
- * @param {Record<'x'|'voltage'|'current'|'power'|'temp'|'recordingSegments'|'sampleIntervals', Float64Array>} columns
+ * @param {Record<'x'|'voltage'|'current'|'power'|'temp'|'recordingSegments'|'sampleIntervals', Float64Array> & {currentMagnitudes?: Float64Array}} columns
  * @param {number} previousX @param {number} previousSegment
  */
 export function foldRangeStatsChunk(stats, from, columns, previousX, previousSegment) {
@@ -212,6 +218,7 @@ export function foldRangeStatsChunk(stats, from, columns, previousX, previousSeg
       previousX,
       previousSegment,
       columns.sampleIntervals[offset],
+      columns.currentMagnitudes?.[offset],
     );
     previousX = columns.x[offset];
     previousSegment = columns.recordingSegments[offset];

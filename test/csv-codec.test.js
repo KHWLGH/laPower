@@ -533,7 +533,7 @@ test('a marker past the snapshot waits for the next one instead of breaking the 
 
 test('the spool header always carries the Marker column', () => {
   const header = formatSpoolHeader({ length: 0, lastX: Number.NaN, sampleRate: 10, startTime: START });
-  assert.match(header, /RecordingSegment,SampleInterval\(ms\),Marker,\n$/);
+  assert.match(header, /RecordingSegment,SampleInterval\(ms\),CurrentMagnitude\(A\),Marker,\n$/);
 });
 
 test('sorting an out-of-order file keeps every marker on its own row', () => {
@@ -579,4 +579,86 @@ test('missing source items are left out and old files report no source', () => {
   assert.ok(!partial.includes('Device,') && !partial.includes('Points,'));
   assert.equal(encode(cols, { source: null }), encode(cols), 'no source, unchanged output');
   assert.deepEqual(decode(encode(cols)).source, { software: null, devices: [], points: null });
+});
+
+test('current magnitude follows rows through sorting and round trips without changing ordinary files', () => {
+  const cols = makeColumns([
+    { x: 0.2, timestamps: START + 200, voltage: 5, current: 0, power: 5 },
+    { x: 0, timestamps: START, voltage: 5, current: 0, power: 10 },
+    { x: 0.1, timestamps: START + 100, voltage: 5, current: 0, power: 15 },
+  ]);
+  cols.currentMagnitudes.set([1, 2, 3]);
+  const text = encode(cols);
+  assert.ok(text.includes('SampleInterval(ms),CurrentMagnitude(A),'));
+  const parsed = decode(text);
+  assert.deepEqual([...parsed.columns.currentMagnitudes.view()], [2, 3, 1]);
+  const again = decode(encode(parsed.columns));
+  assert.deepEqual([...again.columns.currentMagnitudes.view()], [2, 3, 1]);
+  cols.currentMagnitudes.set([NaN, NaN, NaN]);
+  assert.ok(!encode(cols).includes('CurrentMagnitude(A)'));
+});
+
+test('current magnitude, markers and provenance survive the same sorted CSV round trip', () => {
+  const cols = makeColumns([
+    { x: 0.2, timestamps: START + 200, voltage: 5, current: 0, power: 5 },
+    { x: 0, timestamps: START, voltage: 5, current: 0, power: 10 },
+    { x: 0.1, timestamps: START + 100, voltage: 5, current: 0, power: 15 },
+  ]);
+  cols.currentMagnitudes.set([1, 2, 3]);
+  const source = { software: 'laPower 0.2.4', devices: ['WITRN K2 (0716:5060)'], points: 'mean' };
+  const text = encode(cols, {
+    markers: [
+      { index: 0, label: 'late' },
+      { index: 2, label: 'middle' },
+    ],
+    source,
+  });
+  assert.match(text, /SampleInterval\(ms\),CurrentMagnitude\(A\),Marker,\n/);
+  const parsed = decode(text);
+  assert.deepEqual([...parsed.columns.currentMagnitudes.view()], [2, 3, 1]);
+  assert.deepEqual(parsed.markers, [
+    { index: 1, label: 'middle' },
+    { index: 2, label: 'late' },
+  ]);
+  assert.deepEqual(parsed.source, source);
+  const again = decode(encode(parsed.columns, { markers: parsed.markers, source: parsed.source }));
+  assert.deepEqual([...again.columns.currentMagnitudes.view()], [2, 3, 1]);
+  assert.deepEqual(again.markers, parsed.markers);
+  assert.deepEqual(again.source, source);
+});
+
+test('real export Worker retains sparse magnitude cells in bounded chunks', async () => {
+  const { ModuleWorker } = await import('../bench/module-worker.mjs');
+  const { formatCsvRangeAsync, terminateCsvExportWorker } = await import('../src/csv-export.js');
+  const previousWorker = globalThis.Worker;
+  globalThis.Worker = ModuleWorker;
+  try {
+    const cols = makeColumns(
+      Array.from({ length: 5 }, (_, i) => ({
+        x: i / 10,
+        timestamps: START + i * 100,
+        voltage: 5,
+        current: 0,
+        power: 5,
+      })),
+    );
+    cols.currentMagnitudes.set([NaN, 1, 2, NaN, 3]);
+    const snapshot = snapshotCsvColumns(cols, {
+      sampleRate: 100,
+      startTime: START,
+      markers: [
+        { index: 1, label: 'first in chunk' },
+        { index: 4, label: 'last in chunk' },
+      ],
+    });
+    assert.equal(await formatCsvRangeAsync(snapshot, 1, 5), formatCsvRange(snapshot, 1, 5));
+    assert.deepEqual(
+      [...cols.currentMagnitudes.view()],
+      [NaN, 1, 2, NaN, 3],
+      'transfers leave source buffers attached',
+    );
+  } finally {
+    terminateCsvExportWorker();
+    globalThis.Worker = previousWorker;
+  }
 });
