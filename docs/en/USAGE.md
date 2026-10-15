@@ -64,15 +64,17 @@ The bottom bar displays `Recording:` (current state, **click to start or pause**
 | Control | Description |
 | --- | --- |
 | `Start recording` / `Continue recording` / `Pause recording` | Starts or pauses recording. With no data, the label is `Start recording`; with existing or imported data, `Continue recording` appends to the current timeline without clearing it; while recording, it becomes `Pause recording` |
-| `Mark` / marker list | Adds a text marker at the current point (shortcut `M`); see [Markers](#markers) below. While recording, the marker lands on the next point to arrive after the click; with the pointer on the chart, `M` marks the point under it. The list button next to it opens the marker list for renaming and deleting |
 | `Sample rate` | Selector; see the table below |
-| `Export CSV` | Menu: `Without temperature` / `With temperature`. On narrow command bars, export, import and reset move into the right-hand `⋯` overflow menu |
+| `Export CSV │ ▾` | The main button opens the save picker using saved options; the arrow opens temperature, device information and marker checkboxes, plus joint CSV/PD export |
 | `Import CSV` | Loads a previously exported CSV; recording can continue from its last time point |
 | `Reset` | Clears the chart and resets statistics and integrated energy |
-| `⋯` | Appears when space is insufficient; contains export, import and reset |
 | `Display` | Opens the channel display flyout |
 | `Auto pause` | Toggle and gear button for its configuration flyout |
 | `Temperature service` | Toggle and gear button for configuration; see [External temperature service](DEVELOPMENT.md#external-temperature-service) |
+
+The toolbar stays on one row, with import and reset directly accessible; use UI scaling for smaller windows. CSV checkbox changes save immediately and keep the panel open. Defaults exclude temperature and include device information and markers. Selected temperature/marker columns remain present, with blank cells when data is unavailable.
+
+Joint export requires data in both Monitor and PD, independently of the current connection. One save selection produces `name.csv` and `name.pd.json` in the same directory, checking both overwrite targets and reporting each result. Both snapshots are fixed after the picker and include all recorded data, regardless of chart selections, PD filters or later appends, clears and edits. When PD does not follow recording, the panel warns that time ranges may differ; no cropping or realignment occurs.
 
 Sample-rate presets, with the actual millisecond interval also used by CSV `SampTime(ms)`:
 
@@ -96,7 +98,7 @@ The rate also determines **which gaps energy integration excludes**: an interval
 
 ### Markers
 
-During long recordings such as charging tests, mark the moments that matter: the phone reaching 50%, lifting it and putting it back, the fan starting. Click `Mark` or press `M`, type a label in the dialog (the default is `Mark N`) and press Enter.
+During long recordings such as charging tests, mark the moments that matter: the phone reaching 50%, lifting it and putting it back, the fan starting. Click the main part of `Mark ▾` at the chart's top right or press `M`, type a label in the dialog (the default is `Mark N`) and press Enter. The arrow opens the marker list.
 
 - The position is fixed when you press: while recording, the marker lands on the next point to arrive, and recording continues while the dialog is open; otherwise it lands on the last point. With the pointer on the main chart, `M` marks the nearest point under it, which suits annotating a recording afterwards.
 - Each marker is a vertical line on the main chart with its label at the top; labels close together are staggered over up to three rows. The timeline navigator shows a thin tick for each marker.
@@ -115,7 +117,7 @@ The left panel is resizable (200–360 px; default 250 px); dragging the divider
 Additional card behavior:
 
 - **Current** — With signed current enabled, an arrow before the value indicates direction.
-- **Temperature** — Hidden when no temperature source is available; missing readings are `--`. A `Device` source follows the meter lifecycle: unplugging/disconnecting removes the source, resets readings to `--` and the `Temperature service` toggle, and unlocks `Source`. An `External` TCP session remains independent of the meter connection.
+- **Temperature** — The card, display controls and export options stay visible. Status text and `--` indicate disabled, waiting or disconnected states. Acquisition, curve display and CSV temperature are independent. Disconnection preserves source/display/export preferences and historical data, without reconnecting or switching sources; gaps remain blank. Clear/import preserves connection preferences, importing temperature does not connect, and restarting requires a manual connection. A `Device` session ends with the meter connection; an `External` TCP session is independent.
 - **Energy (Wh) and Capacity (mAh)** — Integrated from samples in software, rather than read from the meter's accumulator. Each has an automatically scaled horizontal mini bar. **Only `Reset` zeroes them.** Continuing after a pause retains totals and excludes the pause from integration. Gaps over `max(2 seconds, 8 × sample interval)` are also excluded, as described above.
 - **Signal lines** — D+ / D- / CC1 / CC2 each have a name, value and horizontal mini bar. Values show two decimal places; actual resolution depends on the device, with WITRN CC1/CC2 at 0.1 V.
 
@@ -252,6 +254,19 @@ On first run and after resetting settings, the theme follows OS appearance. Exis
 - **Keep temporary recovery files** — Writes to the app cache about once per second. Recover/delete unfinished recordings in Settings. Normal clear/import/exit removes files after successful synchronization; failed writes/synchronization retain them and report an error. Long-term storage still requires CSV export.
 - **Reset all settings** — Restores language, sample rate, channels, UI scale, auto pause, temperature and other defaults. Success is reported only after saving to disk. If antivirus or a sync drive holds `settings.json`, an error is shown: the interface has reset, but restarting would roll it back. Notifications appear once per failure period rather than on every control's autosave.
 
+### Keyboard shortcuts
+
+| Action | Default | Page |
+| --- | --- | --- |
+| Start / pause / resume recording | `P` | Monitor |
+| Mark | `M` | Monitor |
+| Import | `Ctrl+O` | Monitor CSV; PD JSON |
+| Export | `Ctrl+S` | Monitor CSV; PD JSON |
+| Export CSV and PD together | `Ctrl+Shift+S` | Monitor |
+| Clear current data | Unassigned | Monitor, PD; existing confirmation/linkage applies |
+
+On macOS, use Command instead of Ctrl. Settings → Keyboard shortcuts supports key capture, unassignment, individual defaults and restoring all defaults. Changes save automatically and update button hints. Conflicting bindings, modifier-only keys and close/quit shortcuts are rejected. Input controls, composition, dialogs and shortcut capture suppress business actions; held keys do not repeat them.
+
 ### Device
 
 Displays the connected device's `VID` / `PID` / `SN` from enumeration without interrupting the data stream.
@@ -281,14 +296,16 @@ Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),
 ="00:00:00.000",9.0991,0.0646,0.58820186,31.5,0.61,0.02,0.5,1.6,0,1787415342000,1,250,
 ```
 
-- `Without temperature` omits **`Temp(°C)` from both header and data**, keeping other columns.
+- `Include temperature` controls `Temp(°C)` and `Include markers` controls `Marker`; selected columns remain present even without data.
 - `="HH:MM:SS.mmm"` makes Excel interpret time as text rather than a date. After a day, a day prefix appears: `="1.02:03:04.500"`.
 - Numeric columns use round-trip decimal text with original precision and current sign, without truncation to the UI's decimal places. Missing values are blank; actual device resolution varies by channel/model.
 - `RelativeTime(s)` stores precise relative seconds; `Timestamp(ms)` stores the absolute timestamp. Optional `RecordingSegment` distinguishes recording segments and excludes pauses from integration. `SampleInterval(ms)` stores per-point intervals for mixed rates. Legacy files lacking these trailing columns remain importable.
-- Optional `Marker` holds marker labels: each label sits on its own row and other rows leave the cell empty. The column is omitted when there are no markers; the temporary recovery file always includes it.
+- Optional `Marker` holds marker labels: each label sits on its own row and other rows leave the cell empty. Unchecking `Include markers` omits the column; the recovery format remains unchanged and always includes it.
 - `Software`, `Device` and `Points` are source lines: the program and version that wrote the file; the meter that recorded the data (model and USB VID:PID, with another meter appended after ` / ` if recording continues on it); and how each point is derived from meter frames (`mean` is the mean of every frame in the sampling interval, which is the frame itself when the interval equals the meter's cadence). `Points` is omitted when sources are mixed or unknown, for example when recording continues an older file. Import reads them and keeps them on the next export; older files without them import as before.
 - Optional `CurrentMagnitude(A)` preserves mean current magnitude when signed readings cancel, keeping capacity unchanged after import. Missing or blank cells fall back to `abs(Current(A))`. Normal exports include it only when needed; recovery files always carry it. Older files remain importable, but magnitudes already lost to cancellation cannot be reconstructed.
 - Missing signal values are blank; **older files without the four signal columns remain importable**. Import matches header names independently of column order.
+
+`Include device information` controls only the `Device` source line, preserving software and sampling metadata. Sources come from recorded data; missing imported provenance is never replaced by the currently connected meter. Export options do not change acquisition, display, memory data or recovery files.
 
 ### PD capture
 

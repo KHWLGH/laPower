@@ -19,7 +19,6 @@ import {
   removeMarker,
   renameMarker,
 } from './markers.js';
-import { getActiveView } from './shell.js';
 import { state } from './state.js';
 import { promptText } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
@@ -68,25 +67,10 @@ function addMarkerFromButton() {
   void addMarkerAt(markerRowFor(state.chartSeries.x.length, state.isRecording));
 }
 
-/** @param {EventTarget|null} target */
-function isEditable(target) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.tagName === 'INPUT' ||
-      target.tagName === 'TEXTAREA' ||
-      target.tagName === 'SELECT')
-  );
-}
-
-/** @param {KeyboardEvent} event */
-function onShortcut(event) {
-  if (event.key !== 'm' && event.key !== 'M') return;
-  if (event.metaKey || event.ctrlKey || event.altKey || event.repeat || isEditable(event.target)) return;
-  if (getActiveView() !== 'monitor' || document.querySelector('dialog[open]')) return;
+/** Central dispatcher captures the row before prompting. */
+export function addMarkerFromShortcut() {
   const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-add-marker'));
   if (!button || button.disabled) return;
-  event.preventDefault();
   void addMarkerAt(rowUnderCursor() ?? markerRowFor(state.chartSeries.x.length, state.isRecording));
 }
 
@@ -157,6 +141,5 @@ export function initMarkerUI() {
     // createFlyout 的点击处理先打开面板，这里随后填内容。
     anchor.addEventListener('click', renderList);
   }
-  document.addEventListener('keydown', onShortcut);
   onMarkersChange(onChange);
 }

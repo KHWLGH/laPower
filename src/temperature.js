@@ -34,6 +34,8 @@ export function syncTempSourceUI() {
 // ─── Connect / Disconnect ────────────────────────────────────────────────────
 
 let connectingTemp = false;
+let connectionLost = false;
+let liveReadingAvailable = false;
 
 /** 连接到温度服务（本机或 TCP）。 */
 export async function connectTempService() {
@@ -85,8 +87,10 @@ export async function disconnectTempService() {
  * 更新温度连接状态及 UI。
  * @param {boolean} connected
  */
-export function setTempConnected(connected) {
+export function setTempConnected(connected, lost = false) {
   state.isTempConnected = connected;
+  connectionLost = lost;
+  liveReadingAvailable = false;
 
   /** @param {string} id @param {boolean} disabled */
   const setDisabled = (id, disabled) => {
@@ -100,14 +104,12 @@ export function setTempConnected(connected) {
   setDisabled('temp-source-external', connected);
   syncTempUI(connected);
 
-  if (connected) {
-    state.hasTempData = true;
-  }
-
   if (!connected) {
     state.currentTemp = null;
     const rtTemp = document.getElementById('rt-temp');
     if (rtTemp) rtTemp.textContent = '--';
+    const meter = document.getElementById('lv-temp');
+    if (meter?.style) meter.style.transform = 'scaleX(0)';
   }
 
   updateTempUIVisibility();
@@ -122,28 +124,41 @@ export function setTempConnected(connected) {
  */
 export function resetTempForDevice() {
   if (currentTempSource() !== 'device' || !state.isTempConnected) return;
-  setTempConnected(false);
+  setTempConnected(false, true);
 }
 
 // ─── UI visibility ───────────────────────────────────────────────────────────
 
-/** 根据当前是否有温度数据来显示/隐藏温度相关的 UI 元素。 */
+/** @param {boolean} available */
+export function setTempReadingAvailable(available) {
+  liveReadingAvailable = state.isTempConnected && available;
+  refreshTempStatus();
+}
+
+function refreshTempStatus() {
+  const status = document.getElementById('temp-state');
+  const text = t(
+    state.isTempConnected
+      ? liveReadingAvailable
+        ? 'connected'
+        : 'tempAwaitingData'
+      : connectionLost
+        ? 'tempConnectionLost'
+        : 'tempNotEnabled',
+  );
+  if (status && status.textContent !== text) status.textContent = text;
+}
+
+/** 温度控件固定存在，状态只反映连接和当前读数。 */
 export function updateTempUIVisibility() {
-  const showTemp = state.isTempConnected || state.hasTempData;
-
   const tempCard = document.getElementById('temp-card');
-  if (tempCard) tempCard.style.display = showTemp ? 'grid' : 'none';
-
-  const exportWithTemp = document.getElementById('export-with-temp');
-  if (exportWithTemp) exportWithTemp.classList.toggle('hidden', !showTemp);
-  const overflowExportWithTemp = document.getElementById('overflow-export-with-temp');
-  if (overflowExportWithTemp) overflowExportWithTemp.classList.toggle('hidden', !showTemp);
+  if (tempCard) tempCard.style.display = 'grid';
+  refreshTempStatus();
 
   const showTempContainer = document.getElementById('show-temp-container');
-  if (showTempContainer) showTempContainer.style.display = showTemp ? 'flex' : 'none';
+  if (showTempContainer) showTempContainer.style.display = 'flex';
 
   if (state.mainChart) {
-    const tempVisible = showTemp && state.settings.showTemp;
-    setSeriesVisible(3, tempVisible);
+    setSeriesVisible(3, state.settings.showTemp);
   }
 }

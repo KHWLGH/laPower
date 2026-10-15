@@ -44,6 +44,9 @@
 .fi-download {
   --fi: url("fluent-icons/arrow-download.svg");
 }
+.fi-chevron-down {
+  --fi: url("fluent-icons/chevron-down.svg");
+}
 .fi-clear {
   --fi: url("fluent-icons/delete.svg");
 }

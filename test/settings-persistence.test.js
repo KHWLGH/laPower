@@ -266,3 +266,32 @@ test('loaded settings keep the protocol view and clamp PDM choices field by fiel
     if (!hadElement) delete globalThis.HTMLElement;
   }
 });
+
+test('shortcut unbinding and CSV options survive the existing settings store without connecting temperature', async () => {
+  installStoreStub();
+  const before = state.settings;
+  const wasTempConnected = state.isTempConnected;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    const shortcuts = { ...defaultSettings.shortcuts, record: 'R', mark: '', clear: 'Mod+Shift+X' };
+    const options = { withTemp: true, withDeviceInfo: false, withMarkers: false };
+    state.settings = { ...defaultSettings, shortcuts, csvExportOptions: options, tempSource: 'device' };
+    state.isTempConnected = false;
+    await saveSettings();
+    state.settings = { ...defaultSettings };
+    await loadSettings();
+    assert.deepEqual(state.settings.shortcuts, shortcuts);
+    assert.deepEqual(state.settings.csvExportOptions, options);
+    assert.equal(state.settings.tempSource, 'device');
+    assert.equal(state.isTempConnected, false, 'loading preferences never starts a temperature session');
+    assert.equal(
+      calls.some(({ command }) => command === 'connect_temp_service'),
+      false,
+    );
+  } finally {
+    state.settings = before;
+    state.isTempConnected = wasTempConnected;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});

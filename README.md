@@ -90,7 +90,7 @@ These images show version **0.2.4** on Windows and use simulated devices and dat
 
 ### Recording and interoperability
 
-- **CSV export**, with or without temperature, and **import**. Import matches column names and accepts legacy files without signal-voltage columns.
+- **CSV export** has independent temperature, device information and marker options, plus joint CSV/PD JSON export. **Import** matches column names and accepts legacy files.
 - **Markers**: click `Mark` or press `M` to label the current moment (for example a 50% battery level), or press `M` over the chart to mark the point under the pointer. Markers show as lines on the chart and travel with CSV files in the `Marker` column.
 - **PD capture export/import** uses a versioned JSON envelope and still reads older formats.
 - Select 0.1–100 samples/s; POWER-Z also supports 1000 samples/s. The backend accepts 1–60000 ms intervals, subject to device limits.
@@ -135,7 +135,7 @@ Linux packages do not configure device permissions automatically. Set up the [ud
 1. **Connect** — Plug in the meter, refresh the title-bar device selector, select the target and click `Connect`.
 2. **Record** — Click `Start recording` in `Monitor`. Cards and charts update immediately; energy/capacity integration runs alongside recording and excludes pauses.
 3. **Capture PD** — Open `PD analysis`. `Follow recording` is on by default and synchronizes start/pause with monitoring. **The charger connection handshake is particularly informative.**
-4. **Export** — In `Monitor`, choose `Export CSV` → `With temperature` or `Without temperature`. Save PD messages separately as JSON with `Export` in `PD analysis`.
+4. **Export** — In `Monitor`, the main `Export CSV` button uses your saved options. Its arrow opens temperature, device information and marker checkboxes, plus joint CSV/PD export. The PD page still exports JSON separately. Use `P` for recording and `M` for marking; customize these in Settings.
 
 See the [User guide](docs/en/USAGE.md) for the complete interface, settings and file formats.
 

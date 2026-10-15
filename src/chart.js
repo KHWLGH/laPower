@@ -2590,7 +2590,7 @@ export function initChart() {
     s.showVoltage,
     s.showCurrent,
     s.showPower,
-    s.showTemp && (state.isTempConnected || state.hasTempData),
+    s.showTemp,
     s.showDpDn,
     s.showDpDn,
     s.showCc,

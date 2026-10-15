@@ -1334,6 +1334,7 @@ pub fn run() {
             km003c_session::km003c_cancel_trigger,
             file_io::csv_export_pick,
             file_io::pd_export_pick,
+            file_io::paired_export_pick,
             file_io::csv_import_pick,
             file_io::csv_read_chunk,
             file_io::csv_read_close,

@@ -7,7 +7,7 @@
  */
 
 import { t } from '../i18n.js';
-import { createMenu } from './menu.js';
+import { setShortcutTip } from '../shortcut-hints.js';
 
 /**
  * 设置悬浮提示。本应用统一用原生 title（compact.css 的图标化档依赖它），
@@ -15,8 +15,7 @@ import { createMenu } from './menu.js';
  * @param {HTMLElement} el @param {string} text
  */
 function setTip(el, text) {
-  el.title = text;
-  el.setAttribute('aria-label', text);
+  setShortcutTip(el, text);
 }
 
 /** Update existing icon/text nodes so language changes retain the button's DOM.
@@ -159,75 +158,4 @@ export function syncFollowLinkageUI(followEnabled) {
   if (chartClear) {
     setTip(chartClear, followEnabled ? t('clearChartLinked') : t('clearChart'));
   }
-}
-
-const MONITOR_OVERFLOW_IDS = ['btn-export', 'btn-import', 'btn-clear-chart'];
-/** @type {{ setLabel: (id: string, label: string) => void }|null} */
-let overflowMenu = null;
-
-/**
- * 监控命令栏溢出：宽度不够时把导出 / 导入 / 一键重置收进 ⋯ 菜单。
- * @param {{ exportCSV: (withTemp: boolean) => void }} actions
- */
-export function initCommandOverflow(actions) {
-  const bar = document.querySelector('#view-monitor .commandbar');
-  const overflowBtn = document.getElementById('btn-cmd-overflow');
-  if (!(bar instanceof HTMLElement) || !overflowBtn) return;
-
-  overflowMenu = createMenu(overflowBtn, [
-    {
-      id: 'overflow-export-no-temp',
-      label: `${t('exportCsv')}（${t('withoutTemperature')}）`,
-      icon: 'export',
-      onSelect: () => actions.exportCSV(false),
-    },
-    {
-      id: 'overflow-export-with-temp',
-      label: `${t('exportCsv')}（${t('withTemperature')}）`,
-      icon: 'export',
-      onSelect: () => actions.exportCSV(true),
-    },
-    {
-      id: 'overflow-import',
-      label: t('importCsv'),
-      icon: 'download',
-      onSelect: () => document.getElementById('btn-import')?.click(),
-    },
-    {
-      id: 'overflow-clear',
-      label: t('reset'),
-      icon: 'clear',
-      onSelect: () => {
-        const btn = document.getElementById('btn-clear-chart');
-        if (btn instanceof HTMLButtonElement && !btn.disabled) btn.click();
-      },
-    },
-  ]);
-
-  /** @param {boolean} overflowed */
-  const applyHidden = (overflowed) => {
-    for (const id of MONITOR_OVERFLOW_IDS) {
-      const el = document.getElementById(id);
-      if (el) el.hidden = overflowed;
-    }
-    overflowBtn.hidden = !overflowed;
-  };
-
-  const measure = () => {
-    applyHidden(false);
-    applyHidden(bar.scrollWidth > bar.clientWidth + 1);
-  };
-
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measure).observe(bar);
-  window.addEventListener('resize', measure);
-  measure();
-}
-
-/** Refresh labels in the overflow menu after a language change. */
-export function refreshCommandOverflowLanguage() {
-  if (!overflowMenu) return;
-  overflowMenu.setLabel('overflow-export-no-temp', `${t('exportCsv')} (${t('withoutTemperature')})`);
-  overflowMenu.setLabel('overflow-export-with-temp', `${t('exportCsv')} (${t('withTemperature')})`);
-  overflowMenu.setLabel('overflow-import', t('importCsv'));
-  overflowMenu.setLabel('overflow-clear', t('reset'));
 }

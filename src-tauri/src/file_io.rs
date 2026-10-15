@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use crate::AppState;
 
@@ -34,6 +34,8 @@ struct Writer {
     /// Leading bytes that may later be rewritten in place (the spool's fixed-width header).
     patchable: u64,
     dirty: bool,
+    /// Paired exports are committed only after a successful close.
+    staged_target: Option<(PathBuf, bool)>,
 }
 
 struct Reader {
@@ -79,13 +81,20 @@ impl FileRegistry {
         Ok(id)
     }
 
-    /// Flush and close every writer. Used on exit so nothing buffered is lost.
+    /// Flush recovery files; discard unfinished paired exports on shutdown.
     pub(crate) fn close_all(&mut self) {
         for (_, writer) in self.writers.drain() {
-            if let Ok(mut writer) = writer.lock() {
+            let staged = if let Ok(mut writer) = writer.lock() {
                 if writer.file.flush().is_ok() {
                     let _ = writer.file.get_ref().sync_all();
                 }
+                writer.staged_target.as_ref().map(|_| writer.path.clone())
+            } else {
+                None
+            };
+            drop(writer);
+            if let Some(path) = staged {
+                let _ = std::fs::remove_file(path);
             }
         }
         self.readers.clear();
@@ -196,6 +205,7 @@ pub(crate) async fn csv_export_pick(
             path: path.clone(),
             patchable: 0,
             dirty: false,
+            staged_target: None,
         })?;
         Ok(Some(opened(handle, &path, 0)))
     }
@@ -232,8 +242,152 @@ pub(crate) async fn pd_export_pick(
             path: path.clone(),
             patchable: 0,
             dirty: false,
+            staged_target: None,
         })?;
         Ok(Some(opened(handle, &path, 0)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
+}
+
+#[derive(Serialize)]
+pub(crate) struct PairedOpened {
+    csv: Opened,
+    pd: Opened,
+}
+
+fn paired_paths(mut csv: PathBuf) -> (PathBuf, PathBuf) {
+    if !csv
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv"))
+    {
+        csv.set_extension("csv");
+    }
+    let pd = csv.with_extension("pd.json");
+    (csv, pd)
+}
+
+fn stage_export(target: &Path, overwrite: bool) -> Result<Writer, String> {
+    let parent = target.parent().ok_or("Invalid export directory")?;
+    let name = target
+        .file_name()
+        .ok_or("Invalid export filename")?
+        .to_string_lossy();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    for attempt in 0..100 {
+        let path = parent.join(format!(
+            ".{name}.lapower-{}-{stamp}-{attempt}.tmp",
+            std::process::id()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => {
+                return Ok(Writer {
+                    file: BufWriter::with_capacity(WRITE_BUFFER, file),
+                    path,
+                    patchable: 0,
+                    dirty: false,
+                    staged_target: Some((target.to_path_buf(), overwrite)),
+                })
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Cannot create export: {e}")),
+        }
+    }
+    Err("Cannot allocate temporary export".into())
+}
+
+fn commit_export(staged: &Path, target: &Path, overwrite: bool) -> Result<(), String> {
+    let result = if !overwrite && target.exists() {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Export target appeared after selection",
+        ))
+    } else {
+        std::fs::rename(staged, target)
+    };
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(staged);
+        return Err(format!("Cannot commit export: {error}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn paired_export_pick(
+    default_name: String,
+    title: String,
+    filter_name: String,
+    overwrite_title: String,
+    overwrite_message: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<PairedOpened>, crate::app_error::AppError> {
+    let result: Result<Option<PairedOpened>, String> = async {
+        let selection = tauri::async_runtime::spawn_blocking(move || {
+            let mut builder = app
+                .dialog()
+                .file()
+                .set_title(title)
+                .add_filter(filter_name, &["csv"])
+                .set_file_name(default_name);
+            if let Some(window) = app.get_webview_window("main") {
+                builder = builder.set_parent(&window);
+            }
+            let Some(path) = builder.blocking_save_file() else {
+                return Ok(None);
+            };
+            let (csv, pd) = paired_paths(path.into_path().map_err(|e| e.to_string())?);
+            let csv_exists = csv.exists();
+            let pd_exists = pd.exists();
+            if csv_exists || pd_exists {
+                let names = [(&csv, csv_exists), (&pd, pd_exists)]
+                    .into_iter()
+                    .filter(|(_, exists)| *exists)
+                    .map(|(path, _)| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let mut dialog = app
+                    .dialog()
+                    .message(format!("{overwrite_message}\n\n{names}"))
+                    .title(overwrite_title)
+                    .buttons(MessageDialogButtons::OkCancel);
+                if let Some(window) = app.get_webview_window("main") {
+                    dialog = dialog.parent(&window);
+                }
+                if !dialog.blocking_show() {
+                    return Ok(None);
+                }
+            }
+            Ok::<_, String>(Some((csv, pd, csv_exists, pd_exists)))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let Some((csv, pd, csv_exists, pd_exists)) = selection else {
+            return Ok(None);
+        };
+        let mut files = registry(&state)?;
+        if files.writers.len() + 2 > MAX_OPEN {
+            return Err("Too many export files".into());
+        }
+        let csv_writer = stage_export(&csv, csv_exists)?;
+        let pd_writer = match stage_export(&pd, pd_exists) {
+            Ok(writer) => writer,
+            Err(error) => {
+                let path = csv_writer.path.clone();
+                drop(csv_writer);
+                let _ = std::fs::remove_file(path);
+                return Err(error);
+            }
+        };
+        let csv_handle = files.add_writer(csv_writer)?;
+        let pd_handle = files.add_writer(pd_writer)?;
+        Ok(Some(PairedOpened {
+            csv: opened(csv_handle, &csv, 0),
+            pd: opened(pd_handle, &pd, 0),
+        }))
     }
     .await;
     result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
@@ -453,6 +607,7 @@ pub(crate) fn csv_write_close(
         };
         let mut writer = writer_arc.lock().map_err(|_| "写入句柄已损坏")?;
         let path = writer.path.clone();
+        let staged_target = writer.staged_target.clone();
         let persisted = persist_buffer(&mut writer.file, |file| {
             if options.sync || options.remove_on_success {
                 file.sync_all()
@@ -467,7 +622,13 @@ pub(crate) fn csv_write_close(
             registry(&state)?.writers.remove(&handle);
         }
         drop(writer_arc);
-        finish_close(&path, persisted, options.abort, options.remove_on_success)
+        finish_close(&path, persisted, options.abort, options.remove_on_success)?;
+        if !options.abort {
+            if let Some((target, overwrite)) = staged_target {
+                commit_export(&path, &target, overwrite)?;
+            }
+        }
+        Ok(())
     })();
     result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
@@ -560,6 +721,7 @@ pub(crate) fn spool_open(
             path: path.clone(),
             patchable: header_len,
             dirty: false,
+            staged_target: None,
         })?;
         Ok(opened(handle, &path, 0))
     })();
@@ -786,6 +948,48 @@ mod tests {
     }
 
     #[test]
+    fn paired_exports_stage_before_replacing_either_file() {
+        let dir = temp_dir("paired");
+        let (csv, pd) = paired_paths(dir.join("test.CSV"));
+        assert_eq!(pd, dir.join("test.pd.json"));
+        std::fs::write(&csv, b"original csv").unwrap();
+        std::fs::write(&pd, b"original pd").unwrap();
+        let mut writer = stage_export(&csv, true).unwrap();
+        writer.file.write_all(b"new csv").unwrap();
+        assert_eq!(std::fs::read(&csv).unwrap(), b"original csv");
+        persist_buffer(&mut writer.file, File::sync_all).unwrap();
+        let staged = writer.path.clone();
+        drop(writer);
+        commit_export(&staged, &csv, true).unwrap();
+        assert_eq!(std::fs::read(&csv).unwrap(), b"new csv");
+        assert_eq!(std::fs::read(&pd).unwrap(), b"original pd");
+        assert!(!staged.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn aborted_or_failed_staged_exports_keep_original_targets() {
+        let dir = temp_dir("paired-failure");
+        let target = dir.join("test.pd.json");
+        std::fs::write(&target, b"original").unwrap();
+        let writer = stage_export(&target, true).unwrap();
+        let staged = writer.path.clone();
+        drop(writer);
+        finish_close(&staged, Err("write failed".into()), true, false).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"original");
+        assert!(!staged.exists());
+        let writer = stage_export(&target, false).unwrap();
+        let staged = writer.path.clone();
+        drop(writer);
+        assert!(commit_export(&staged, &target, false).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"original");
+        assert!(!staged.exists());
+        let writer = stage_export(&dir.join("missing").join("test.csv"), false);
+        assert!(writer.is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_header_patch_rewrites_in_place_and_appends_resume_at_the_end() {
         let dir = temp_dir("patch");
         let (file, path) = create_unique(&dir, "rec").unwrap();
@@ -794,6 +998,7 @@ mod tests {
             path: path.clone(),
             patchable: 8,
             dirty: false,
+            staged_target: None,
         };
         writer.file.write_all(b"SUM,0000\nrow1\n").unwrap();
         // Same sequence as csv_write_patch.

@@ -400,6 +400,8 @@ async function invoke(command, args = {}, ipc = {}) {
     case 'csv_export_pick':
     case 'pd_export_pick':
       return newFile(args.defaultName);
+    case 'paired_export_pick':
+      return { csv: newFile(args.defaultName), pd: newFile(args.defaultName.replace(/\.csv$/i, '.pd.json')) };
     case 'csv_import_pick': {
       const file = await chooseFile('.csv');
       return file ? newFile(file.name, false, new Uint8Array(await file.arrayBuffer())) : null;

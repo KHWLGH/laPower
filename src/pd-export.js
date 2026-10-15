@@ -1,4 +1,6 @@
 // @ts-check
+
+import { runExportSession } from './export-session.js';
 import { closeWriter, pickPdExportFile, writeBytes } from './file-io.js';
 import { PD_EXPORT_BATCH } from './pd-export-core.js';
 
@@ -13,15 +15,28 @@ let cancelActive = null;
  */
 export function exportPdFile(getEntries) {
   if (active) return active;
-  active = runExport(getEntries).finally(() => {
-    active = null;
-    cancelActive = null;
-  });
+  active = runExportSession(() => runExport(getEntries))
+    .then((value) => value ?? null)
+    .finally(() => {
+      active = null;
+      cancelActive = null;
+    });
   return active;
 }
 
 /** @param {() => (import('./pd-model.js').PdEntry|import('./pd-model.js').PdDivider)[]} getEntries */
 async function runExport(getEntries) {
+  const file = await pickPdExportFile(`lapower_pd_${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  if (!file) return null;
+  return writePdSnapshot(
+    file,
+    getEntries().map((entry) => ({ ...entry })),
+  );
+}
+
+/** @param {import('./file-io.js').OpenedFile} file
+ * @param {(import('./pd-model.js').PdEntry|import('./pd-model.js').PdDivider)[]} entries */
+export async function writePdSnapshot(file, entries) {
   let cancelled = false;
   /** @type {Worker|null} */
   let worker = null;
@@ -32,11 +47,8 @@ async function runExport(getEntries) {
     worker?.terminate();
     rejectPending?.(new Error('pdExportCancelled'));
   };
-  const file = await pickPdExportFile(`lapower_pd_${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  if (!file) return null;
   try {
     if (cancelled) throw new Error('pdExportCancelled');
-    const entries = getEntries().slice();
     const exportedAt = new Date().toISOString();
     worker = new Worker(new URL('./pd-export-worker.js', import.meta.url), { type: 'module' });
     /** @type {((message:any) => void)|null} */

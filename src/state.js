@@ -7,6 +7,9 @@
  * - 类型定义（@typedef）集中在此文件，其余模块通过 `import('./state.js')` 引用。
  */
 
+import { defaultCsvExportOptions } from './export-options.js';
+import { defaultShortcuts } from './shortcuts-core.js';
+
 // ─── Type Definitions ────────────────────────────────────────────────────────
 
 /**
@@ -29,6 +32,8 @@
 /**
  * 应用设置。
  * @typedef {Object} Settings
+ * @property {Record<string,string>} shortcuts
+ * @property {import('./export-options.js').CsvExportOptions} csvExportOptions
  * @property {number} rangeStart
  * @property {number} rangeEnd
  * @property {number} sampleRate      - 采样间隔 (ms)
@@ -332,6 +337,8 @@ export function setChartColumns(cols) {
 
 /** @type {Settings} */
 export const defaultSettings = {
+  shortcuts: defaultShortcuts,
+  csvExportOptions: defaultCsvExportOptions,
   rangeStart: 0,
   rangeEnd: 1000,
   sampleRate: 250,

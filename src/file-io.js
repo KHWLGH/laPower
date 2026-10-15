@@ -31,6 +31,18 @@ export function pickPdExportFile(defaultName) {
   return invoke('pd_export_pick', { defaultName, title: t('pdExportTitle'), filterName: t('pdFile') });
 }
 
+/** @param {string} defaultName
+ * @returns {Promise<{csv:OpenedFile,pd:OpenedFile}|null>} */
+export function pickPairedExportFiles(defaultName) {
+  return invoke('paired_export_pick', {
+    defaultName,
+    title: t('exportBoth'),
+    filterName: t('csvFile'),
+    overwriteTitle: t('exportOverwriteTitle'),
+    overwriteMessage: t('exportOverwriteMessage'),
+  });
+}
+
 /** @returns {Promise<OpenedFile|null>} 选择要导入的 CSV；取消时为 null。 */
 export function pickImportFile() {
   return invoke('csv_import_pick', { title: t('importCsv'), filterName: t('csvFile') });

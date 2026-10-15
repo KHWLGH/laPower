@@ -39,7 +39,7 @@ import {
   spoolRowsAppended,
 } from './recording-spool.js';
 import { emptyChartColumns, setChartColumns, state } from './state.js';
-import { updateTempUIVisibility } from './temperature.js';
+import { setTempReadingAvailable, updateTempUIVisibility } from './temperature.js';
 import { syncMarkerControls, syncRecordUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 import { formatRelativeHMS, formatSampleRateLabel } from './utils.js';
@@ -349,9 +349,12 @@ export function addDataPoint(data, segment) {
   updateStats('voltage', data.voltage);
   updateStats('current', currentValue);
   updateStats('power', powerAbs);
+  const firstTemp = !state.hasTempData && Number.isFinite(tempValue);
   if (state.isTempConnected && Number.isFinite(tempValue)) {
+    state.hasTempData = true;
     updateStats('temp', tempValue);
   }
+  if (cols.x.length === 1 || firstTemp) document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
 
   // 能量累计用相对秒（与范围统计同口径）；暂停空档不在 x 里。
   // 与 integrateEnergy 一致：跳过非有限值，避免单个缺失样本把整条累计污染成 NaN。
@@ -671,6 +674,7 @@ export function updateRealtimeDisplay(data) {
     }
   }
 
+  setTempReadingAvailable(Number.isFinite(data.temp));
   if (state.isTempConnected && Number.isFinite(data.temp)) {
     const tEl = document.getElementById('rt-temp');
     setTextIfChanged(tEl, data.temp.toFixed(1));
@@ -1354,10 +1358,8 @@ export function clearChart() {
   updateChartEmptyState();
   updateDurationDisplay();
 
-  if (!state.isTempConnected) {
-    state.hasTempData = false;
-    updateTempUIVisibility();
-  }
+  state.hasTempData = false;
+  updateTempUIVisibility();
 
   setChartXWindow(null, null);
   syncChartSeries();

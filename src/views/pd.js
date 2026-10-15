@@ -187,6 +187,7 @@ function ingestOne(payload, live = true) {
   }
   rememberSeq(entry);
   log.push(entry);
+  if (log.length === 1) document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
   if (originTime === null && !isDivider(entry)) originTime = entry.t;
   if (log.length === PD_SOFT_CAP && !softCapWarned) {
     softCapWarned = true;
@@ -255,6 +256,11 @@ async function fillPdGap() {
 /** 当前 PD 日志中的条目数（用于诊断与测试）。 */
 export function getPdBufferLength() {
   return log.length;
+}
+
+/** Independent of view initialization, filters and subsequent log replacement. */
+export function capturePdSnapshot() {
+  return log.map((entry) => ({ ...entry }));
 }
 
 /**
@@ -802,7 +808,9 @@ function clearSelection() {
  */
 export function clearPdEntries() {
   cancelProjection();
+  const hadData = log.length > 0;
   log.length = 0;
+  if (hadData) document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
   originTime = null;
   filtered = [];
   rowOffsets = [0];
@@ -943,6 +951,7 @@ async function importPdCapture() {
     }
 
     rebuildFilterAndWindow();
+    document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
     const count = log.length;
     toast.success(() => t('importPdCount', { count }));
   } catch (e) {

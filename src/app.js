@@ -16,7 +16,7 @@ import {
   updateCharts,
 } from './chart.js';
 import { panPermilleWindow } from './chart-window.js';
-import { exportCSV, importCSV } from './csv.js';
+import { importCSV } from './csv.js';
 import {
   adoptWindowFromPermille,
   clearAndResetStats,
@@ -46,8 +46,10 @@ import {
 } from './device.js';
 import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
+import { initExportUI } from './export-ui.js';
 import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
-import { initMarkerUI } from './marker-ui.js';
+import { addMarkerFromShortcut, initMarkerUI } from './marker-ui.js';
+import { canExportBoth, exportBoth } from './paired-export.js';
 import { setSoftwareVersion } from './provenance.js';
 import { clampLimitMb } from './recording-limit.js';
 import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
@@ -61,26 +63,21 @@ import {
   resetSettings,
   saveSettings,
 } from './settings.js';
-import { onSelectionChange, registerView, restoreView, showView } from './shell.js';
+import { getActiveView, onSelectionChange, registerView, restoreView, showView } from './shell.js';
+import { initShortcuts } from './shortcuts.js';
 import { state } from './state.js';
 import {
   connectTempService,
   disconnectTempService,
   setTempConnected,
+  setTempReadingAvailable,
   syncTempSourceUI,
   updateTempUIVisibility,
 } from './temperature.js';
 import { applyThemePreference } from './theme.js';
-import {
-  initCommandOverflow,
-  refreshCommandOverflowLanguage,
-  syncAutoPauseUI,
-  syncFollowLinkageUI,
-  syncTempUI,
-} from './ui/controlbar.js';
+import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
-import { createMenu } from './ui/menu.js';
 import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
@@ -107,9 +104,6 @@ import { applyWindowStyle } from './window-style.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
-
-/** @type {{ setLabel: (id: string, label: string) => void }|null} */
-let exportMenu = null;
 
 // ─── Close confirmation ──────────────────────────────────────────────────────
 
@@ -189,8 +183,7 @@ function setupChartToggles() {
 
     state.settings[key] = checkbox.checked;
 
-    const effectiveShow =
-      field === 'temp' ? checkbox.checked && (state.isTempConnected || state.hasTempData) : checkbox.checked;
+    const effectiveShow = checkbox.checked;
     setSeriesVisible(index, effectiveShow);
 
     checkbox.addEventListener('change', () => {
@@ -513,20 +506,10 @@ function setupControls() {
     });
   }
 
-  // Export dropdown menu — 菜单项 id 保持不变：temperature.js 依赖
-  // getElementById('export-with-temp') 切换其可见性
-  const exportBtn = document.getElementById('btn-export');
-  if (exportBtn) {
-    exportMenu = createMenu(exportBtn, [
-      { id: 'export-no-temp', label: t('withoutTemperature'), onSelect: () => exportCSV(false) },
-      { id: 'export-with-temp', label: t('withTemperature'), onSelect: () => exportCSV(true) },
-    ]);
-  }
+  initExportUI();
 
   const importBtn = document.getElementById('btn-import');
   if (importBtn) importBtn.addEventListener('click', importCSV);
-
-  initCommandOverflow({ exportCSV });
 
   initMonitorSplitter();
 
@@ -573,9 +556,6 @@ function setupControls() {
     fillUiScaleHint();
     const recordStatus = document.getElementById('record-status');
     if (recordStatus) recordStatus.textContent = t(state.isRecording ? 'recording' : 'stopRecording');
-    exportMenu?.setLabel('export-no-temp', t('withoutTemperature'));
-    exportMenu?.setLabel('export-with-temp', t('withTemperature'));
-    refreshCommandOverflowLanguage();
     refreshChartLanguage();
     updateSampleRateStatus();
     updateDurationDisplay();
@@ -585,6 +565,7 @@ function setupControls() {
     syncDeviceCapabilities();
     syncTempUI(state.isTempConnected);
     syncTempSourceUI();
+    updateTempUIVisibility();
     refreshRecoveryLanguage();
     syncAutoPauseUI(state.autoPauseSettings.enabled);
     syncFollowLinkageUI(state.settings.pdFollowRecording);
@@ -996,12 +977,14 @@ async function setupEventListener() {
       state.currentTemp = event.payload;
       if (state.isTempConnected) {
         const el = document.getElementById('rt-temp');
-        if (el) el.textContent = state.currentTemp.toFixed(1);
+        const valid = Number.isFinite(state.currentTemp);
+        if (el) el.textContent = valid ? state.currentTemp.toFixed(1) : '--';
+        setTempReadingAvailable(valid);
       }
     }),
 
     listen('temp-disconnected', () => {
-      setTempConnected(false);
+      setTempConnected(false, true);
       console.info('Temperature service disconnected');
     }),
 
@@ -1062,6 +1045,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupControls();
   setupShell();
   initMarkerUI();
+  const clickEnabled = (id) => {
+    const button = document.getElementById(id);
+    if (button instanceof HTMLButtonElement && !button.disabled) button.click();
+  };
+  initShortcuts({
+    record: () => clickEnabled('btn-record-toggle'),
+    mark: addMarkerFromShortcut,
+    import: () => clickEnabled(getActiveView() === 'pd' ? 'btn-pd-import' : 'btn-import'),
+    export: () => clickEnabled(getActiveView() === 'pd' ? 'btn-pd-export' : 'btn-export'),
+    exportBoth: () => {
+      if (canExportBoth()) void exportBoth();
+    },
+    clear: () => clickEnabled(getActiveView() === 'pd' ? 'btn-pd-clear' : 'btn-clear-chart'),
+  });
   // 导出的 CSV 在表头写明软件版本；拿不到时只写 laPower。
   const appApi = /** @type {any} */ (window.__TAURI__)?.app;
   void appApi?.getVersion?.().then(setSoftwareVersion, () => {});

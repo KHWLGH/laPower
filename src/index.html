@@ -50,21 +50,6 @@
             <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
               <i class="fi fi-record" aria-hidden="true"></i><span data-i18n="startRecording">Start recording</span>
             </button>
-            <div class="cmd-action-group" id="marker-actions">
-              <button type="button" class="cmd-btn" id="btn-add-marker" disabled title="Add a marker (M)" data-i18n-title="addMarkerHint">
-                <i class="fi fi-flag" aria-hidden="true"></i><span data-i18n="addMarker">Mark</span>
-              </button>
-              <button
-                type="button"
-                class="cmd-btn cmd-btn-icon cmd-settings-btn"
-                id="btn-flyout-markers"
-                disabled
-                aria-label="Markers" data-i18n-aria-label="markerList"
-                title="Markers" data-i18n-title="markerList"
-              >
-                <i class="fi fi-list" aria-hidden="true"></i>
-              </button>
-            </div>
             <span class="cmd-sep"></span>
             <span class="cmd-label"><span data-i18n="samplingRate">Sample rate</span></span>
             <select id="sample-rate" class="ribbon-select" title="Choose how many samples to record per second" data-i18n-title="sampleRateHint">
@@ -78,15 +63,12 @@
               <option value="10000" data-i18n="rate01">0.1 samples/s (1 every 10s)</option>
             </select>
             <span class="cmd-sep"></span>
-            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button>
-            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
+            <div class="cmd-action-group split-button" id="export-actions"><button type="button" class="cmd-btn" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button><button type="button" class="cmd-btn cmd-btn-icon cmd-settings-btn" id="btn-export-options" aria-label="Export options" data-i18n-aria-label="exportOptions" title="Export options" data-i18n-title="exportOptions"><i class="fi fi-chevron-down" aria-hidden="true"></i></button></div>
+            <button type="button" class="cmd-btn" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
               <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
             </button>
-            <button type="button" class="cmd-btn cmd-overflow-src" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
+            <button type="button" class="cmd-btn" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
               <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="reset">Reset</span>
-            </button>
-            <button type="button" class="cmd-btn cmd-btn-icon" id="btn-cmd-overflow" hidden title="More" data-i18n-title="more" aria-label="More" data-i18n-aria-label="more">
-              <i class="fi fi-more" aria-hidden="true"></i>
             </button>
             <span class="cmd-spacer"></span>
             <button type="button" class="cmd-btn" id="btn-flyout-display" title="Display channel settings" data-i18n-title="displayChannels"><i class="fi fi-eye" aria-hidden="true"></i><span data-i18n="display">Display</span></button>
@@ -174,7 +156,7 @@
               </div>
               <div class="realtime-card temperature" id="temp-card">
                 <div class="realtime-body">
-                  <div class="realtime-label"><span class="realtime-dot"></span><span><span data-i18n="temperature">Temperature</span></span></div>
+                  <div class="realtime-label"><span class="realtime-dot"></span><span><span data-i18n="temperature">Temperature</span></span><span class="temp-state" id="temp-state" data-i18n="tempNotEnabled">Not enabled</span></div>
                   <div class="realtime-content">
                     <div class="level-bar" aria-hidden="true"><span class="level-bar-fill" id="lv-temp"></span></div>
                     <div class="realtime-value" id="rt-temp">--</div>
@@ -250,7 +232,23 @@
             <div class="chart-area">
               <!-- 主图表 -->
               <div class="chart-container">
-                <div class="chart-legend" id="main-chart-legend"></div>
+                <div class="chart-header"><div class="chart-legend" id="main-chart-legend"></div>
+            <div class="cmd-action-group split-button" id="marker-actions">
+              <button type="button" class="cmd-btn" id="btn-add-marker" disabled title="Add a marker" data-i18n-title="addMarker">
+                <i class="fi fi-flag" aria-hidden="true"></i><span data-i18n="addMarker">Mark</span>
+              </button>
+              <button
+                type="button"
+                class="cmd-btn cmd-btn-icon cmd-settings-btn"
+                id="btn-flyout-markers"
+                disabled
+                aria-label="Markers" data-i18n-aria-label="markerList"
+                title="Markers" data-i18n-title="markerList"
+              >
+                <i class="fi fi-chevron-down" aria-hidden="true"></i>
+              </button>
+            </div>
+                </div>
                 <div id="main-chart"></div>
                 <div class="empty-state chart-empty" id="chart-empty">
                   <i class="fi fi-pulse" aria-hidden="true"></i>
@@ -734,6 +732,12 @@
                     </div>
                   </div>
                 </section>
+                <section class="settings-section">
+                  <h2 class="settings-section-title"><span data-i18n="shortcuts">Keyboard shortcuts</span></h2>
+                  <div class="settings-group" id="shortcut-bindings"></div>
+                  <div class="shortcut-footer"><span class="card-hint" data-i18n="shortcutHelp">Click a binding and press a key combination. Escape cancels.</span><button type="button" class="btn" id="btn-reset-shortcuts" data-i18n="shortcutRestoreAll">Restore defaults</button></div>
+                  <div class="card-hint shortcut-error" id="shortcut-error" role="alert"></div>
+                </section>
               </div>
               <aside class="settings-aside">
                 <section class="settings-section">
@@ -925,6 +929,17 @@
         </div>
       </div>
       <div class="card-hint" id="temp-source-hint"><span data-i18n="temperatureExternalHint">External TCP temperature service, one value per line. Use the command bar to connect or disconnect.</span></div>
+    </div>
+
+    <div id="flyout-export" hidden aria-label="Export options" data-i18n-aria-label="exportOptions">
+      <div class="flyout-row-label" data-i18n="exportCsvContents">CSV contents</div>
+      <div class="flyout-row export-option"><label class="ribbon-checkbox"><input type="checkbox" id="export-withTemp" /><span class="checkmark"></span><span data-i18n="exportIncludeTemperature"></span></label><span class="card-hint" id="export-withTemp-hint"></span></div>
+      <div class="flyout-row export-option"><label class="ribbon-checkbox"><input type="checkbox" id="export-withDeviceInfo" /><span class="checkmark"></span><span data-i18n="exportIncludeDevice"></span></label><span class="card-hint" id="export-withDeviceInfo-hint"></span></div>
+      <div class="flyout-row export-option"><label class="ribbon-checkbox"><input type="checkbox" id="export-withMarkers" /><span class="checkmark"></span><span data-i18n="exportIncludeMarkers"></span></label><span class="card-hint" id="export-withMarkers-hint"></span></div>
+      <div class="flyout-divider"></div>
+      <button type="button" class="cmd-btn" id="btn-export-both" data-i18n-title="exportBoth" disabled><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportBoth">Export CSV and PD data…</span></button>
+      <div class="card-hint" id="export-both-missing" data-i18n="exportBothMissing">CSV and PD data are both required.</div>
+      <div class="card-hint" id="export-both-unlinked" data-i18n="exportBothUnlinked" hidden>PD does not follow recording; time ranges may differ.</div>
     </div>
 
     <div id="flyout-markers" class="marker-flyout" hidden>

@@ -11,9 +11,11 @@ import {
   updateSliderFill,
   updateStatsDisplay,
 } from './data.js';
+import { normalizeCsvExportOptions } from './export-options.js';
 import { applyLanguage, errorText, normalizeLanguagePreference, t } from './i18n.js';
 import { clampPdm } from './km003c-model.js';
 import { clampLimitMb } from './recording-limit.js';
+import { normalizeShortcuts } from './shortcuts-core.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { applyThemePreference, echoThemeUI } from './theme.js';
@@ -45,6 +47,8 @@ function normalizeSettings(saved) {
     saved && typeof saved === 'object' ? saved : {}
   );
   const merged = { ...defaultSettings, ...source };
+  merged.shortcuts = normalizeShortcuts(source.shortcuts);
+  merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
 
   /** @param {number} value @param {number} min @param {number} max @param {number} fallback */
   const clamp = (value, min, max, fallback) =>
@@ -143,6 +147,7 @@ export function echoApUnit() {
 
 /** 把当前 settings / autoPause 写回控件（loadSettings / resetSettings 共用）。 */
 function echoSettingsUI() {
+  document.dispatchEvent?.(new Event('lapower:preferences-changed'));
   const rateSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('sample-rate'));
   if (rateSelect) setSampleRateOption(rateSelect, state.settings.sampleRate);
   const language = /** @type {HTMLSelectElement|null} */ (document.getElementById('language-select'));

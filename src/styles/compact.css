@@ -36,30 +36,6 @@
   }
 }
 
-/* ── W2：视口 < 980，命令栏图标化 ────────────────────────────── */
-
-@media (max-width: 979.98px) {
-  /* 图标 + title 提示保留全部功能可见。
-     状态承载按钮（自动暂停 / 温度服务 / PD 暂停）保留文字——文字即状态。
-     导出 / 导入 / 一键重置由命令栏溢出菜单收纳，此处不再图标化。 */
-  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-overflow-src) {
-    font-size: 0;
-    gap: 0;
-  }
-
-  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-btn-icon):not(.cmd-overflow-src) {
-    padding: 0 8px;
-  }
-
-  .commandbar .cmd-btn:not(.cmd-state-btn):not(.cmd-overflow-src) .fi {
-    font-size: 14px;
-  }
-
-  .titlebar-connect .ribbon-select {
-    min-width: 140px;
-  }
-}
-
 /* ── W3：视口 ≤ 900（最小窗宽 + 极端 DPI / 浏览器安全网） ───── */
 
 @media (max-width: 900.98px) {

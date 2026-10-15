@@ -22,6 +22,7 @@ import {
   updateRemainingDisplay,
   updateStatsDisplay,
 } from './data.js';
+import { runExportSession } from './export-session.js';
 import {
   closeReader,
   closeWriter,
@@ -53,11 +54,46 @@ function csvErrorText(error) {
 
 // ─── Export ──────────────────────────────────────────────────────────────────
 
-/**
- * 导出数据为 CSV 文件。
- * @param {boolean} [withTemp=false] - 是否包含温度列
+/** Capture immutable column views, copied markers and dataset provenance before yielding.
+ * @param {import('./export-options.js').CsvExportOptions} [options]
  */
-export async function exportCSV(withTemp = false) {
+export function captureCsvSnapshot(options = state.settings.csvExportOptions) {
+  const cols = state.chartSeries;
+  const source = provenanceOf(cols);
+  return snapshotCsvColumns(cols, {
+    withTemp: options.withTemp,
+    sampleRate: state.dataIntervalMs ?? state.settings.sampleRate,
+    startTime: state.lastRecordingStartTime ?? cols.timestamps.at(0) ?? Date.now(),
+    markers: options.withMarkers ? markersOf(cols) : null,
+    source: { software: softwareLabel(), points: source.points, devices: options.withDeviceInfo ? source.devices : [] },
+  });
+}
+
+/** @param {import('./file-io.js').OpenedFile} file @param {import('./csv-codec.js').CsvSnapshot} snapshot */
+export async function writeCsvSnapshot(file, snapshot) {
+  try {
+    await writeText(file.handle, formatCsvHeader(snapshot));
+    for (let from = 0; from < snapshot.length; from += EXPORT_CHUNK_ROWS) {
+      await writeText(
+        file.handle,
+        await formatCsvRangeAsync(snapshot, from, Math.min(snapshot.length, from + EXPORT_CHUNK_ROWS)),
+      );
+      await yieldToMainThread();
+    }
+    await closeWriter(file.handle, { sync: true });
+  } catch (error) {
+    await closeWriter(file.handle, { abort: true }).catch(() => {});
+    throw error;
+  }
+}
+
+/** @param {import('./export-options.js').CsvExportOptions} [options] */
+export function exportCSV(options = state.settings.csvExportOptions) {
+  return runExportSession(() => exportCsvOnce({ ...options }));
+}
+
+/** @param {import('./export-options.js').CsvExportOptions} options */
+async function exportCsvOnce(options) {
   if (state.chartSeries.x.length === 0) {
     toast.warning(() => t('noDataToExport'));
     return;
@@ -74,31 +110,15 @@ export async function exportCSV(withTemp = false) {
   }
   // 取消不遍历、格式化或复制任何列；对话框期间可能继续录制或换入新数据。
   if (!file) return;
-  const cols = state.chartSeries;
-  if (cols.x.length === 0) {
+  if (state.chartSeries.x.length === 0) {
     await closeWriter(file.handle, { abort: true }).catch(() => {});
     toast.warning(() => t('noDataToExport'));
     return;
   }
-  // 没有已落地的标记就不写 Marker 列，导出与旧版本逐字节一致。
-  const markers = markersOf(cols);
-  const snapshot = snapshotCsvColumns(cols, {
-    withTemp,
-    sampleRate: state.dataIntervalMs ?? state.settings.sampleRate,
-    startTime: state.lastRecordingStartTime ?? cols.timestamps.at(0) ?? Date.now(),
-    markers: markers.some((marker) => marker.index < cols.x.length) ? markers : null,
-    source: { software: softwareLabel(), ...provenanceOf(cols) },
-  });
+  const snapshot = captureCsvSnapshot(options);
   if (snapshot.length >= LARGE_EXPORT_ROWS) toast.info(() => t('csvExporting', { count: snapshot.length }));
   try {
-    // 逐块等待写完再格式化下一块：背压留在这里，内存里最多一块文本。
-    await writeText(file.handle, formatCsvHeader(snapshot));
-    for (let from = 0; from < snapshot.length; from += EXPORT_CHUNK_ROWS) {
-      const to = Math.min(snapshot.length, from + EXPORT_CHUNK_ROWS);
-      await writeText(file.handle, await formatCsvRangeAsync(snapshot, from, to));
-      await yieldToMainThread();
-    }
-    await closeWriter(file.handle, { sync: true });
+    await writeCsvSnapshot(file, snapshot);
     toast.success(() => t('csvExported', { name: file.name }));
   } catch (e) {
     console.error(e);
