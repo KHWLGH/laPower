@@ -16,7 +16,7 @@ This guide explains every laPower interface control, setting and file format. Th
 
 ## Language selection
 
-In **Settings → Appearance → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
+In **Settings → Appearance & language → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
 
 Linux uses the first non-empty variable in LC_ALL → LC_MESSAGES → LANG order; Windows/macOS use the native system locale. If native detection is unavailable, the WebView preferred language is used, with English as the final fallback. Hans selects Simplified Chinese and Hant Traditional Chinese before considering regions; otherwise CN/SG and bare zh select Simplified Chinese, TW/HK/MO Traditional Chinese, and ja Japanese. All other locales, including C/POSIX, select English. Case, underscores, encoding and modifier suffixes are normalized. Manual selection overrides detection.
 
@@ -39,9 +39,9 @@ The title bar also acts as the tab strip. Monitor, PD analysis and Settings are 
 | `Monitor` | Live readings, chart, recording and import/export |
 | `PD analysis` | USB-PD message list and field-by-field decoding |
 | `Protocol control` (POWER-Z only) | PDM, PDO, protocol detection and voltage requests |
-| `Settings` (gear icon) | Appearance, charts and recording, device VID/PID/SN and About |
+| `Settings` (gear icon) | Appearance & language, Charts & recording, Keyboard shortcuts, Recovery & reset, and About |
 
-On the right is the **persistent device connection area**: a device selector, refresh button and a state-dependent `Connect` / `Disconnect` button. It remains available in every tab. The same button displays `Connect` while disconnected and `Disconnect` after connection.
+On the right is the **persistent device connection area**: from left to right, a device selector, refresh button, information icon and a state-dependent `Connect` / `Disconnect` button. It remains available in every tab. The same button displays `Connect` while disconnected and `Disconnect` after connection.
 
 Device names use these formats:
 
@@ -53,9 +53,17 @@ WITRN K2 (USB 4-4) [Interface 0 / Usage 0xFF00]   Multiple HID interfaces on one
 
 The interface suffix appears only if multiple HID interfaces remain after filtering a physical device. WITRN devices with an unrecognized PID appear as `Unknown WITRN device (0716:XXXX)`.
 
+### Device information
+
+The button shows only an information icon, with the tooltip `Device information`. It works before connecting and updates when you select or refresh devices.
+
+The information icon between Refresh and Connect in the title bar opens `VID` / `PID` / `SN` and device descriptions. It shows the connected device first, otherwise the selected device, or an empty state if none is selected, without interrupting the data stream.
+
+> WITRN USB serial numbers identify a **manufacturing batch date**, rather than an individual unit. Two meters from the same batch can share a serial number. The title-bar list therefore includes USB ports to distinguish identical models on different ports.
+
 ### Status bar
 
-The bottom bar displays `Recording:` (current state, **click to start or pause**), `Duration:` (accumulated recording duration), `Sample:` (sample rate), `Points:` (total acquired points), and the connection indicator (`Connected` / `Disconnected`) on the right. Clicking `Recording:` while disconnected does not start recording.
+The bottom bar displays `Recording:` (current state, **click to start or pause**), `Duration:` (accumulated recording duration), `Sample:` (sample rate), `Points:` (total acquired points), `Remaining:` (estimated recording time left at the current limit and sample rate), and the connection indicator (`Connected` / `Disconnected`) on the right. Clicking `Recording:` while disconnected does not start recording.
 
 ## Monitor workspace
 
@@ -65,14 +73,16 @@ The bottom bar displays `Recording:` (current state, **click to start or pause**
 | --- | --- |
 | `Start recording` / `Continue recording` / `Pause recording` | Starts or pauses recording. With no data, the label is `Start recording`; with existing or imported data, `Continue recording` appends to the current timeline without clearing it; while recording, it becomes `Pause recording` |
 | `Sample rate` | Selector; see the table below |
-| `Export CSV │ ▾` | The main button opens the save picker using saved options; the arrow opens temperature, device information and marker checkboxes, plus joint CSV/PD export |
+| `Export CSV │ ▾` | The main button opens the save picker using saved options; the arrow opens `Include temperature`, `Include device information`, `Include markers`, and `Export CSV and PD data…` |
 | `Import CSV` | Loads a previously exported CSV; recording can continue from its last time point |
-| `Reset` | Clears the chart and resets statistics and integrated energy |
+| `Reset` | Available after pausing; clears the chart, statistics and integrated energy, plus PD messages in follow mode |
 | `Display` | Opens the channel display flyout |
-| `Auto pause` | Toggle and gear button for its configuration flyout |
-| `Temperature service` | Toggle and gear button for configuration; see [External temperature service](DEVELOPMENT.md#external-temperature-service) |
+| `Auto pause │ ▾` | The main button enables/disables auto pause and highlights when enabled; the arrow opens its configuration flyout |
+| `Temperature service │ ▾` | The main button connects/disconnects the temperature source and highlights when connected; the arrow opens configuration. See [External temperature service](DEVELOPMENT.md#external-temperature-service) |
 
 The toolbar stays on one row, with import and reset directly accessible; use UI scaling for smaller windows. CSV checkbox changes save immediately and keep the panel open. Defaults exclude temperature and include device information and markers. Selected temperature/marker columns remain present, with blank cells when data is unavailable.
+
+Each split button has independent main and arrow actions; opening configuration does not toggle the feature. Click outside a flyout to close it, or press Escape to close it and return focus to its trigger.
 
 Joint export requires data in both Monitor and PD, independently of the current connection. One save selection produces `name.csv` and `name.pd.json` in the same directory, checking both overwrite targets and reporting each result. Both snapshots are fixed after the picker and include all recorded data, regardless of chart selections, PD filters or later appends, clears and edits. When PD does not follow recording, the panel warns that time ranges may differ; no cropping or realignment occurs.
 
@@ -111,7 +121,7 @@ During long recordings such as charging tests, mark the moments that matter: the
 
 The reading panel hides its scrollbar without reserving space for it. In shorter windows, use the mouse wheel or trackpad inside the panel to scroll through all readings.
 
-The left panel is resizable (200–360 px; default 250 px); dragging the divider on its right saves the width. The four main cards (voltage/current/power/temperature) share this structure:
+The left panel is resizable (200–360 px; default 250 px); dragging the divider on its right saves the width. Narrow or short windows cap its actual width at 220 px or 200 px. The four main cards (voltage/current/power/temperature) share this structure:
 
 - A title with the channel's color dot and name.
 - A rounded **horizontal level bar** around the current reading. Background and fill use lighter and stronger shades of the channel color. The range automatically follows the observed session maximum using 1-2-5 steps, and fills left to right. The large, centered reading occupies most of the bar and uses the normal text color.
@@ -121,7 +131,7 @@ Additional card behavior:
 
 - **Current** — With signed current enabled, an arrow before the value indicates direction.
 - **Temperature** — The card, display controls and export options stay visible. Status text and `--` indicate disabled, waiting or disconnected states. Acquisition, curve display and CSV temperature are independent. Disconnection preserves source/display/export preferences and historical data, without reconnecting or switching sources; gaps remain blank. Clear/import preserves connection preferences, importing temperature does not connect, and restarting requires a manual connection. A `Device` session ends with the meter connection; an `External` TCP session is independent.
-- **Energy (Wh) and Capacity (mAh)** — Integrated from samples in software, rather than read from the meter's accumulator. Each has an automatically scaled horizontal mini bar. **Only `Reset` zeroes them.** Continuing after a pause retains totals and excludes the pause from integration. Gaps over `max(2 seconds, 8 × sample interval)` are also excluded, as described above.
+- **Energy (Wh) and Capacity (mAh)** — Integrated from samples in software, rather than read from the meter's accumulator. Totals appear on two rows. `Reset` zeroes them; importing a file recalculates them from the imported data. Continuing after a pause retains totals and excludes the pause from integration. Gaps over `max(2 seconds, 8 × sample interval)` are also excluded, as described above.
 - **Signal lines** — D+ / D- / CC1 / CC2 each have a name, value and horizontal mini bar. Values show two decimal places; actual resolution depends on the device, with WITRN CC1/CC2 at 0.1 V.
 
 An empty chart displays “Connect a device, then start recording”. It disappears once recording writes its first point.
@@ -137,6 +147,8 @@ An empty chart displays “Connect a device, then start recording”. It disappe
 
 For unattended tests, recording pauses after the selected measurement remains below a threshold for a continuous duration.
 
+Use the arrow to configure the condition, threshold and hold duration, then click the main `Auto pause` button to enable it. It is off by default. `None` never triggers, even when the main button is highlighted; changing configuration does not enable it automatically.
+
 | Field | Values |
 | --- | --- |
 | `Condition` | `None` (default, disabled) / `Voltage <` / `Current <` / `Power <` |
@@ -147,8 +159,8 @@ For unattended tests, recording pauses after the selected measurement remains be
 
 The main chart draws up to eight curves on four shared Y axes: **current (A)**, **voltage (V)**, **power (W)** and **temperature (°C)**, with strictly aligned ticks. D+ / D− / CC1 / CC2 use the voltage axis.
 
-- **Tooltip** — Hover shows all channels at that time and relative time (`HH:MM:SS.d`).
-- **Legend** — Click a channel name to hide that curve temporarily.
+- **Tooltip** — Hover shows enabled channels with finite values at that time, plus relative time (`HH:MM:SS.d`).
+- **Legend** — Shows names and colors of visible curves. Change visibility in the `Display` flyout.
 - **Timeline navigator** — Drag the bottom overview's end handles to select a range, or drag the highlighted middle to pan while preserving the span. The middle shows `Duration:` and the range's point count.
 - **Mouse-wheel horizontal zoom** — Scroll over the main chart to zoom around the time at the cursor: up/forward zooms in, down/back zooms out. During recording, a window whose right edge meets the latest point follows new data with a fixed duration; a historical window stays in place. The navigator follows the zoom, and pausing/continuing retains the current window.
 - Dense data uses incremental min/max pixel buckets, while full data stays in column storage. Hover uses binary search to retrieve real original samples. History preserves detail at the actual canvas pixel resolution, including high DPI, with the same projection while dragging and after release. At no more than one sample per canvas pixel, it restores original points plus neighbors on either side of the window.
@@ -161,7 +173,7 @@ At 1000 samples/s, automatic drawing is about 20 fps by default and can fall to 
 
 | Control | Description |
 | --- | --- |
-| `Start recording` / `Pause` | Start/pause recording in follow mode; in independent mode, pause list updates while messages continue buffering |
+| `Start recording` / `Continue recording` / `Pause recording` | Start/pause recording in follow mode; in independent mode, resume/pause list updates while messages continue buffering |
 | `Clear` | Clears the message list |
 | `Export` / `Import` | Saves/loads PD capture JSON |
 | `Filter by message type…` | Text filter matching message type names |
@@ -228,7 +240,9 @@ WITRN devices do not show this tab or receive control commands.
 
 Open settings with the gear button in the title bar. On macOS, you can also press ⌘, or choose “Settings…” from the application menu. Settings is one scrolling page ordered as Appearance & language, Charts & recording, Keyboard shortcuts, Recovery & reset, and About. The directory stays on the left in wide windows and becomes a horizontal bar at the top below 980px. Clicking scrolls smoothly, manual scrolling updates the highlight, and returning preserves your position for this session. Scrollbars keep a fixed width so hovering does not shift content.
 
-### Appearance
+Use Tab to focus a directory link and Enter to jump. With reduced motion enabled, jumps are immediate. Returning to Settings also restores your position without an animation.
+
+### Appearance & language
 
 | Setting | Control | Default |
 | --- | --- | --- |
@@ -247,10 +261,12 @@ On first run and after resetting settings, the theme follows OS appearance. Exis
 | --- | --- | --- |
 | `Chart headroom` | `Automatic` / `Custom` and percentage | Automatic (≈ 25%) |
 | `Record current direction` | Toggle | Off |
+| `Mark immediately` | Toggle | Off |
 | `Recording limit` | Numeric input, 64–8192 MB | 512 MB |
 
 - **Chart headroom** — Leaves blank space above curves, keeping them in the upper-middle area rather than against the top. `Custom` accepts 0–100%.
 - **Record current direction** — New recordings/imports keep the sign (positive forward, negative reverse) and show arrows; disabled recording stores absolute values. **Existing data is not rewritten.** Export follows the values actually recorded.
+- **Mark immediately** — The `Mark` button and `M` add a marker with its default label, which you can rename in the list. When off, a label dialog opens first.
 - **Recording limit** — Estimated from memory and CSV row sizes. Recording pauses at the limit; the status bar shows estimated remaining time.
 
 ### Keyboard shortcuts
@@ -273,22 +289,18 @@ On macOS, use Command instead of Ctrl. Settings → Keyboard shortcuts supports 
 | `Keep temporary recovery files` | Toggle | On |
 | `Reset all settings` | Button | — |
 
-- **Keep temporary recovery files** — Writes to the app cache about once per second. Recover/delete unfinished recordings in Settings. Normal clear/import/exit removes files after successful synchronization; failed writes/synchronization retain them and report an error. Long-term storage still requires CSV export.
+- **Keep temporary recovery files** — Writes to the app cache about once per second. Recover/delete unfinished recordings under `Settings → Recovery & reset`. Normal clear/import/exit removes files after successful synchronization; failed writes/synchronization retain them and report an error. Long-term storage still requires CSV export.
 - **Reset all settings** — Restores language, sample rate, channels, UI scale, auto pause, temperature and other defaults. Success is reported only after saving to disk. If antivirus or a sync drive holds `settings.json`, an error is shown: the interface has reset, but restarting would roll it back. Notifications appear once per failure period rather than on every control's autosave.
-
-### Device
-
-The information icon between Refresh and Connect in the title bar opens `VID` / `PID` / `SN` and device descriptions. It shows the connected device first, otherwise the selected device, or an empty state if none is selected, without interrupting the data stream.
-
-> WITRN USB serial numbers identify a **manufacturing batch date**, rather than an individual unit. Two meters from the same batch can share a serial number. The title-bar list therefore includes USB ports to distinguish identical models on different ports.
 
 ### About
 
-The application card arranges the icon, name, description, version and license horizontally; action buttons wrap in narrow windows. `GitHub` opens the project homepage in your system browser.
+The application card arranges the icon, name, description, version and license horizontally; actions move to the next row below 720 px of available card width. The `GitHub` button uses the GitHub icon and opens the project homepage in your system browser.
 
 Only clicking `Check for updates` connects to GitHub to check stable releases. Results appear within About, with no startup checks, popups or badges. If a newer version is found, `Download on GitHub` opens its release page. Connection errors, timeouts and request limits allow retrying. The app does not download or install updates automatically.
 
-The third-party card shows the versions, purposes and licenses of main components. Expand `All runtime components` for direct and indirect runtime dependencies across supported desktop platforms. This bundled list works offline and excludes development and build tools. Recovery files, the recovery list and resetting settings are grouped under `Recovery & reset`.
+The button is disabled while checking, and results stay for this session. Entering Settings or switching workspaces also does not check automatically. Equal or older published versions report up to date; no stable release has its own status, and failures are never reported as up to date.
+
+The third-party card lists versions, purposes and licenses for uPlot, Fluent System Icons, GitHub Octicons, Tauri and plugins, device communication, update checking and other main components. Wide cards use two columns; narrow cards use one. `All runtime components (count)` is collapsed by default and lists direct and indirect runtime dependencies across all four desktop release targets alphabetically, scrolling with the page. This bundled list works offline and excludes this project's workspace packages and development/build dependencies. Unversioned icon resources show `Bundled with the app`.
 
 ## File formats
 
@@ -301,7 +313,7 @@ SUM,1
 TotalTime,="00:00:00.000"
 SampTime(ms),250
 DateTime,2026-08-23 00:15:42
-Software,laPower 0.2.4
+Software,laPower 0.2.5
 Device,WITRN K2 (0716:5060)
 Points,mean
 
@@ -343,7 +355,7 @@ Imported and live messages use different log generations, so historical captures
 ### Device not recognized
 
 - Refresh and check whether it appears in the selector.
-- WITRN enumeration uses VID `0x0716`, so WITRN devices should appear. If none do, check for a power-only cable or port.
+- WITRN enumeration uses VID `0x0716`; POWER-Z KM003C/KM002C uses the VID `0x5FC9` Vendor Bulk interface. Check that the cable and port support data if no device appears.
 - Unplug and reconnect.
 
 ### Connection fails

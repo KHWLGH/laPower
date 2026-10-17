@@ -25,7 +25,7 @@
 
 ## Language selection
 
-In **Settings → Appearance → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
+In **Settings → Appearance & language → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
 
 Linux uses the first non-empty variable in LC_ALL → LC_MESSAGES → LANG order; Windows/macOS use the native system locale. If native detection is unavailable, the WebView preferred language is used, with English as the final fallback. Hans selects Simplified Chinese and Hant Traditional Chinese before considering regions; otherwise CN/SG and bare zh select Simplified Chinese, TW/HK/MO Traditional Chinese, and ja Japanese. All other locales, including C/POSIX, select English. Case, underscores, encoding and modifier suffixes are normalized. Manual selection overrides detection.
 
@@ -37,7 +37,7 @@ env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
 
 ## 📖 About the project
 
-laPower is a desktop companion for WITRN USB power meters and POWER-Z KM003C/KM002C. It reads measurement frames through USB HID or a vendor Bulk interface and handles live display, long recordings and USB-PD decoding locally, without a network connection.
+laPower is a desktop companion for WITRN USB power meters and POWER-Z KM003C/KM002C. It reads measurement frames through USB HID or a vendor Bulk interface and handles live display, long recordings and USB-PD decoding locally. These features work offline; manual update checks contact GitHub, and external temperature sources use TCP to connect to the configured server.
 
 Built on **Tauri v2**, it uses **Rust** for device communication, USB-PD parsing and background thread lifecycles. The frontend is **plain JavaScript ES Modules**, bundled with its styles by esbuild for release, with uPlot charts. All runtime frontend dependencies are vendored in the repository; no resources are loaded from a CDN at runtime.
 
@@ -85,7 +85,7 @@ These images show version **0.2.5** on Windows and use simulated devices and dat
 - uPlot draws **8 curves and 4 Y axes** (current A, voltage V, power W, temperature °C) with strictly aligned ticks and two levels of dense minor grids.
 - Dense data uses incremental min/max pixel buckets, keeping **million-point histories draggable**. History rendering preserves detail at the canvas pixel resolution; slow frames do not widen buckets, and zoom restores original points. Full data stays in column storage; hover retrieves original samples by binary search. Mouse-wheel horizontal zoom also works during recording.
 - At 1000 samples/s, automatic drawing runs at about 10–20 fps while dragging/zooming refresh independently. Acquisition and saving retain every sample. Recording and history browsing share the historical extrema index, avoiding a full-history scan when zooming out or panning. See [Performance notes](docs/en/PERFORMANCE.md#measurement-and-hardware-limits) for verified scope and limits.
-- Tooltips show all eight channels; the legend toggles each channel; the bottom timeline navigator selects ranges and pans them.
+- Tooltips show enabled channels with finite values (up to eight); the legend lists visible channels, with visibility controlled in `Display`; the bottom timeline navigator selects ranges and pans them.
 - Each curve's fill is controlled directly by opacity (0 = off; 1–100 = on).
 
 ### Recording and interoperability
@@ -175,7 +175,7 @@ The project uses separate licenses for its components:
 
 The protocol crates use LGPL to facilitate reuse in other projects. The root [`LICENSE`](LICENSE) contains the full GPLv3 text; the full LGPL-3.0 text is on the [GNU website](https://www.gnu.org/licenses/lgpl-3.0).
 
-Third-party components: uPlot (MIT) · Fluent System Icons (MIT)
+Main third-party components include uPlot, Fluent System Icons, GitHub Octicons, Tauri and its plugins. See `Settings → About → Third-party components` for versions, purposes and licenses; expand `All runtime components` for the complete offline list.
 
 ## 🔗 Related links
 

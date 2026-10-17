@@ -25,6 +25,7 @@ laPower/
 │   ├── src/lib.rs        State, Tauri commands, HID reader and IPC sender
 │   ├── src/pd_capture.rs USB-PD sessions (seq / generation / lazy decoding)
 │   ├── src/usb_port.rs   Platform-specific USB topology
+│   ├── src/updates.rs    Manual GitHub release checks and restricted browser links
 │   ├── capabilities/    Tauri ACL declarations
 │   └── tauri.conf.json  Window, CSP and packaging configuration
 ├── crates/
@@ -45,7 +46,7 @@ laPower/
 
 ### `src-tauri/src/lib.rs`
 
-Hosts application state and all Tauri commands. The shared-state principle is **lock only where necessary**:
+Hosts application state, device commands and command registration for the other modules. The shared-state principle is **lock only where necessary**:
 
 - `sample_rate: Arc<AtomicU64>`: the reader accesses the interval on every iteration; an atomic avoids locking every frame.
 - Other shared state uses `Arc<Mutex<...>>`.
@@ -78,7 +79,7 @@ Shutdown requires consumption and ACK of the final batch; this check applies to 
 | Command | Purpose |
 | --- | --- |
 | `enumerate_devices` | Combine WITRN HID and POWER-Z Vendor Bulk enumeration |
-| `connect_device_by_path` | Connect by HID path (the frontend's entry point) |
+| `connect_device_by_path` | Connect WITRN HID or POWER-Z Bulk by its enumerated device path (the frontend's entry point) |
 | `disconnect_device` | Disconnect and stop this connection's workers |
 | `get_current_device_info` | Return connected-device information |
 | `set_sample_rate` | Set interval, accepting 1–60000 ms and clamping to device limits |
@@ -92,6 +93,8 @@ Shutdown requires consumption and ACK of the final batch; this check applies to 
 | `set_recording_segment` | Establish acquisition segment boundaries and synchronize PD follow mode |
 | `abandon_device_stream` | Retire a terminal session to restore disconnect/reconnect/exit; does not rewrite `consumed` |
 | `connect_temp_service` / `disconnect_temp_service` | External TCP temperature source |
+| `check_for_updates` | Manually request a stable GitHub release with a 10-second timeout and SemVer comparison; failures return stable error codes |
+| `open_project_page` | Open the fixed repository or a validated release page in the system browser |
 | `shutdown` | Stop all workers and destroy the main window |
 | `km003c_trigger` / `km003c_cancel_trigger` | Execute or cancel POWER-Z protocol-control commands |
 
@@ -160,6 +163,8 @@ Interface 0 Vendor Bulk and virtual serial control for POWER-Z KM003C/KM002C. `p
 
 The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to `out/assets/app-icon.png`, sharing the desktop asset. The showcase also reads that file directly.
 
+The About component list is copied from `src/third-party-components.json`. `scripts/third-party-components.mjs` generates it from locked runtime graphs for the four release targets and vendored resource metadata; ordinary frontend builds only copy it. See [Runtime component list](DEVELOPMENT.md#runtime-component-list).
+
 | Group | Modules | Responsibility |
 | --- | --- | --- |
 | Assembly | `app.js`, `shell.js`, `state.js` | Entry/events, view registry/Tab switching, shared state/types |
@@ -167,8 +172,9 @@ The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to 
 | Data | `data.js`, `measurement.js`, `csv.js`, `provenance.js` | Acquisition/statistics, pure time parsing/integration, CSV I/O and data provenance (meters, point rule, software version) |
 | Markers | `markers.js`, `marker-ui.js` | Dataset-scoped labels, sanitization and row selection (pure functions); marker button, M shortcut and list |
 | PD | `pd-model.js`, `views/pd.js` | Pure summaries/filtering and workspace view |
-| Devices | `device.js`, `temperature.js` | Connections, VID/PID/SN settings and TCP temperature |
-| Settings | `settings.js`, `views/settings-view.js`, `ui-scale.js`, `theme-boot.js` | Debounced persistence, settings UI, 50–200% scaling, system-default/first-frame theme |
+| Devices | `device.js`, `temperature.js` | Connections, title-bar device-information flyout (VID/PID/SN) and TCP temperature |
+| Settings | `settings.js`, `views/settings-view.js`, `ui-scale.js`, `theme-boot.js` | Debounced persistence, single-page navigation and session scroll position, 50–200% scaling, system-default/first-frame theme |
+| About | `views/about-view.js`, `third-party-components.json` | Application information, offline component list, manual update checks and GitHub links; check results stay within the session |
 | UI primitives | `ui/` | `dialog`, `toast`, `menu`, `flyout`, `tabbar`, `controlbar`, `windowcontrols` |
 | Styles | `styles/` | Three-layer `tokens` → `base` → `components` → `app` → `views` → `compact` narrow-window layout |
 | Dependencies | `vendor/` | uPlot and Store-plugin shim; no runtime CDN requests |
@@ -264,4 +270,4 @@ The preview server `tools/showcase/server.mjs` injects a virtual Tauri bridge in
 - **Minimal dialog capabilities**: `capabilities/default.json` grants only `dialog:allow-open` and `dialog:allow-save`. In-app confirmations use `<dialog>`; native message/ask are not authorized.
 - **Minimal filesystem capabilities**: plugin permissions retain `fs:default` and `fs:allow-write-text-file`, not recursive home-directory writes. CSV/PD I/O uses chunked Rust handles; paths come from native dialogs or controlled caches, never arbitrary frontend opens. Chunks are at most 4 MiB.
 - **Window capabilities**: the frameless custom title bar needs selected `core:window:allow-*` permissions for dragging, resizing, maximizing and related operations.
-- **No network dependency**: frontend runtime dependencies are vendored in `src/vendor/`, with no CDN scripts/styles. The only network activity is an explicitly configured external temperature service (outbound TCP).
+- **Local resources and network boundaries**: frontend runtime dependencies are vendored in `src/vendor/`, with no CDN scripts/styles. Rust handles network requests: the configured external temperature service uses outbound TCP, and only clicking About's update button requests GitHub Releases for the fixed `KHWLGH/laPower` repository. Startup and entering Settings do not check for updates. GitHub buttons validate the target in Rust before opening the system browser through opener; arbitrary URLs are not accepted.

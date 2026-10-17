@@ -19,7 +19,7 @@
 
 ## Language selection
 
-In **Settings → Appearance → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
+In **Settings → Appearance & language → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
 
 Linux uses the first non-empty variable in LC_ALL → LC_MESSAGES → LANG order; Windows/macOS use the native system locale. If native detection is unavailable, the WebView preferred language is used, with English as the final fallback. Hans selects Simplified Chinese and Hant Traditional Chinese before considering regions; otherwise CN/SG and bare zh select Simplified Chinese, TW/HK/MO Traditional Chinese, and ja Japanese. All other locales, including C/POSIX, select English. Case, underscores, encoding and modifier suffixes are normalized. Manual selection overrides detection.
 
@@ -71,6 +71,10 @@ npx --no-install tauri build
 ```
 
 Without an explicit target, local release output is in `target/release/bundle/`; CI specifies targets and uses `target/<target>/release/bundle/`. Tauri CLI runs `beforeBuildCommand` automatically to generate the minified frontend, so a separate `npm run build:dist` is unnecessary before packaging. Direct Cargo checks still require `out/` first.
+
+### Runtime component list
+
+About reads the bundled `src/third-party-components.json`. After changing Cargo runtime dependencies or vendored frontend components, run `npm run components:generate`, commit the result, then run `npm run components:check`. The script merges locked runtime graphs for Windows x64, Linux x64, macOS Intel and Apple Silicon, excluding workspace packages and development/build/procedural-macro dependencies. Vendored script and icon versions come from their resource declarations; unknown versions are marked as bundled. Generation and checking require Cargo and may fetch uncached dependencies. Ordinary frontend builds only copy the list and require neither Cargo nor network access for it. CI already checks the list in `validate`.
 
 ## Release process
 
@@ -330,7 +334,7 @@ laPower supports two temperature sources: **the meter's sensor** or **an externa
 
 ### Selecting a source
 
-In the `Monitor` command bar, click the gear beside `Temperature service` to open configuration:
+In the `Monitor` command bar, click the down arrow beside `Temperature service` to open configuration:
 
 | Field | Description | Default |
 | --- | --- | --- |
@@ -344,7 +348,7 @@ Use the command-bar `Temperature service` toggle to connect/disconnect. Connecti
 
 A `Device` source follows the meter lifecycle: disconnecting/unplugging removes it, clears live readings to `--`, resets the `Temperature service` toggle and unlocks `Source`. The backend emits `temp-disconnected` only for TCP, since the device source has no separate session to close; the frontend handles its removal when meter connection state changes. Recorded temperature curves and the temperature-data flag remain intact. The `External` TCP session is independent of the HID stream and survives unplugging the meter.
 
-Once connected, the card shows the current temperature and `Average` / `Min` / `Max`; the chart uses its fourth Y axis. `Export CSV` → `With temperature` writes it to `Temp(°C)`.
+Once connected, the card shows the current temperature and `Average` / `Min` / `Max`; the chart uses its fourth Y axis. `Export CSV` arrow → `Include temperature` writes it to `Temp(°C)`.
 
 ### Protocol
 

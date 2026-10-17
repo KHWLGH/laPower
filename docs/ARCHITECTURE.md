@@ -25,6 +25,7 @@ laPower/
 │   ├── src/lib.rs        应用状态、Tauri 命令、HID 读线程与 IPC 发射线程
 │   ├── src/pd_capture.rs USB-PD 捕获会话（seq / generation / 按需解码）
 │   ├── src/usb_port.rs   分平台 USB 拓扑解析
+│   ├── src/updates.rs    手动 GitHub 更新检查与受限浏览器跳转
 │   ├── capabilities/     Tauri ACL 能力声明
 │   └── tauri.conf.json   窗口、CSP、打包配置
 ├── crates/
@@ -45,7 +46,7 @@ laPower/
 
 ### `src-tauri/src/lib.rs`
 
-承载应用状态与全部 Tauri 命令。共享状态的设计原则是**只在必要处加锁**：
+承载应用状态、设备命令与各模块 Tauri 命令的注册。共享状态的设计原则是**只在必要处加锁**：
 
 - `sample_rate: Arc<AtomicU64>` —— HID 读循环每次迭代都要读采样率，用原子量避免每帧取一次锁。
 - 其余共享状态用 `Arc<Mutex<...>>`。
@@ -78,7 +79,7 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | 命令 | 作用 |
 | --- | --- |
 | `enumerate_devices` | 合并 WITRN HID 与 POWER-Z Vendor Bulk 设备枚举 |
-| `connect_device_by_path` | 按 HID 路径连接（前端实际使用的入口） |
+| `connect_device_by_path` | 按枚举返回的设备路径连接 WITRN HID 或 POWER-Z Bulk（前端实际使用的入口） |
 | `disconnect_device` | 断开并停止该连接的后台线程 |
 | `get_current_device_info` | 返回当前连接的设备信息 |
 | `set_sample_rate` | 设置采样间隔，接受 1 – 60000 ms；按设备下限钳制 |
@@ -92,6 +93,8 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `set_recording_segment` | 在采集源建立录制段边界，同步 PD 跟随状态 |
 | `abandon_device_stream` | 退休一个终态会话，让断开 / 重连 / 退出重新可达；不改写 `consumed` |
 | `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源 |
+| `check_for_updates` | 仅手动请求 GitHub 正式 Release，10 秒超时，SemVer 比较；错误返回稳定错误码 |
+| `open_project_page` | 用系统浏览器打开固定仓库首页或经校验的该仓库发布页 |
 | `shutdown` | 停止全部后台线程后销毁主窗口 |
 | `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制命令 |
 
@@ -165,6 +168,8 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 
 关于页图标在构建时从 `src-tauri/icons/128x128@2x.png` 复制到 `out/assets/app-icon.png`，与桌面图标使用同一份资源；开发展示服务器也直接读取该文件。
 
+关于页组件清单来自随包复制的 `src/third-party-components.json`。`scripts/third-party-components.mjs` 根据四个发布目标的锁定运行依赖图及内置资源元数据生成，普通前端构建只复制文件；维护方法见 [运行组件清单](DEVELOPMENT.md#运行组件清单)。
+
 按职责分组：
 
 | 分组 | 模块 | 职责 |
@@ -174,8 +179,9 @@ MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字
 | 数据 | `data.js`、`measurement.js`、`csv.js`、`provenance.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出、数据来源（仪表、选点规则、软件版本） |
 | 打点 | `markers.js`、`marker-ui.js` | 标记按数据集保存、标签清洗与行号规则（纯函数）；打点按钮、快捷键 M 与标记列表 |
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
-| 设备 | `device.js`、`temperature.js` | 连接管理、设置页 VID/PID/SN、TCP 温度源 |
-| 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、设置页、50–200% 缩放、默认跟随系统并同步首帧主题 |
+| 设备 | `device.js`、`temperature.js` | 连接管理、标题栏设备信息浮层（VID/PID/SN）、TCP 温度源 |
+| 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、单页设置目录与会话滚动位置、50–200% 缩放、默认跟随系统并同步首帧主题 |
+| 关于 | `views/about-view.js`、`third-party-components.json` | 应用信息、离线组件清单、手动更新检查与 GitHub 跳转；检查结果仅保留于会话内 |
 | 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `windowcontrols` |
 | 样式 | `styles/` | `tokens`（三层设计令牌）→ `base` → `components` → `app` → `views` → `compact`（窄窗分级布局） |
 | 依赖 | `vendor/` | uPlot 与 Store 插件 shim，运行时无 CDN 请求 |
@@ -275,4 +281,4 @@ CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），四个包
 - **对话框能力最小化** —— `capabilities/default.json` 只授予 `dialog:allow-open` 与 `dialog:allow-save`。应用内确认框走 `<dialog>`，不授权原生 message/ask。
 - **文件系统能力最小化** —— 插件权限保留 `fs:default` 与 `fs:allow-write-text-file`，不授予主目录递归写权限。CSV / PD 文件通过 Rust 文件句柄接口分块读写；路径由原生对话框或受控缓存目录决定，前端不能提交任意路径打开文件，单块最多 4 MiB。
 - **窗口能力** —— 因为使用无边框自定义标题栏，需要一组 `core:window:allow-*` 权限（拖动、缩放、最大化等）。
-- **无网络依赖** —— 前端运行依赖全部 vendor 到 `src/vendor/`，运行时不从 CDN 加载脚本或样式。唯一的网络行为是用户主动配置的外部温度服务（出站 TCP）。
+- **本地资源与网络边界** —— 前端运行依赖全部 vendor 到 `src/vendor/`，运行时不从 CDN 加载脚本或样式。网络请求由 Rust 后端执行：用户配置的外部温度服务使用出站 TCP；仅点击关于页的“检查更新”才请求固定仓库 `KHWLGH/laPower` 的 GitHub Releases。启动和进入设置不发起更新请求。GitHub 快捷按钮经后端验证目标后调用 opener 打开系统浏览器，不接受任意 URL。
