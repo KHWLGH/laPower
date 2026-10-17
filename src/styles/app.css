@@ -941,7 +941,7 @@ html[data-ui-scale-css] .flyout-panel {
 
 .settings-layout {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: minmax(180px, max-content) minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
   width: 100%;
@@ -976,6 +976,7 @@ html[data-ui-scale-css] .flyout-panel {
   font: var(--type-body);
   color: var(--text-secondary);
   text-decoration: none;
+  white-space: nowrap;
   border-radius: var(--radius-control);
 }
 
@@ -1344,7 +1345,6 @@ html[data-ui-scale-css] .flyout-panel {
 
   .settings-nav-link {
     flex-shrink: 0;
-    white-space: nowrap;
     min-height: 36px;
   }
 

@@ -84,7 +84,7 @@ These images show version **0.2.5** on Windows and use simulated devices and dat
 
 - uPlot draws **8 curves and 4 Y axes** (current A, voltage V, power W, temperature °C) with strictly aligned ticks and two levels of dense minor grids.
 - Dense data uses incremental min/max pixel buckets, keeping **million-point histories draggable**. History rendering preserves detail at the canvas pixel resolution; slow frames do not widen buckets, and zoom restores original points. Full data stays in column storage; hover retrieves original samples by binary search. Mouse-wheel horizontal zoom also works during recording.
-- At 1000 samples/s, automatic drawing runs at about 10–20 fps while dragging/zooming refresh independently. Acquisition and saving retain every sample. Recording and history browsing share the historical extrema index, avoiding a full-history scan when zooming out or panning. See [Performance notes](docs/en/PERFORMANCE.md#2026-10-04-high-rate-window-interaction-acceptance) for verified scope and limits.
+- At 1000 samples/s, automatic drawing runs at about 10–20 fps while dragging/zooming refresh independently. Acquisition and saving retain every sample. Recording and history browsing share the historical extrema index, avoiding a full-history scan when zooming out or panning. See [Performance notes](docs/en/PERFORMANCE.md#measurement-and-hardware-limits) for verified scope and limits.
 - Tooltips show all eight channels; the legend toggles each channel; the bottom timeline navigator selects ranges and pans them.
 - Each curve's fill is controlled directly by opacity (0 = off; 1–100 = on).
 
@@ -146,7 +146,7 @@ See the [User guide](docs/en/USAGE.md) for the complete interface, settings and 
 | [User guide](docs/en/USAGE.md) | Every interface control, all settings, CSV/PD capture formats and FAQs |
 | [Architecture](docs/en/ARCHITECTURE.md) | Thread model, Tauri commands, data flow, HID layouts, tests and security boundaries |
 | [Development and build](docs/en/DEVELOPMENT.md) | Requirements, build commands, CI gates, Linux/macOS builds, external temperature service and contributions |
-| [Performance benchmarks and limits](docs/en/PERFORMANCE.md) | Chart scheduling, data integrity, measurements and hardware acceptance records |
+| [Performance benchmarks and limits](docs/en/PERFORMANCE.md) | Chart scheduling, data integrity, benchmarks and hardware limits |
 | [Changelog](CHANGELOG.md) | Version index, bilingual release notes and earlier Chinese archives |
 
 ## 🙏 Credits and related projects
