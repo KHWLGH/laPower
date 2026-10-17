@@ -109,6 +109,8 @@ During long recordings such as charging tests, mark the moments that matter: the
 
 ### Reading cards
 
+The reading panel hides its scrollbar without reserving space for it. In shorter windows, use the mouse wheel or trackpad inside the panel to scroll through all readings.
+
 The left panel is resizable (200–360 px; default 250 px); dragging the divider on its right saves the width. The four main cards (voltage/current/power/temperature) share this structure:
 
 - A title with the channel's color dot and name.

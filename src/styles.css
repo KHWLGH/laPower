@@ -454,11 +454,17 @@ input[type="number"]::-webkit-outer-spin-button {
   flex-shrink: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* 矮窗口仍可滚动查看读数，但不显示滚动条或预留其宽度。 */
+  scrollbar-width: none;
   background: var(--surface-card);
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-2);
   padding: 0;
+}
+
+.realtime-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .realtime-card {
