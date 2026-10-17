@@ -93,7 +93,7 @@ Release notes expand English and collapse Simplified Chinese, with installation 
 
 ### Refresh documentation screenshots before release
 
-Every release preparation must refresh documentation screenshots in this order: synchronize product versions and archive notes → capture and review screenshots → run quality checks and installer prebuilds → commit all release changes → push the version tag. `release:prepare` handles versions and notes; screenshots use the separate command above. If the version is already archived, rerun `npm run showcase:capture` without preparing the same version again.
+Every release preparation must refresh documentation screenshots in this order: synchronize product versions and archive notes → capture and review screenshots → run quality checks → commit all release changes → push the version tag → let GitHub Actions build, verify and publish the installers. Official releases do not require local installer prebuilds. `release:prepare` handles versions and notes; screenshots use the separate command above. If the version is already archived, rerun `npm run showcase:capture` without preparing the same version again.
 
 Install Chromium once with `npx playwright install chromium`; on Linux, use `npx playwright install --with-deps chromium` if browser system libraries are missing. Capture the full matrix of Simplified Chinese, Traditional Chinese, English and Japanese × light and dark × monitor, PD analysis, protocol control and settings: 32 images under `docs/screenshots/<language>/`, retaining the full title bar. Use the current version, the same 120 seconds of simulated data and the established viewport; a partial capture does not replace the release set.
 
