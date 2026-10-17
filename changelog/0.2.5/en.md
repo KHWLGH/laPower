@@ -10,6 +10,7 @@
 
 ## Changed
 
+- Refresh documentation screenshots for 0.2.5 in all four languages and both themes. Generating and reviewing the full image set and updating README references are now required steps before each release.
 - Auto pause and temperature service use split buttons matching CSV export: the main button toggles the service and the arrow opens configuration. Device information moves to an information-only icon between refresh and connect. It prefers the connected device, otherwise the selected device, and works before connection.
 - Settings remains a single scrolling page with a sticky directory on the left in wide windows and at the top in narrow windows, with active-section tracking. Recovery files and reset controls share a section. About moves to the end and uses a responsive horizontal application card. Returning from another workspace restores the session's scroll position.
 - Scrollbars keep a fixed width and reserve space to prevent hover or content changes from shifting the layout. Settings navigation scrolls smoothly, allows user interruption and respects reduced motion preferences.

@@ -78,14 +78,23 @@ npx --no-install tauri build
 開發期間只維護 `changelog/unreleased/zh-CN.md`。發佈前由開發助手合併重複項目、整理面向使用者的簡體中文說明，再產生 `en.md` 並人工校對。更新記錄僅提供英文與簡體中文，不要求逐句或逐項對應，也不使用翻譯 API。
 
 ```bash
-npm run release:prepare -- 0.2.4 --date 2026-10-13 --dry-run
-npm run release:prepare -- 0.2.4 --date 2026-10-13
+npm run release:prepare -- 0.2.5 --date 2026-10-17 --dry-run
+npm run release:prepare -- 0.2.5 --date 2026-10-17
 npm run release:notes
+npm run showcase:capture
 ```
 
 將範例版本及日期換成實際值。準備命令確認兩份語言檔案存在且正文非空，拒絕覆蓋既有版本目錄，接著歸檔至 `changelog/<version>/`、同步產品版本、更新根目錄入口並產生 `dist/release-notes.md`；全部完成後才清空草稿。`--dry-run` 只顯示計畫與預覽，不寫入檔案。失敗時保留草稿；檢查錯誤及 `git diff`，修正後再試，如已產生部分版本檔案，先人工整理。
 
 Release 預設展開英文，簡體中文放在摺疊區，兩種語言均附安裝說明。預覽與正式發佈共用渲染邏輯。優先使用 `GITHUB_REPOSITORY`，本機未設定時從 `origin` 解析。命令不會提交、建立或推送 Tag，也不會公開 Release；校對預覽並完成品質檢查後，再提交及推送新 Tag。
+
+### 發佈前更新文件截圖
+
+每次發佈準備都必須更新文件截圖，順序為：同步產品版本與歸檔更新記錄 → 產生並檢查截圖 → 執行品質檢查與安裝包預先建置 → 提交全部發佈變更 → 推送版本 Tag。`release:prepare` 只處理版本與文案，截圖使用上方的獨立命令；版本已歸檔時，直接重新執行 `npm run showcase:capture`，無需再次歸檔。
+
+首次使用先執行 `npx playwright install chromium`；Linux 缺少瀏覽器系統依賴時，使用 `npx playwright install --with-deps chromium`。截圖必須完整涵蓋簡體中文、繁體中文、英文、日文 × 淺色、深色 × 監控、PD 分析、協定控制、設定，共 32 張，寫入 `docs/screenshots/<language>/` 並保留完整標題列。使用目前版本、統一的 120 秒模擬資料與既定視口尺寸，不以部分截圖代替整套發佈圖片。
+
+產生後逐張查看語言、主題、文字截斷、圖表、所選報文、協定狀態與設定目錄，確認沒有空白、遮擋或溢出，版本也與目前清單一致。同步四語 README 的截圖版本、說明及圖片引用，並將 32 張圖片與文件一起提交。截圖失敗或檢查未通過時，修正後重新產生，發佈前準備尚未完成。參數與資料說明見[開發展示工具](#開發展示工具)。
 
 ### 文件維護範圍
 

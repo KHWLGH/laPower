@@ -77,14 +77,23 @@ Without an explicit target, local release output is in `target/release/bundle/`;
 During development, edit only `changelog/unreleased/zh-CN.md`. Before a release, ask the development assistant to merge duplicates and prepare user-facing Chinese notes, generate `en.md`, and review both languages manually. Notes are bilingual; sentence-by-sentence or item-by-item parity is not required. No translation API is used.
 
 ```bash
-npm run release:prepare -- 0.2.4 --date 2026-10-13 --dry-run
-npm run release:prepare -- 0.2.4 --date 2026-10-13
+npm run release:prepare -- 0.2.5 --date 2026-10-17 --dry-run
+npm run release:prepare -- 0.2.5 --date 2026-10-17
 npm run release:notes
+npm run showcase:capture
 ```
 
 Replace the example version and date. Preparation requires both language files with non-empty bodies and refuses an existing version directory. It archives notes to `changelog/<version>/`, synchronizes product versions, updates the root index and writes `dist/release-notes.md`; drafts are cleared only on completion. `--dry-run` prints the plan and preview without writing. Failure preserves drafts: inspect the error and `git diff`, fix the problem and retry; manually reconcile any partially generated release files first.
 
 Release notes expand English and collapse Simplified Chinese, with installation instructions in both languages. Preview and publication use the same renderer. `GITHUB_REPOSITORY` takes precedence; locally, the repository is otherwise read from `origin`. Commands do not commit, create/push tags or publish a Release. Review the preview and run quality checks before committing and pushing a new tag.
+
+### Refresh documentation screenshots before release
+
+Every release preparation must refresh documentation screenshots in this order: synchronize product versions and archive notes → capture and review screenshots → run quality checks and installer prebuilds → commit all release changes → push the version tag. `release:prepare` handles versions and notes; screenshots use the separate command above. If the version is already archived, rerun `npm run showcase:capture` without preparing the same version again.
+
+Install Chromium once with `npx playwright install chromium`; on Linux, use `npx playwright install --with-deps chromium` if browser system libraries are missing. Capture the full matrix of Simplified Chinese, Traditional Chinese, English and Japanese × light and dark × monitor, PD analysis, protocol control and settings: 32 images under `docs/screenshots/<language>/`, retaining the full title bar. Use the current version, the same 120 seconds of simulated data and the established viewport; a partial capture does not replace the release set.
+
+Review every image for language, theme, clipped text, charts, selected messages, protocol state and settings navigation, with no blank, obscured or overflowing content. Confirm the version matches the manifests. Update screenshot versions, descriptions and image references in all four READMEs, and commit the 32 images together with the documents. A failed capture or review leaves release preparation incomplete; fix the issue and regenerate. See [Development showcase](#development-showcase) for capture options and fixture details.
 
 ### Documentation maintenance
 

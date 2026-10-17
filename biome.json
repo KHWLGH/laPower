@@ -48,6 +48,8 @@
       "!**/src-tauri/gen",
       "!**/bench/results",
       "!**/out",
+      "!**/dist",
+      "!**/output",
       "!**/bench/baselines",
       "!**/.vscode",
       "!**/node_modules",

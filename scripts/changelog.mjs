@@ -194,9 +194,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     }
     const result = await prepareRelease(version, { date: args[dateIndex + 1], dryRun: args.includes('--dry-run') });
     console.log(
-      `${args.includes('--dry-run') ? '预览，不写文件' : '发布准备完成'}：${version} (${result.date})\n${result.files.join('\n')}`,
+      `${args.includes('--dry-run') ? '预览，不写文件' : '版本与文案准备完成'}：${version} (${result.date})\n${result.files.join('\n')}`,
     );
     console.log(`\n${result.body}`);
+    console.log(
+      `\n${args.includes('--dry-run') ? '正式准备后' : '下一步'}：运行 npm run showcase:capture 更新四语言、浅深主题的 32 张文档截图；逐张检查并同步四语言 README 的截图版本与说明，完成质量检查后再提交发布。`,
+    );
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

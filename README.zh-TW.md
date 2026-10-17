@@ -49,14 +49,14 @@ laPower 是一個連線維簡 (WITRN) USB 電壓電流表與 POWER-Z KM003C/KM00
 
 ## 📸 介面預覽
 
-以下展示圖為 Windows 上的 **0.2.4** 版本，使用獨立開發工具產生的模擬裝置與資料，保留軟體完整標題列，淺色主題優先展示。軟體預設跟隨系統，開發展示工具預設淺色。重新產生方法見 [開發展示工具](docs/zh-TW/DEVELOPMENT.md#開發展示工具)。
+以下展示圖為 Windows 上的 **0.2.5** 版本，使用獨立開發工具產生的模擬裝置與資料，保留軟體完整標題列，淺色主題優先展示。軟體預設跟隨系統，開發展示工具預設淺色。每次發佈前更新整套截圖，重新產生方法見 [開發展示工具](docs/zh-TW/DEVELOPMENT.md#開發展示工具)。
 
 | 淺色主題 | 深色主題 |
 | :---: | :---: |
 | <img src="docs/screenshots/zh-TW/light-record.png" alt="監控工作區（淺色）：即時讀數卡片、8 通道圖表、時間線導航器" /><br><sub>**監控** · 即時讀數卡 / 8 通道 4 軸圖表 / 時間線導航器</sub> | <img src="docs/screenshots/zh-TW/dark-record.png" alt="監控工作區（深色）" /><br><sub>**監控** · 深色主題</sub> |
 | <img src="docs/screenshots/zh-TW/light-pd.png" alt="PD 分析工作區（淺色）：報文清單與逐欄位解碼樹" /><br><sub>**PD 分析** · 報文清單 / PDO 速覽 / 逐欄位解碼</sub> | <img src="docs/screenshots/zh-TW/dark-pd.png" alt="PD 分析工作區（深色）" /><br><sub>**PD 分析** · 深色主題</sub> |
 | <img src="docs/screenshots/zh-TW/light-trigger.png" alt="協定控制工作區（淺色）：PDM、PDO 清單與偵測記錄" /><br><sub>**協定控制** · PDM / PDO / 協定偵測與電壓觸發</sub> | <img src="docs/screenshots/zh-TW/dark-trigger.png" alt="協定控制工作區（深色）" /><br><sub>**協定控制** · 深色主題</sub> |
-| <img src="docs/screenshots/zh-TW/light-settings.png" alt="設定頁（淺色）：外觀、圖表與記錄、裝置、關於" /><br><sub>**設定** · 外觀 / 圖表與記錄 / 裝置 / 關於</sub> | <img src="docs/screenshots/zh-TW/dark-settings.png" alt="設定頁（深色）" /><br><sub>**設定** · 深色主題</sub> |
+| <img src="docs/screenshots/zh-TW/light-settings.png" alt="設定頁（淺色）：固定目錄、外觀與語言、圖表與記錄" /><br><sub>**設定** · 固定目錄 / 外觀與語言 / 圖表與記錄</sub> | <img src="docs/screenshots/zh-TW/dark-settings.png" alt="設定頁（深色）" /><br><sub>**設定** · 深色主題</sub> |
 
 ## ✨ 功能特性
 

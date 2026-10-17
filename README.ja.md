@@ -49,14 +49,14 @@ laPower は WITRN USB 電力計と POWER-Z KM003C/KM002C に接続するデス�
 
 ## 📸 画面プレビュー
 
-Windows 上の **0.2.4** の画面です。独立した開発ツールで生成した仮想デバイスとデータを使用し、アプリ全体のタイトルバーを含めて表示しています。ライトテーマを先に掲載しています。アプリは既定でシステムテーマに従い、開発用プレビューはライトテーマが既定です。再生成方法は[開発用プレビュー](docs/ja/DEVELOPMENT.md#開発用プレビュー)を参照してください。
+Windows 上の **0.2.5** の画面です。独立した開発ツールで生成した仮想デバイスとデータを使用し、アプリ全体のタイトルバーを含めて表示しています。ライトテーマを先に掲載しています。アプリは既定でシステムテーマに従い、開発用プレビューはライトテーマが既定です。リリース前に毎回画像一式を更新します。再生成方法は[開発用プレビュー](docs/ja/DEVELOPMENT.md#開発用プレビュー)を参照してください。
 
 | ライトテーマ | ダークテーマ |
 | :---: | :---: |
 | <img src="docs/screenshots/ja/light-record.png" alt="モニター（ライト）：測定値カード、8 チャンネルのグラフ、タイムラインナビゲーター" /><br><sub>**モニター** · 測定値カード / 8 チャンネル・4 軸 / タイムライン</sub> | <img src="docs/screenshots/ja/dark-record.png" alt="モニター（ダーク）" /><br><sub>**モニター** · ダークテーマ</sub> |
 | <img src="docs/screenshots/ja/light-pd.png" alt="PD 分析（ライト）：メッセージ一覧とフィールドごとのデコードツリー" /><br><sub>**PD 分析** · メッセージ一覧 / PDO 概要 / フィールドデコード</sub> | <img src="docs/screenshots/ja/dark-pd.png" alt="PD 分析（ダーク）" /><br><sub>**PD 分析** · ダークテーマ</sub> |
 | <img src="docs/screenshots/ja/light-trigger.png" alt="プロトコル制御（ライト）：PDM、PDO 一覧、検出ログ" /><br><sub>**プロトコル制御** · PDM / PDO / プロトコル検出・電圧要求</sub> | <img src="docs/screenshots/ja/dark-trigger.png" alt="プロトコル制御（ダーク）" /><br><sub>**プロトコル制御** · ダークテーマ</sub> |
-| <img src="docs/screenshots/ja/light-settings.png" alt="設定（ライト）：外観、グラフと記録、デバイス、このアプリについて" /><br><sub>**設定** · 外観 / グラフと記録 / デバイス / このアプリについて</sub> | <img src="docs/screenshots/ja/dark-settings.png" alt="設定（ダーク）" /><br><sub>**設定** · ダークテーマ</sub> |
+| <img src="docs/screenshots/ja/light-settings.png" alt="設定（ライト）：固定目次、外観と言語、グラフと記録" /><br><sub>**設定** · 固定目次 / 外観と言語 / グラフと記録</sub> | <img src="docs/screenshots/ja/dark-settings.png" alt="設定（ダーク）" /><br><sub>**設定** · ダークテーマ</sub> |
 
 ## ✨ 主な機能
 
