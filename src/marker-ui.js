@@ -39,13 +39,17 @@ function rowUnderCursor() {
 }
 
 /**
- * 弹出输入框并在给定行添加标记。
+ * 在给定行添加标记：立即模式直接使用默认标签，否则先弹出输入框。
  * @param {number|null} row 由调用方在按下的那一刻确定
  */
 async function addMarkerAt(row) {
   if (prompting || row === null) return;
   const cols = state.chartSeries;
   const fallback = t('markerDefaultLabel', { n: nextMarkerNumber(cols) });
+  if (state.settings.immediateMarker) {
+    addMarker(cols, row, fallback);
+    return;
+  }
   prompting = true;
   try {
     const label = await promptText(() => t('markerPrompt'), {

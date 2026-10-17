@@ -222,7 +222,7 @@ test('rebuild of a large window does not exceed cap', () => {
   assert.equal(max, 8);
 });
 
-test('flatten emits two vertices per bucket at the midpoint', () => {
+test('flatten retains true endpoint times and independently ordered candidates', () => {
   const buckets = new SeriesBuckets();
   buckets.cap = 64;
   buckets.ppb = 2;
@@ -230,8 +230,8 @@ test('flatten emits two vertices per bucket at the midpoint', () => {
   buckets.pushSample(2, [3, 0, 0, 0, 0, 0, 0, 0]);
   const flat = buckets.flatten();
   assert.equal(flat.x.length, 2);
-  assert.equal(flat.x[0], 1);
-  assert.equal(flat.x[1], 1);
+  assert.equal(flat.x[0], 0);
+  assert.equal(flat.x[1], 2);
   assert.equal(flat.ys[0][0], 1);
   assert.equal(flat.ys[0][1], 3);
 });
@@ -273,5 +273,45 @@ test('coarsening rejects finer and non-power-of-two densities without changing t
   for (const ppb of [buckets.ppb / 2, buckets.ppb * 3, Infinity, NaN]) {
     assert.throws(() => buckets.coarsenTo(ppb), RangeError);
     assert.deepEqual(buckets.list, before);
+  }
+});
+
+test('ordered candidates preserve slopes, spikes, steps, repeated time, negative values and missing intervals', () => {
+  const xs = Float64Array.from({ length: 512 }, (_, i) => Math.floor(i / 3) / 1000);
+  for (const make of [
+    (i) => 512 - i,
+    (i) => (i === 3 ? 1000 : -i),
+    (i) => (i < 4 ? -2 : 5),
+    (i) => (i % 7 === 3 ? NaN : i % 2 ? -0 : 0),
+  ]) {
+    const ys = Float64Array.from(xs, (_, i) => make(i));
+    const buckets = new SeriesBuckets();
+    buckets.rebuild(xs, [ys], 0, xs.length, 64);
+    const g = buckets.flatten().channels[0];
+    for (let j = 0; j < g.x.length; j++) {
+      const i = g.indices[j];
+      assert.ok(Object.is(g.x[j], xs[i]));
+      assert.ok(Object.is(g.y[j], ys[i]));
+      if (j > 0) {
+        assert.ok(i > g.indices[j - 1]);
+        const valid = Array.from(ys.subarray(g.indices[j - 1], i + 1)).every(Number.isFinite);
+        assert.equal(Boolean(g.connect[j]), valid);
+      }
+    }
+    for (const b of buckets.list) {
+      const candidates = Array.from(g.indices).filter((i) => i >= b.start && i < b.start + b.n);
+      assert.deepEqual(
+        candidates,
+        [...new Set([b.start, b.start + b.n - 1, b.minIndex[0], b.maxIndex[0]].filter((i) => i >= 0))].sort(
+          (a, b) => a - b,
+        ),
+      );
+    }
+    const flat = buckets.flatten();
+    assert.ok(
+      flat.x.every((v, i) => i === 0 || v > flat.x[i - 1]),
+      'carrier timestamps are unique without altering geometry',
+    );
+    assert.ok(g.x.length <= 4 * buckets.list.length);
   }
 });

@@ -281,6 +281,34 @@ for (const [label, start, end] of [
   });
 }
 
+test('medium raw windows bound retraced geometry and keep their choice through release', async () => {
+  const u = stubChart();
+  u.bbox = { width: PLOT_WIDTH, height: 300 };
+  u.series = [{}, ...Array.from({ length: 8 }, () => ({ show: true }))];
+  state.mainChart = u;
+  state.navigatorChart = null;
+  state.isRecording = false;
+  const range = [20, 79.98];
+  for (const alternating of [false, true]) {
+    for (const [key, col] of Object.entries(state.chartSeries)) {
+      col.set(
+        Float64Array.from({ length: 10000 }, (_, i) =>
+          key === 'x' ? i * 0.02 : alternating ? 5 + (i % 2 ? 2 : -2) : 5 + i / 10000,
+        ),
+      );
+    }
+    chart.syncChartSeries();
+    chart.setRangeDragging(true);
+    await commit(range);
+    const dragging = u.data;
+    if (alternating) assert.equal(u.__chartProjection.ppb, 4, 'large repeated swings retain bounded ordered geometry');
+    else assert.equal(dragging[0].length, 3002, 'smooth geometry can use the larger raw budget');
+    chart.setRangeDragging(false);
+    await commit(range);
+    assert.deepEqual(u.data, dragging);
+  }
+});
+
 test('a retained sparse binding refreshes before navigating into newly appended data', async () => {
   seed();
   const u = stubChart();

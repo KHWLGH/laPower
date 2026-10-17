@@ -46,6 +46,9 @@ tauri-plugin-dialog = "2.4.2"
 tauri-plugin-fs = "2.4.4"
 tauri-plugin-store = "2.4.1"
 tauri-plugin-decorum = "1.1.1"
+tauri-plugin-opener = "=2.5.4"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "system-proxy"] }
+semver = "1"
 sys-locale.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -39,7 +39,10 @@ globalThis.uPlot = class {
     queueMicrotask(() => {
       for (const hook of this.hooks.drawClear ?? []) hook(this);
       for (let s = 1; s < (this.series?.length ?? 0); s++)
-        if (this.series[s].show) for (const hook of this.hooks.drawSeries ?? []) hook(this, s);
+        if (this.series[s].show) {
+          this.options.series[s].paths?.(this, s, 0, this.data[0].length - 1);
+          for (const hook of this.hooks.drawSeries ?? []) hook(this, s);
+        }
       time += 0.4;
       for (const hook of this.hooks.draw ?? []) hook(this);
     });
@@ -225,6 +228,11 @@ test('pressured review paints exact extrema into a bounded transparent bitmap an
       this.width = width;
       this.height = height;
       this.context = {
+        clearRect() {},
+        save() {},
+        restore() {},
+        translate() {},
+        fill() {},
         createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
         putImageData: (image) => {
           this.image = image;
@@ -235,7 +243,11 @@ test('pressured review paints exact extrema into a bounded transparent bitmap an
       return this.context;
     }
   };
-  globalThis.Path2D = class {};
+  globalThis.Path2D = class {
+    moveTo() {}
+    lineTo() {}
+    closePath() {}
+  };
   try {
     seed(false);
     const u = state.mainChart;
@@ -254,11 +266,19 @@ test('pressured review paints exact extrema into a bounded transparent bitmap an
       beginPath() {},
       rect() {},
       clip() {},
+      moveTo() {},
+      lineTo() {},
+      closePath() {},
+      fill() {},
+      transform() {},
       drawImage: (canvas) => {
         const image = canvas.image;
-        pixels ??= { ...image, data: new Uint8ClampedArray(image.data.length) };
-        for (let i = 0; i < image.data.length; i += 4)
-          if (image.data[i + 3]) pixels.data.set(image.data.subarray(i, i + 4), i);
+        pixels ??= { width: image.height, height: image.width, data: new Uint8ClampedArray(image.data.length) };
+        for (let x = 0; x < image.height; x++)
+          for (let y = 0; y < image.width; y++) {
+            const i = (x * image.width + y) * 4;
+            if (image.data[i + 3]) pixels.data.set(image.data.subarray(i, i + 4), (y * image.height + x) * 4);
+          }
         paints++;
       },
     };
@@ -283,34 +303,73 @@ test('pressured review paints exact extrema into a bounded transparent bitmap an
     assert.deepEqual(Array.from(pixels.data.slice(first, first + 4)), [101, 173, 229, 255]);
     await submit();
     assert.equal(allocations, 1, 'repaints reuse the canvas-sized buffer');
-    const originalData = u.data;
-    const originalPosition = u.valToPos;
+    assert.equal(performanceDiagnostics.snapshot().charts.main.last.stages.intervalsCachedCount, 1);
+    u.series[1].width++;
+    await submit();
+    assert.equal(
+      performanceDiagnostics.snapshot().charts.main.last.stages.intervalsCount,
+      1,
+      'stroke width invalidates intervals',
+    );
+    u.series[1].width--;
+    u.scales = { x: { min: 0, max: 4.999 }, voltage: { min: 0, max: 2 } };
+    u.valToPos = (value, scale) => (scale === 'x' ? 11 + (value / 4.999) * 600 : 12 + value);
+    await submit();
+    for (let y = 0; y < 4; y++)
+      for (let x = 0; x < 600; x++) assert.equal(opaque(x, y), false, 'moving the dirty interval clears old extrema');
+    assert.equal(allocations, 1, 'a range change keeps one shared raster');
+    const fixture = async (xs, ys, second = null) => {
+      const columns = emptyChartColumns();
+      for (const [key, col] of Object.entries(columns))
+        col.set(
+          Float64Array.from({ length: 5000 }, (_, i) =>
+            key === 'x'
+              ? xs[Math.min(xs.length - 1, Math.floor(i / (5000 / xs.length)))]
+              : key === 'voltage'
+                ? ys[Math.min(ys.length - 1, Math.floor(i / (5000 / ys.length)))]
+                : key === 'current' && second
+                  ? second[Math.min(second.length - 1, Math.floor(i / (5000 / second.length)))]
+                  : NaN,
+          ),
+        );
+      state.chartSeries = columns;
+      chart.syncChartSeries();
+      chart.setChartXWindow(xs[0], xs.at(-1));
+      await submit();
+    };
     u.valToPos = (value, scale) => (scale === 'x' ? 11 + value : 7 + value);
-    u.data = [
-      [10, 10, 30, 30, 50, 50, 70, 70],
-      [5, 5, 5, 5, NaN, NaN, 5, 5],
-      ...Array.from({ length: 7 }, () => Array(8).fill(NaN)),
-    ];
-    pixels = null;
-    u.hooks.drawSeries[1](u, 1);
-    assert.equal(opaque(20, 5), true, 'nonuniform timestamps retain connecting lines');
-    assert.equal(opaque(60, 5), false, 'missing stripes break the line');
+    await fixture([10, 30, 50, 70], [5, 5, NaN, 5]);
+    assert.equal(opaque(20, 5), true, 'nonuniform repeated timestamps retain connecting lines');
+    assert.equal(opaque(60, 5), false, 'missing samples break the line');
+    await fixture([10, 11, 12], [2, 10, 2]);
+    for (let y = 3; y < 10; y++) assert.ok(opaque(10, y) || opaque(11, y), 'adjacent columns connect steep slopes');
     u.series[2].show = true;
-    u.data[2] = [3, 6, 3, 6, NaN, NaN, 3, 6];
-    u.hooks.drawSeries[1](u, 2);
+    await fixture([10, 30, 50, 70], [5, 5, NaN, 5], [5, 5, NaN, 5]);
     assert.deepEqual(
       Array.from(pixels.data.slice((5 * 600 + 30) * 4, (5 * 600 + 30) * 4 + 4)),
       [52, 216, 137, 255],
-      'visible channels retain draw order',
+      'channel draw order',
     );
+    await fixture([10, 30], [5, 5], [10, 10]);
+    assert.equal(opaque(20, 10), true);
     u.series[2].show = false;
-    u.data[0] = [10, 10, 30, 30];
-    u.data[1] = [-1e12, -1e12, 1e12, 1e12];
-    pixels = null;
-    u.hooks.drawSeries[1](u, 1);
-    assert.equal(opaque(20, 10), true, 'off-screen segments clip before raster stepping');
-    u.data = originalData;
-    u.valToPos = originalPosition;
+    await submit();
+    assert.equal(opaque(20, 10), false, 'hiding a channel clears its previous raster rows');
+    u.bbox.width = 300;
+    u.bbox.height = 12;
+    await submit();
+    assert.equal(pixels.width, 300);
+    assert.equal(pixels.height, 12);
+    assert.equal(pixels.data[(10 * 300 + 20) * 4 + 3], 0, 'shrinking the viewport retains no hidden-channel pixels');
+    u.bbox.width = 600;
+    u.bbox.height = 20;
+    await fixture([10, 30], [-1e12, 1e12]);
+    assert.equal(opaque(20, 10), true, 'off-screen slopes clip in bounded columns');
+    seed(false);
+    state.mainChart = u;
+    chart.syncChartSeries();
+    chart.setChartXWindow(0, 4.999);
+    await submit();
     const densePaints = paints;
     chart.setChartXWindow(2, 2.01);
     await submit();
@@ -324,96 +383,131 @@ test('pressured review paints exact extrema into a bounded transparent bitmap an
   }
 });
 
-test('navigator keeps its stroke and density across imported histories and main-window zoom', async () => {
-  const savedPaths = uPlot.paths;
-  const savedCanvas = globalThis.OffscreenCanvas;
-  const savedPath = globalThis.Path2D;
-  uPlot.paths = {
-    spline: () => () => ({ stroke: 'spline', fill: null }),
-    linear: () => () => ({ stroke: 'linear', fill: null }),
-  };
-  globalThis.OffscreenCanvas = class {};
-  globalThis.Path2D = class {};
-  try {
-    for (const count of [128, 5000, 100000]) {
-      seed(false, count);
-      await submit();
-      while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 1));
-      const main = state.mainChart;
-      const nav = {
-        series: [{}, { show: true, alpha: 1, stroke: () => '#ff8033', fill: () => null }],
-      };
-      const expected = count <= 300 ? 'spline' : 'linear';
-      const navStroke = () => main.options.series[1].paths(nav, 1, 0, Math.min(count, 300) - 1).stroke;
-      assert.equal(navStroke(), expected, 'an imported overview must have a visible uPlot stroke');
-      chart.setChartXWindow(0, 0.01);
-      await submit();
-      assert.equal(navStroke(), expected, 'zooming the main graph cannot switch the overview projection');
+test('navigator and Canvas fallback use ordered linear geometry independently of the carrier', async () => {
+  const savedPath = globalThis.Path2D,
+    savedCanvas = globalThis.OffscreenCanvas;
+  globalThis.OffscreenCanvas = undefined;
+  globalThis.Path2D = class {
+    points = [];
+    moveTo(x, y) {
+      this.points.push(['M', x, y]);
     }
+    lineTo(x, y) {
+      this.points.push(['L', x, y]);
+    }
+    closePath() {
+      this.points.push(['Z']);
+    }
+  };
+  try {
+    seed(false, 5000);
+    await submit();
+    const u = state.mainChart;
+    u.series = u.options.series.map((s) => ({ ...s, alpha: 1, fillTo: () => 0 }));
+    u.valToPos = (v) => v;
+    const main = u.options.series[1].paths(u, 1, 0, u.data[0].length - 1);
+    assert.ok(main.stroke instanceof Path2D);
+    assert.equal(main.fill, null);
+    const nav = { series: [{}, { scale: 'y' }], valToPos: (v) => v };
+    const before = u.options.series[1].paths(nav, 1, 0, 10).stroke.points;
+    assert.ok(before.length > 0);
+    chart.setChartXWindow(2, 2.01);
+    await submit();
+    assert.deepEqual(u.options.series[1].paths(nav, 1, 0, 10).stroke.points, before);
   } finally {
-    uPlot.paths = savedPaths;
-    globalThis.OffscreenCanvas = savedCanvas;
     globalThis.Path2D = savedPath;
+    globalThis.OffscreenCanvas = savedCanvas;
     chart.handleMonitorHidden();
   }
 });
 
-test('review splits fill into independent stripes with the same area and missing-value breaks', async () => {
-  const savedLinear = uPlot.paths.linear;
-  const savedPath = globalThis.Path2D;
-  uPlot.paths.linear = () => () => ({ stroke: 'stroke', fill: 'fill', clip: null });
-  globalThis.Path2D = class {};
+test('ordered fill and fallback stroke share true points and missing-value breaks', async () => {
+  const savedPath = globalThis.Path2D,
+    savedCanvas = globalThis.OffscreenCanvas;
+  globalThis.OffscreenCanvas = undefined;
+  globalThis.Path2D = class {
+    points = [];
+    moveTo(x, y) {
+      this.points.push(['M', x, y]);
+    }
+    lineTo(x, y) {
+      this.points.push(['L', x, y]);
+    }
+    closePath() {
+      this.points.push(['Z']);
+    }
+  };
   try {
-    seed(false);
+    seed(false, 5000);
+    const cs = state.chartSeries;
+    cs.x.set(Float64Array.from({ length: 5000 }, (_, i) => i / 1000));
+    cs.voltage.set(Float64Array.from({ length: 5000 }, (_, i) => (i >= 2000 && i < 3000 ? NaN : 1 + i / 1000)));
+    chart.syncChartSeries();
     await submit();
     const u = state.mainChart;
-    u.series = u.options.series.map((series) => ({ ...series, alpha: 1, pxRound: Math.round, fillTo: () => 0 }));
-    u.valToPos = (value) => value;
+    u.series = u.options.series.map((s) => ({ ...s, alpha: 1, fillTo: () => 0 }));
+    u.valToPos = (v) => v;
     u.bbox = { left: 0, top: 0, width: 600, height: 20 };
-    u.data = [[0, 0, 10, 10, 20, 20], [1, 3, 2, 4, 6, 9], ...Array.from({ length: 7 }, () => Array(6).fill(NaN))];
-    const polygons = [];
-    let points = [];
+    const polygons = [],
+      order = [];
+    let points = [],
+      stroke;
     u.ctx = {
       save() {},
       restore() {},
       rect() {},
       clip() {},
       closePath() {},
-      beginPath: () => {
+      beginPath() {
         points = [];
       },
-      moveTo: (x, y) => points.push([x, y]),
-      lineTo: (x, y) => points.push([x, y]),
-      fill: () => polygons.push(points),
+      moveTo(x, y) {
+        points.push([x, y]);
+      },
+      lineTo(x, y) {
+        points.push([x, y]);
+      },
+      fill(path) {
+        for (const [op, x, y] of path.points) {
+          if (op === 'M') points = [[x, y]];
+          if (op === 'L') points.push([x, y]);
+          if (op === 'Z') polygons.push(points);
+        }
+        order.push('fill');
+      },
+      stroke(path) {
+        stroke = path;
+        order.push('stroke');
+      },
     };
-    const paths = u.options.series[1].paths(u, 1, 0, 5);
-    assert.ok(paths.fill instanceof Path2D);
-    assert.equal(paths.stroke, 'stroke');
-    const nav = { series: [{}, { fill: () => null }] };
-    u.options.series[1].paths(nav, 1, 0, 5);
+    const paths = u.options.series[1].paths(u, 1, 0, u.data[0].length - 1);
+    assert.equal(paths.stroke.points.length, 0, 'fallback postpones stroke until after fill');
     u.hooks.drawSeries[0](u, 1);
-    assert.equal(polygons.length, 2, 'building the navigator must preserve cached main-chart fill');
-    const area = (polygon) =>
-      Math.abs(
-        polygon.reduce((sum, [x, y], i) => {
-          const [nextX, nextY] = polygon[(i + 1) % polygon.length];
-          return sum + x * nextY - y * nextX;
-        }, 0),
-      ) / 2;
-    const original = u.data[0].map((x, i) => [x, u.data[1][i]]);
-    original.push([20, 0], [0, 0]);
-    assert.equal(
-      polygons.reduce((sum, polygon) => sum + area(polygon), 0),
-      area(original),
+    u.hooks.drawSeries[1](u, 1);
+    assert.ok(stroke.points.filter((p) => p[0] === 'M').length >= 2, 'stroke breaks at missing interval');
+    assert.equal(order.at(-1), 'stroke');
+    assert.ok(order.slice(0, -1).every((p) => p === 'fill'));
+    assert.equal(order.filter((op) => op === 'fill').length, 1, 'one alpha composition for the channel');
+    assert.equal(polygons.length, 2, 'each finite run is a separate closed subpath');
+    for (const p of polygons)
+      assert.ok(p.every(([x]) => x < 2) || p.every(([x]) => x >= 3), 'fill cannot bridge missing samples');
+    const area = polygons.reduce(
+      (n, p) =>
+        n +
+        Math.abs(
+          p.reduce((a, [x, y], i) => {
+            const [nx, ny] = p[(i + 1) % p.length];
+            return a + x * ny - nx * y;
+          }, 0),
+        ) /
+          2,
+      0,
     );
-    u.data[1][2] = u.data[1][3] = NaN;
-    polygons.length = 0;
-    u.options.series[1].paths(u, 1, 0, 5);
-    u.hooks.drawSeries[0](u, 1);
-    assert.equal(polygons.length, 0, 'fill does not bridge missing stripes');
+    const expected = ((1 + 2.999) * 1.999) / 2 + ((4 + 5.999) * 1.999) / 2;
+    assert.ok(Math.abs(area - expected) < 1e-8, 'linear ramp area is preserved');
   } finally {
-    uPlot.paths.linear = savedLinear;
     globalThis.Path2D = savedPath;
+    globalThis.OffscreenCanvas = savedCanvas;
     chart.handleMonitorHidden();
   }
 });
@@ -540,6 +634,100 @@ test('four points per pixel is eligibility, not an automatic fill cutoff', async
     await paintFeedback();
     assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
     assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, false);
+  }
+});
+
+test('complex bucket review retains measured fill protection below four points per pixel', async () => {
+  seed(false, 5000);
+  const u = state.mainChart;
+  // This alternating window cannot use the bounded raw renderer. Crossing the
+  // density threshold must not restore its expensive fill on every gesture.
+  u.bbox = { width: 600, height: 300 };
+  u.series = u.options.series.map((s, i) => ({ ...s, show: i === 1 }));
+  // This fixture measures feedback policy. The Canvas fixtures below cover
+  // rendering; this uPlot substitute has no coordinate or drawing context.
+  for (const s of u.options.series) delete s.paths;
+  u.hooks.drawSeries = [];
+  await submit();
+  await frame(120);
+  await frame(16);
+  chart.setRangeDragging(true);
+  chart.setChartXWindow(0, 2.398);
+  await submit();
+  try {
+    const last = performanceDiagnostics.snapshot().charts.main.last;
+    assert.equal(last.sourcePointCount, 2399);
+    assert.equal(last.fillSuppressed, true);
+    assert.equal(state.mainChart.options.series[1].fill(), null);
+  } finally {
+    chart.setRangeDragging(false);
+  }
+});
+
+test('ordinary and highly retraced fills choose one composition without changing channel order', async () => {
+  const savedPath = globalThis.Path2D,
+    savedCanvas = globalThis.OffscreenCanvas;
+  const operations = [];
+  globalThis.Path2D = class {
+    moveTo() {}
+    lineTo() {}
+    closePath() {}
+  };
+  globalThis.OffscreenCanvas = class {
+    constructor(width, height) {
+      Object.assign(this, { width, height });
+    }
+    getContext() {
+      return {
+        createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+        clearRect() {},
+        putImageData() {},
+        save() {},
+        restore() {},
+        translate() {},
+        fill() {
+          operations.push('scratch-fill');
+        },
+      };
+    }
+  };
+  try {
+    for (const retraced of [false, true, 'both']) {
+      seed(false, 5000);
+      state.chartSeries.voltage.set(Float64Array.from({ length: 5000 }, (_, i) => (retraced ? i % 2 : i / 4999)));
+      if (retraced === 'both') state.chartSeries.current.set(Float64Array.from({ length: 5000 }, (_, i) => i % 2));
+      chart.syncChartSeries();
+      const u = state.mainChart;
+      u.series = u.options.series.map((s, i) => ({ ...s, show: i === 1 || i === 2, alpha: 1, fillTo: () => 0 }));
+      u.bbox = { left: 0, top: 0, width: 600, height: 300 };
+      u.scales = { x: { min: 0, max: 5 }, voltage: { min: 0, max: 1 }, current: { min: 0, max: 2 } };
+      u.valToPos = (value, scale) => (scale === 'x' ? value * 120 : (1 - value) * 300);
+      u.ctx = {
+        save() {},
+        restore() {},
+        beginPath() {},
+        rect() {},
+        clip() {},
+        transform() {},
+        fill() {
+          operations.push('main-fill');
+        },
+        drawImage() {
+          operations.push('bitmap');
+        },
+      };
+      operations.length = 0;
+      await submit();
+      assert.deepEqual(
+        operations,
+        retraced === 'both' ? ['bitmap'] : [...(retraced ? [] : ['main-fill']), 'bitmap', 'main-fill', 'bitmap'],
+      );
+      assert.equal(state.mainChart.__chartProjection.quality, 'fine');
+    }
+  } finally {
+    globalThis.Path2D = savedPath;
+    globalThis.OffscreenCanvas = savedCanvas;
+    chart.handleMonitorHidden();
   }
 });
 
@@ -830,4 +1018,114 @@ test('delayed idle candidates cannot normalize raster lag into the refresh basel
   assert.equal(performanceDiagnostics.idleFrameIntervalMs(), 8);
   assert.equal(performanceDiagnostics.frameDelaySince(time - 50), 48);
   assert.equal(performanceDiagnostics.frameDelaySince(time + 1), 0);
+});
+
+test('ordered paint caches coordinates and fills while scale, size, source and baseline changes invalidate them', async () => {
+  const savedPath = globalThis.Path2D,
+    savedCanvas = globalThis.OffscreenCanvas;
+  globalThis.OffscreenCanvas = undefined;
+  globalThis.Path2D = class {
+    points = [];
+    moveTo(x, y) {
+      this.points.push(['M', x, y]);
+    }
+    lineTo(x, y) {
+      this.points.push(['L', x, y]);
+    }
+    closePath() {
+      this.points.push(['Z']);
+    }
+  };
+  try {
+    seed(false, 5000);
+    const cs = state.chartSeries;
+    cs.x.set(Float64Array.from({ length: 5000 }, (_, i) => Math.floor(i / 2) / 1000));
+    cs.voltage.set(Float64Array.from({ length: 5000 }, (_, i) => (i >= 2000 && i < 3000 ? NaN : i % 2 ? -2 : 2)));
+    chart.syncChartSeries();
+    chart.setChartXWindow(0, 2.499);
+    await submit();
+    const u = state.mainChart;
+    u.series = u.options.series.map((s) => ({ ...s, alpha: 0.7, fillTo: () => baseline }));
+    u.bbox = { left: 0, top: 0, width: 600, height: 20 };
+    u.scales = { x: { min: 0, max: 2.5 }, voltage: { min: -2, max: 2 } };
+    let projections = 0,
+      baseline = 0;
+    u.valToPos = (v) => {
+      projections++;
+      return v;
+    };
+    const fills = [],
+      order = [];
+    u.ctx = {
+      save() {},
+      restore() {},
+      beginPath() {},
+      rect() {},
+      clip() {},
+      fill(path) {
+        fills.push(path);
+        order.push('fill');
+        assert.equal(this.globalAlpha, 0.7);
+      },
+      stroke() {
+        order.push('stroke');
+      },
+    };
+    const paint = () => {
+      u.options.series[1].paths(u, 1, 0, u.data[0].length - 1);
+      for (const hook of u.hooks.drawSeries) hook(u, 1);
+    };
+    paint();
+    const first = fills.at(-1),
+      reads = projections;
+    assert.equal(first.points.filter((p) => p[0] === 'M').length, 2, 'NaN creates independent areas');
+    assert.ok(
+      first.points.some((p) => p[2] === -2),
+      'negative values retain their sign',
+    );
+    assert.ok(
+      first.points.some(
+        (p, i, a) => p[0] === 'L' && a[i - 1][0] === 'L' && p[1] === a[i - 1][1] && p[2] !== a[i - 1][2],
+      ),
+      'duplicate time retains vertical source order',
+    );
+    paint();
+    assert.equal(fills.at(-1), first, 'same geometry reuses its fill');
+    assert.equal(projections, reads + 1, 'only the baseline is queried on a cache hit');
+    assert.deepEqual(order, ['fill', 'stroke', 'fill', 'stroke']);
+    chart.setSeriesFill(0, 0);
+    const strokes = order.filter((op) => op === 'stroke').length;
+    const unfilled = u.options.series[1].paths(u, 1, 0, u.data[0].length - 1);
+    assert.ok(unfilled.stroke.points.length > 0, 'uPlot receives the unfilled fallback stroke');
+    for (const hook of u.hooks.drawSeries) hook(u, 1);
+    assert.equal(
+      order.filter((op) => op === 'stroke').length,
+      strokes,
+      'fallback does not double-stroke an unfilled channel',
+    );
+    chart.setSeriesFill(0, 0.12);
+    for (const change of [
+      () => u.scales.voltage.max++,
+      () => u.bbox.width++,
+      () => baseline++,
+      () => {
+        u.ctx.canvas = { width: u.width * 2 };
+      },
+    ]) {
+      const prior = fills.at(-1);
+      change();
+      paint();
+      assert.notEqual(fills.at(-1), prior);
+    }
+    const prior = fills.at(-1);
+    cs.voltage.set(Float64Array.from({ length: 5000 }, () => 1));
+    chart.syncChartSeries();
+    await submit();
+    paint();
+    assert.notEqual(fills.at(-1), prior, 'source replacement retires the cache');
+  } finally {
+    globalThis.Path2D = savedPath;
+    globalThis.OffscreenCanvas = savedCanvas;
+    chart.handleMonitorHidden();
+  }
 });

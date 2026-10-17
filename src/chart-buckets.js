@@ -103,10 +103,9 @@ export function firstIndexAfter(xs, length, target) {
 }
 
 /**
- * @typedef {{
- *   x0: number, x1: number, n: number,
- *   min: number[], max: number[],
- * }} DisplayBucket
+ * @typedef {{x0:number,x1:number,start:number,n:number,min:number[],max:number[],minIndex:number[],maxIndex:number[],count:number[]}} DisplayBucket
+ * @typedef {{x:Float64Array,y:Float64Array,indices:Uint32Array,connect:Uint8Array}} OrderedGeometry
+ * @typedef {{first:number[],last:number[],minX:number[],maxX:number[],minRank:number[],maxRank:number[]}} StreamPoints
  */
 
 export class SeriesBuckets {
@@ -116,361 +115,416 @@ export class SeriesBuckets {
   srcStart = 0;
   srcEnd = 0;
   cap = BUCKET_MIN;
-  /** @type {Float64Array|null} */
-  _flatX = null;
-  /** @type {Float64Array[]|null} */
-  _flatYs = null;
-  _flatCap = 0;
-  _flatDirty = 0;
-  /** @type {{ x: Float64Array, ys: Float64Array[] }|null} */
+  /** @type {{x:Float64Array,ys:Float64Array[],channels:OrderedGeometry[]}|null} */
   _flatView = null;
+  _dirty = 0;
+  /** @type {NumericColumn|null} */
+  _xs = null;
+  /** @type {NumericColumn[]} */
+  _series = [];
+  /** @type {import('./chart-extrema.js').ExactExtremaIndex|null} */
+  _index = null;
+  /** Only standalone pushSample needs endpoint values/ranks; ordinary projections read source columns. @type {WeakMap<DisplayBucket,StreamPoints>} */
+  _stream = new WeakMap();
+  /** @type {{x:Float64Array,y:Float64Array,indices:Uint32Array,connect:Uint8Array,ends:Uint32Array}[]} */
+  _buffers = [];
 
-  constructor() {
-    this.reset(0);
-  }
-
-  /** @param {number} [srcStart=0] */
-  reset(srcStart = 0) {
-    /** @type {DisplayBucket[]} */
+  /** @param {number} [start=0] */
+  reset(start = 0) {
     this.list = [];
     this.ppb = 1;
-    this.srcStart = srcStart;
-    this.srcEnd = srcStart;
+    this.srcStart = this.srcEnd = start;
     this.cap = BUCKET_MIN;
-    this._flatDirty = 0;
+    this._flatView = null;
+    this._dirty = 0;
+    this._xs = null;
+    this._series = [];
+    this._index = null;
+    this._stream = new WeakMap();
   }
-
-  /**
-   * @param {number} srcStart
-   * @param {number} srcEndWanted
-   */
-  canAppend(srcStart, srcEndWanted) {
-    return this.srcStart === srcStart && this.srcEnd >= srcStart && this.srcEnd <= srcEndWanted;
+  /** @param {number} start @param {number} end */
+  canAppend(start, end) {
+    return this.srcStart === start && this.srcEnd >= start && this.srcEnd <= end;
   }
-
-  /**
-   * @param {number} x
-   * @param {number[]} values
-   */
+  /** @param {number} x @param {number[]} values */
   pushSample(x, values) {
     this.pushSampleInternal(x, values, true);
   }
-
-  /** Append without pairwise merging; used by a live projection with fixed density. @param {number} x @param {number[]} values */
+  /** @param {number} x @param {number[]} values */
   pushSampleFixed(x, values) {
     this.pushSampleInternal(x, values, false);
   }
-
   /** @param {number} x @param {number[]} values @param {boolean} merge */
   pushSampleInternal(x, values, merge) {
-    const lastIndex = this.list.length - 1;
-    const last = this.list[lastIndex];
-    this._flatDirty = Math.min(this._flatDirty, last && last.n < this.ppb ? lastIndex : this.list.length);
-    if (last && last.n < this.ppb) {
+    const last = this.list.at(-1),
+      partial = last && last.n < this.ppb;
+    this._dirty = Math.min(this._dirty, partial ? this.list.length - 1 : this.list.length);
+    if (partial) {
+      const meta = this._stream.get(last);
+      foldValues(last, values, this.srcEnd);
       last.x1 = x;
-      last.n += 1;
-      foldValues(last, values);
+      last.n++;
+      if (meta) updateStream(meta, last, x, values, this.srcEnd);
     } else {
-      this.list.push(makeBucket(x, values));
-      if (merge) this.mergeDown();
+      const bucket = makeBucket(x, values, this.srcEnd);
+      this.list.push(bucket);
+      if (!this._xs)
+        this._stream.set(bucket, {
+          first: values.slice(),
+          last: values.slice(),
+          minX: Array(8).fill(x),
+          maxX: Array(8).fill(x),
+          minRank: bucket.count.slice(),
+          maxRank: bucket.count.slice(),
+        });
     }
-    this.srcEnd += 1;
+    this.srcEnd++;
+    this._flatView = null;
+    if (merge) this.mergeDown();
   }
-
   mergeDown() {
     while (this.list.length > this.cap) this.coarsenTo(this.ppb * 2);
   }
-
-  /** Coarsen a fixed prefix without rereading samples; the final partial bucket stays appendable. @param {number} ppb */
+  /** @param {number} ppb */
   coarsenTo(ppb) {
-    if (!Number.isFinite(ppb) || ppb < this.ppb || Math.log2(ppb / this.ppb) % 1 !== 0) {
+    if (!Number.isFinite(ppb) || ppb < this.ppb || Math.log2(ppb / this.ppb) % 1 !== 0)
       throw new RangeError('Bucket density must be a power-of-two multiple of the current density');
-    }
     while (this.ppb < ppb) {
-      /** @type {DisplayBucket[]} */
       const merged = [];
       for (let i = 0; i < this.list.length; i += 2) {
-        const a = this.list[i];
-        const b = this.list[i + 1];
-        if (!a) break;
+        const a = this.list[i],
+          b = this.list[i + 1];
         if (!b) {
           merged.push(a);
-          break;
+          continue;
         }
-        merged.push(mergeBucket(a, b));
+        const out = mergeBucket(a, b),
+          am = this._stream.get(a),
+          bm = this._stream.get(b);
+        if (am && bm) {
+          const meta = {
+            first: am.first,
+            last: bm.last,
+            minX: am.minX.slice(),
+            maxX: am.maxX.slice(),
+            minRank: am.minRank.slice(),
+            maxRank: am.maxRank.slice(),
+          };
+          for (let s = 0; s < 8; s++) {
+            if (out.minIndex[s] === b.minIndex[s] && b.minIndex[s] >= 0) {
+              meta.minX[s] = bm.minX[s];
+              meta.minRank[s] = a.count[s] + bm.minRank[s];
+            }
+            if (out.maxIndex[s] === b.maxIndex[s] && b.maxIndex[s] >= 0) {
+              meta.maxX[s] = bm.maxX[s];
+              meta.maxRank[s] = a.count[s] + bm.maxRank[s];
+            }
+          }
+          this._stream.set(out, meta);
+        }
+        merged.push(out);
       }
       this.list = merged;
       this.ppb *= 2;
-      this._flatDirty = 0;
+      this._flatView = null;
+      this._dirty = 0;
     }
   }
 
-  /**
-   * 单遍按条带折叠，不给每个样本分配中间数组。
-   * @param {NumericColumn} xs
-   * @param {NumericColumn[]} series
-   * @param {number} start
-   * @param {number} end
-   * @param {number} cap
-   * @param {import('./chart-extrema.js').ExactExtremaIndex|null} [extrema=null]
-   */
-  rebuild(xs, series, start, end, cap, extrema = null) {
-    const step = this.beginRebuild(xs, series, start, end, cap, extrema);
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} start @param {number} end @param {number} cap @param {import('./chart-extrema.js').ExactExtremaIndex|null} [index=null] */
+  rebuild(xs, series, start, end, cap, index = null) {
+    const step = this.beginRebuild(xs, series, start, end, cap, index);
     while (!step(Infinity)) {
-      /* synchronous public API */
+      /* synchronous API */
     }
   }
-
-  /**
-   * Build privately in bounded chunks, including partial stripes. Callers must
-   * publish this instance only after step() returns true.
-   * @param {NumericColumn} xs @param {NumericColumn[]} series
-   * @param {number} start @param {number} end @param {number} cap
-   * @param {import('./chart-extrema.js').ExactExtremaIndex|null} [extrema=null]
-   * @returns {(maxSamples?: number, maxBuckets?: number) => boolean}
-   */
-  beginRebuild(xs, series, start, end, cap, extrema = null) {
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} start @param {number} end @param {number} cap @param {import('./chart-extrema.js').ExactExtremaIndex|null} [index=null] */
+  beginRebuild(xs, series, start, end, cap, index = null) {
     this.reset(start);
-    if (end <= start) {
-      this.cap = Math.max(BUCKET_MIN, cap | 0);
-      return () => true;
-    }
-    const n = end - start;
-    const ppb = stripePpb(n, cap);
-    const plainColumns = !('_chunks' in xs) && series.every((col) => !col || !('_chunks' in col));
-    this.ppb = ppb;
+    this._xs = xs;
+    this._series = series;
+    this._index = index;
+    this.ppb = stripePpb(end - start, cap);
     let i = start;
     /** @type {DisplayBucket|null} */
     let bucket = null;
-    let stripeEnd = start;
+    const values = new Array(8);
     return (maxSamples = 4096, maxBuckets = Infinity) => {
-      let remaining = Math.max(1, maxSamples);
-      let bucketsRemaining = Math.max(1, maxBuckets);
+      let remaining = Math.max(1, maxSamples),
+        bucketsRemaining = Math.max(1, maxBuckets);
       while (i < end && remaining > 0 && bucketsRemaining > 0) {
         if (!bucket) {
-          stripeEnd = Math.min(i + ppb, end);
-          bucket = makeBucketFromIndex(xs, series, i++);
+          for (let s = 0; s < 8; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
+          bucket = makeBucket(columnValue(xs, i), values, i++);
           remaining--;
         }
-        const through = Math.min(stripeEnd, i + remaining);
-        if (extrema) {
-          extrema.fold(bucket, series, i, through);
-          bucket.n += through - i;
-          bucket.x1 = Number(columnValue(xs, through - 1));
-        } else {
-          if (plainColumns) {
-            for (let j = i; j < through; j++) foldIndex(bucket, xs, series, j);
-          } else {
-            foldRange(bucket, xs, series, i, through);
+        const through = Math.min(end, bucket.start + this.ppb, i + remaining);
+        if (index) index.fold(bucket, series, i, through);
+        else {
+          for (let s = 0; s < 8; s++) {
+            const col = series[s];
+            if (!col) continue;
+            let min = bucket.min[s],
+              max = bucket.max[s],
+              mi = bucket.minIndex[s],
+              ma = bucket.maxIndex[s],
+              count = bucket.count[s];
+            for (let j = i; j < through; ) {
+              const span = columnSpan(col, j, through);
+              for (; j < span.end; j++) {
+                const v = Number(span.values[j - span.base]);
+                if (!Number.isFinite(v)) continue;
+                count++;
+                if (mi < 0 || v < min) {
+                  min = v;
+                  mi = j;
+                }
+                if (ma < 0 || v > max) {
+                  max = v;
+                  ma = j;
+                }
+              }
+            }
+            bucket.min[s] = min;
+            bucket.max[s] = max;
+            bucket.minIndex[s] = mi;
+            bucket.maxIndex[s] = ma;
+            bucket.count[s] = count;
           }
         }
+        bucket.n += through - i;
+        bucket.x1 = columnValue(xs, through - 1);
         remaining -= through - i;
         i = through;
-        if (i === stripeEnd) {
+        if (i === end || i === bucket.start + this.ppb) {
           this.list.push(bucket);
           bucket = null;
           bucketsRemaining--;
         }
       }
       this.srcEnd = i;
-      // 条带数本来就贴着密度上限，此时 cap 保持等于它就意味着「录制中再落一个样本」
-      // 会 mergeDown 把整表分辨率腰斩 —— 画面会在没人操作时自己变稀。留一倍余量，
-      // 分辨率的合法变化由调用方比较 stripePpb 后整体重建决定，不靠这里降级。
+      this._flatView = null;
       if (i === end) this.cap = Math.max(BUCKET_MIN, this.list.length * 2);
       return i === end;
     };
   }
 
-  /**
-   * @param {NumericColumn} xs
-   * @param {NumericColumn[]} series
-   * @param {number} end
-   */
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end */
   appendThrough(xs, series, end) {
     this.appendThroughMode(xs, series, end, false);
   }
-
-  /** Append a live tail while preserving the existing samples-per-bucket density. @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end */
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end */
   appendThroughFixed(xs, series, end) {
     this.appendThroughMode(xs, series, end, true);
   }
-
-  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end @param {boolean} fixedDensity */
-  appendThroughMode(xs, series, end, fixedDensity) {
-    const values = new Array(DISPLAY_SERIES);
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end @param {boolean} fixed */
+  appendThroughMode(xs, series, end, fixed) {
+    this._xs = xs;
+    this._series = series;
+    const values = new Array(8);
     for (let i = this.srcEnd; i < end; ) {
-      const xSpan = columnSpan(xs, i, end);
-      const spans = series.map((col) => (col ? columnSpan(col, i, end) : null));
+      const xSpan = columnSpan(xs, i, end),
+        spans = series.map((col) => (col ? columnSpan(col, i, end) : null));
       const through = Math.min(xSpan.end, ...spans.map((span) => span?.end ?? end));
       for (; i < through; i++) {
-        for (let s = 0; s < DISPLAY_SERIES; s++) {
+        for (let s = 0; s < 8; s++) {
           const span = spans[s];
-          values[s] = span ? Number(span.values[i - span.base]) : Number.NaN;
+          values[s] = span ? Number(span.values[i - span.base]) : NaN;
         }
-        if (fixedDensity) this.pushSampleFixed(Number(xSpan.values[i - xSpan.base]), values);
-        else this.pushSample(Number(xSpan.values[i - xSpan.base]), values);
+        this.pushSampleInternal(Number(xSpan.values[i - xSpan.base]), values, !fixed);
       }
     }
   }
 
-  /** @returns {{ x: Float64Array, ys: Float64Array[] }} */
-  flatten() {
-    const n = this.list.length * 2;
-    if (!this._flatX || !this._flatYs || this._flatCap < n) {
-      this._flatCap = Math.max(n, this._flatCap * 2 || 64);
-      this._flatX = new Float64Array(this._flatCap);
-      this._flatYs = Array.from({ length: DISPLAY_SERIES }, () => new Float64Array(this._flatCap));
-      this._flatDirty = 0;
-      this._flatView = null;
-    }
-    const x = this._flatX;
-    const ys = this._flatYs;
-    for (let i = this._flatDirty; i < this.list.length; i++) {
-      const b = this.list[i];
-      const k = i * 2;
-      const xm = (b.x0 + b.x1) / 2;
-      x[k] = xm;
-      x[k + 1] = xm;
-      for (let s = 0; s < DISPLAY_SERIES; s++) {
-        ys[s][k] = Number(b.min[s]);
-        ys[s][k + 1] = Number(b.max[s]);
+  /** @param {DisplayBucket} b @param {number} s @param {number} a @param {number} end */
+  connected(b, s, a, end) {
+    if (b.count[s] === b.n) return true;
+    const col = this._series[s];
+    if (col) {
+      if (this._index) return this._index.allFinite(col, s, a, end + 1);
+      for (let i = a; i <= end; ) {
+        const span = columnSpan(col, i, end + 1);
+        for (; i < span.end; i++) if (!Number.isFinite(Number(span.values[i - span.base]))) return false;
       }
+      return true;
     }
-    this._flatDirty = this.list.length;
-    if (!this._flatView || this._flatView.x.length !== n) {
-      this._flatView = { x: x.subarray(0, n), ys: ys.map((col) => col.subarray(0, n)) };
-    }
+    const meta = this._stream.get(b);
+    if (!meta) return false;
+    const rank = (i) =>
+      i === b.start
+        ? Number(Number.isFinite(meta.first[s]))
+        : i === b.start + b.n - 1
+          ? b.count[s]
+          : i === b.minIndex[s]
+            ? meta.minRank[s]
+            : meta.maxRank[s];
+    return rank(end) - rank(a) === end - a;
+  }
+
+  /** Per-channel candidates stay independent; the shared carrier only drives scales/cursor. */
+  flatten() {
+    if (this._flatView) return this._flatView;
+    const size = this.list.length * 4;
+    const channels = Array.from({ length: 8 }, (_, s) => {
+      let buffer = this._buffers[s];
+      const reused = !!buffer && buffer.x.length >= size;
+      if (!reused) {
+        const capacity = Math.max(64, size, buffer ? buffer.x.length * 2 : 0);
+        buffer = {
+          x: new Float64Array(capacity),
+          y: new Float64Array(capacity),
+          indices: new Uint32Array(capacity),
+          connect: new Uint8Array(capacity),
+          ends: new Uint32Array(capacity / 4),
+        };
+        this._buffers[s] = buffer;
+      }
+      const { x, y, indices, connect, ends } = buffer,
+        dirty = reused ? this._dirty : 0;
+      let n = dirty ? ends[dirty - 1] : 0;
+      const candidates = new Array(4),
+        col = this._series[s];
+      for (let bi = n ? dirty : 0; bi < this.list.length; bi++) {
+        const b = this.list[bi],
+          meta = this._stream.get(b);
+        candidates[0] = b.start;
+        candidates[1] = b.minIndex[s];
+        candidates[2] = b.maxIndex[s];
+        candidates[3] = b.start + b.n - 1;
+        candidates.sort((a, b) => a - b);
+        let previous = -1;
+        for (const i of candidates) {
+          if (i < 0 || i === previous) continue;
+          const first = i === b.start,
+            last = i === b.start + b.n - 1,
+            min = i === b.minIndex[s];
+          const px = this._xs
+            ? columnValue(this._xs, i)
+            : first
+              ? b.x0
+              : last
+                ? b.x1
+                : min
+                  ? meta?.minX[s]
+                  : meta?.maxX[s];
+          const py = col
+            ? columnValue(col, i)
+            : first
+              ? meta?.first[s]
+              : last
+                ? meta?.last[s]
+                : min
+                  ? b.min[s]
+                  : b.max[s];
+          connect[n] = Number(
+            Number.isFinite(py) &&
+              n > 0 &&
+              Number.isFinite(y[n - 1]) &&
+              (previous < 0 ? i === indices[n - 1] + 1 : this.connected(b, s, previous, i)),
+          );
+          x[n] = Number(px);
+          y[n] = Number(py);
+          indices[n++] = i;
+          previous = i;
+        }
+        ends[bi] = n;
+      }
+      return {
+        x: x.subarray(0, n),
+        y: y.subarray(0, n),
+        indices: indices.subarray(0, n),
+        connect: connect.subarray(0, n),
+      };
+    });
+    const x = new Float64Array(this.list.length * 2),
+      ys = Array.from({ length: 8 }, () => new Float64Array(x.length));
+    let n = 0;
+    for (const b of this.list)
+      for (const last of [false, true]) {
+        const px = last ? b.x1 : b.x0,
+          meta = this._stream.get(b);
+        if (n > 0 && x[n - 1] === px) n--;
+        x[n] = px;
+        for (let s = 0; s < 8; s++)
+          ys[s][n] = this._series[s]
+            ? columnValue(this._series[s], last ? b.start + b.n - 1 : b.start)
+            : ((last ? meta?.last[s] : meta?.first[s]) ?? NaN);
+        n++;
+      }
+    this._dirty = this.list.length;
+    this._flatView = { x: x.subarray(0, n), ys: ys.map((col) => col.subarray(0, n)), channels };
     return this._flatView;
   }
 }
 
-/**
- * @param {NumericColumn} xs
- * @param {NumericColumn[]} series
- * @param {number} i
- */
-function makeBucketFromIndex(xs, series, i) {
-  /** @type {number[]} */
-  const values = new Array(DISPLAY_SERIES);
-  for (let s = 0; s < DISPLAY_SERIES; s++) {
-    const col = series[s];
-    values[s] = col ? Number(columnValue(col, i)) : Number.NaN;
+/** @param {number} x @param {number[]} values @param {number} start @returns {DisplayBucket} */
+function makeBucket(x, values, start) {
+  const min = new Array(8),
+    max = new Array(8),
+    minIndex = new Array(8),
+    maxIndex = new Array(8),
+    count = new Array(8);
+  for (let s = 0; s < 8; s++) {
+    const v = values[s],
+      valid = Number.isFinite(v);
+    min[s] = max[s] = valid ? v : NaN;
+    minIndex[s] = maxIndex[s] = valid ? start : -1;
+    count[s] = Number(valid);
   }
-  return makeBucket(Number(columnValue(xs, i)), values);
+  return { x0: x, x1: x, start, n: 1, min, max, minIndex, maxIndex, count };
 }
-
-/** @param {DisplayBucket} bucket @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} i */
-function foldIndex(bucket, xs, series, i) {
-  bucket.x1 = Number(xs[i]);
-  bucket.n += 1;
-  for (let s = 0; s < DISPLAY_SERIES; s++) {
-    const col = series[s];
-    const v = col ? Number(col[i]) : Number.NaN;
+/** @param {DisplayBucket} b @param {number[]} values @param {number} i */
+function foldValues(b, values, i) {
+  for (let s = 0; s < 8; s++) {
+    const v = values[s];
     if (!Number.isFinite(v)) continue;
-    const curMin = bucket.min[s];
-    const curMax = bucket.max[s];
-    if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
-    if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
-  }
-}
-
-/**
- * @param {DisplayBucket} bucket
- * @param {NumericColumn} xs
- * @param {NumericColumn[]} series
- * @param {number} start @param {number} end
- */
-function foldRange(bucket, xs, series, start, end) {
-  if (!('_chunks' in xs) && series.every((col) => !col || !('_chunks' in col))) {
-    for (let i = start; i < end; i++) {
-      bucket.x1 = Number(xs[i]);
-      bucket.n += 1;
-      for (let s = 0; s < DISPLAY_SERIES; s++) {
-        const col = series[s];
-        const v = col ? Number(col[i]) : Number.NaN;
-        if (!Number.isFinite(v)) continue;
-        const curMin = bucket.min[s];
-        const curMax = bucket.max[s];
-        if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
-        if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
-      }
+    b.count[s]++;
+    if (b.minIndex[s] < 0 || v < b.min[s]) {
+      b.min[s] = v;
+      b.minIndex[s] = i;
     }
-    return;
-  }
-  for (let i = start; i < end; ) {
-    const xSpan = columnSpan(xs, i, end);
-    const spans = series.map((col) => (col ? columnSpan(col, i, end) : null));
-    const through = Math.min(xSpan.end, ...spans.map((span) => span?.end ?? end));
-    for (; i < through; i++) {
-      bucket.x1 = Number(xSpan.values[i - xSpan.base]);
-      bucket.n += 1;
-      for (let s = 0; s < DISPLAY_SERIES; s++) {
-        const span = spans[s];
-        const v = span ? Number(span.values[i - span.base]) : Number.NaN;
-        if (!Number.isFinite(v)) continue;
-        const curMin = bucket.min[s];
-        const curMax = bucket.max[s];
-        if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
-        if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
-      }
+    if (b.maxIndex[s] < 0 || v > b.max[s]) {
+      b.max[s] = v;
+      b.maxIndex[s] = i;
     }
   }
 }
-
-/** @param {number} x @param {number[]} values */
-function makeBucket(x, values) {
-  /** @type {number[]} */
-  const min = new Array(DISPLAY_SERIES);
-  /** @type {number[]} */
-  const max = new Array(DISPLAY_SERIES);
-  for (let s = 0; s < DISPLAY_SERIES; s++) {
-    const v = values[s];
-    if (Number.isFinite(v)) {
-      min[s] = v;
-      max[s] = v;
-    } else {
-      min[s] = Number.NaN;
-      max[s] = Number.NaN;
+/** @param {StreamPoints} meta @param {DisplayBucket} b @param {number} x @param {number[]} values @param {number} i */
+function updateStream(meta, b, x, values, i) {
+  meta.last = values.slice();
+  for (let s = 0; s < 8; s++) {
+    if (b.minIndex[s] === i) {
+      meta.minX[s] = x;
+      meta.minRank[s] = b.count[s];
+    }
+    if (b.maxIndex[s] === i) {
+      meta.maxX[s] = x;
+      meta.maxRank[s] = b.count[s];
     }
   }
-  return { x0: x, x1: x, n: 1, min, max };
 }
-
-/** @param {DisplayBucket} bucket @param {number[]} values */
-function foldValues(bucket, values) {
-  for (let s = 0; s < DISPLAY_SERIES; s++) {
-    const v = values[s];
-    if (v === undefined || !Number.isFinite(v)) continue;
-    const curMin = bucket.min[s];
-    const curMax = bucket.max[s];
-    if (curMin === undefined || !Number.isFinite(curMin) || v < curMin) bucket.min[s] = v;
-    if (curMax === undefined || !Number.isFinite(curMax) || v > curMax) bucket.max[s] = v;
-  }
-}
-
-/** @param {DisplayBucket} a @param {DisplayBucket} b */
+/** @param {DisplayBucket} a @param {DisplayBucket} b @returns {DisplayBucket} */
 function mergeBucket(a, b) {
-  /** @type {number[]} */
-  const min = new Array(DISPLAY_SERIES);
-  /** @type {number[]} */
-  const max = new Array(DISPLAY_SERIES);
-  for (let s = 0; s < DISPLAY_SERIES; s++) {
-    min[s] = nanMin(Number(a.min[s]), Number(b.min[s]));
-    max[s] = nanMax(Number(a.max[s]), Number(b.max[s]));
+  const out = {
+    x0: a.x0,
+    x1: b.x1,
+    start: a.start,
+    n: a.n + b.n,
+    min: a.min.slice(),
+    max: a.max.slice(),
+    minIndex: a.minIndex.slice(),
+    maxIndex: a.maxIndex.slice(),
+    count: a.count.map((n, s) => n + b.count[s]),
+  };
+  for (let s = 0; s < 8; s++) {
+    if (b.minIndex[s] >= 0 && (a.minIndex[s] < 0 || b.min[s] < a.min[s])) {
+      out.min[s] = b.min[s];
+      out.minIndex[s] = b.minIndex[s];
+    }
+    if (b.maxIndex[s] >= 0 && (a.maxIndex[s] < 0 || b.max[s] > a.max[s])) {
+      out.max[s] = b.max[s];
+      out.maxIndex[s] = b.maxIndex[s];
+    }
   }
-  return { x0: a.x0, x1: b.x1, n: a.n + b.n, min, max };
-}
-
-/** @param {number} a @param {number} b */
-function nanMin(a, b) {
-  if (!Number.isFinite(a)) return b;
-  if (!Number.isFinite(b)) return a;
-  return a <= b ? a : b;
-}
-
-/** @param {number} a @param {number} b */
-function nanMax(a, b) {
-  if (!Number.isFinite(a)) return b;
-  if (!Number.isFinite(b)) return a;
-  return a >= b ? a : b;
+  return out;
 }

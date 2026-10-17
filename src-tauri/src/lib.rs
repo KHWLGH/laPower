@@ -12,6 +12,7 @@ mod pd_capture;
 // Public only so `cargo bench` can drive the emit path; the app itself never re-exports it.
 pub mod stream;
 mod titlebar;
+mod updates;
 mod usb_port;
 #[cfg(target_os = "windows")]
 mod windows_icon;
@@ -1266,6 +1267,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build());
     boot_timing::mark("plugins_registered");
 
@@ -1308,6 +1310,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            updates::check_for_updates,
+            updates::open_project_page,
             boot_timing::get_boot_timing,
             boot_timing::report_boot_timing,
             get_runtime_platform,

@@ -49,6 +49,8 @@ function normalizeSettings(saved) {
   const merged = { ...defaultSettings, ...source };
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
+  merged.immediateMarker =
+    typeof source.immediateMarker === 'boolean' ? source.immediateMarker : defaultSettings.immediateMarker;
 
   /** @param {number} value @param {number} min @param {number} max @param {number} fallback */
   const clamp = (value, min, max, fallback) =>
@@ -165,6 +167,7 @@ function echoSettingsUI() {
   setChecked('show-dpdn', state.settings.showDpDn);
   setChecked('show-cc', state.settings.showCc);
   setChecked('signed-current', state.settings.signedCurrent);
+  setChecked('immediate-marker', state.settings.immediateMarker);
   setChecked('pd-follow-recording', state.settings.pdFollowRecording);
   echoHeadroomUI();
 

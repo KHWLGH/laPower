@@ -1,6 +1,6 @@
 {
   "name": "lapower",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,8 @@
     "format": "biome format --write .",
     "build": "node scripts/build-dist.mjs",
     "build:dist": "node scripts/build-dist.mjs --minify",
+    "components:generate": "node scripts/third-party-components.mjs",
+    "components:check": "node scripts/third-party-components.mjs --check",
     "bench:core": "node bench/core.mjs",
     "bench:gate": "node bench/core.mjs --compare",
     "bench:extrema": "node bench/extrema.mjs",

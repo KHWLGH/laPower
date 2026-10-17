@@ -17,6 +17,10 @@ globalThis.MutationObserver = class {
 };
 globalThis.requestAnimationFrame = () => 1;
 globalThis.cancelAnimationFrame = () => {};
+globalThis.Path2D = class {
+  moveTo() {}
+  lineTo() {}
+};
 globalThis.uPlot = class {
   static paths = { spline: () => () => 'spline', linear: () => () => 'linear' };
   constructor(options, data) {
@@ -52,14 +56,11 @@ test('envelope hover resolves pointer time to the raw sample; marker uses that s
   assert.deepEqual(u.options.cursor.points.bbox(u, 1), { left: 4119, top: 8242, width: 8, height: 8 });
   assert.equal(u.options.cursor.dataIdx(u, 4, 42), null);
   assert.equal(u.options.cursor.points.bbox(u, 4).width, 0);
-  assert.equal(
-    u.options.series[1].paths(u, 1, 0, u.data[0].length - 1),
-    'linear',
-    'short envelope still has duplicate x',
-  );
+  u.series = u.options.series;
+  assert.ok(u.options.series[1].paths(u, 1, 0, u.data[0].length - 1).stroke instanceof Path2D);
   chart.setChartXWindow(1200, 1210);
   chart.updateCharts();
-  assert.equal(u.options.series[1].paths(u, 1, 1200, 1210), 'spline');
+  assert.equal(u.options.series[1].paths(u, 1, 1200, 1210), 'linear');
   u.cursor.left = -1;
   assert.equal(u.options.cursor.dataIdx(u, 1, 42), null);
 });

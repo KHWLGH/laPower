@@ -1446,6 +1446,7 @@ export async function startRecording() {
  * @param {{discard?:boolean}} [options]
  */
 export function stopRecording({ discard = false } = {}) {
+  const requestedAt = performance.now();
   recordingEpoch++;
   recordingStartLock = false;
   const paused = deviceStream.enabled
@@ -1457,7 +1458,7 @@ export function stopRecording({ discard = false } = {}) {
   state.recordingStartTime = null;
   state.energy.lastX = null;
   state.autoPauseSettings.triggerStartTime = null;
-  // 落盘在读线程排空后的尾部点到达前就开始同步；之后到达的尾点由下一次追加或收尾写入。
+  // 排空原生尾点后再同步恢复文件；显示刷新不等待栅栏或磁盘。
   void paused.then(spoolRecordingPaused, spoolRecordingPaused);
 
   const el = document.getElementById('record-status');
@@ -1470,8 +1471,11 @@ export function stopRecording({ discard = false } = {}) {
   if (btnClear) btnClear.disabled = false;
 
   state.__setRangeControlsEnabled?.(true);
+  // The range UI may still be waiting for rAF while the latest batch is already
+  // retained. Capture the pause window from those samples before preparing it.
+  if (!state.__rangeDragging) updateChartRange();
   // 暂停时补上最后一帧，密集回看继续遵循当前显示预算。
-  updateCharts();
+  updateCharts('maintenance', { force: false, reason: 'pause', requestedAt });
 
   // 跟随记录关闭时采集门保持开；开启时与本地 isRecording 一起关掉。
   if (!deviceStream.enabled) {

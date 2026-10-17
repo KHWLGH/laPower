@@ -72,6 +72,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Verify bundled runtime component list
+        run: npm run components:check
+
       - name: Check Rust formatting
         run: cargo fmt --check --all
 

@@ -250,6 +250,11 @@ test('native manual pause resolves after retained samples and preserves exact en
     settled = true;
   });
   assert.equal(state.isRecording, false);
+  assert.equal(
+    state.chartWindow.max,
+    state.chartSeries.x.at(-1),
+    'pause captures samples ahead of the pending UI frame',
+  );
   await Promise.resolve();
   assert.equal(settled, false);
   deviceStream.handleBatch([nativeSample(3), nativeSample(4), nativeSample(5, 0)]);

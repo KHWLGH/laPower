@@ -100,6 +100,7 @@ The rate also determines **which gaps energy integration excludes**: an interval
 
 During long recordings such as charging tests, mark the moments that matter: the phone reaching 50%, lifting it and putting it back, the fan starting. Click the main part of `Mark ▾` at the chart's top right or press `M`, type a label in the dialog (the default is `Mark N`) and press Enter. The arrow opens the marker list.
 
+- Enable `Mark immediately` under `Settings → Charts & recording` to add markers with the default `Mark N` label using the button or shortcut, then rename them in the marker list. This option is off by default and saves automatically.
 - The position is fixed when you press: while recording, the marker lands on the next point to arrive, and recording continues while the dialog is open; otherwise it lands on the last point. With the pointer on the main chart, `M` marks the nearest point under it, which suits annotating a recording afterwards.
 - Each marker is a vertical line on the main chart with its label at the top; labels close together are staggered over up to three rows. The timeline navigator shows a thin tick for each marker.
 - The list button next to `Mark` lists every marker with its time. Click a label to rename it (an empty label deletes it), or × to delete it.
@@ -223,7 +224,7 @@ WITRN devices do not show this tab or receive control commands.
 
 ## Settings
 
-Open settings with the gear button in the title bar. On macOS, you can also press ⌘, or choose “Settings…” from the application menu. The main settings list is on the left; device and About information appear on the right in wide windows.
+Open settings with the gear button in the title bar. On macOS, you can also press ⌘, or choose “Settings…” from the application menu. Settings is one scrolling page ordered as Appearance & language, Charts & recording, Keyboard shortcuts, Recovery & reset, and About. The directory stays on the left in wide windows and becomes a horizontal bar at the top below 980px. Clicking scrolls smoothly, manual scrolling updates the highlight, and returning preserves your position for this session. Scrollbars keep a fixed width so hovering does not shift content.
 
 ### Appearance
 
@@ -245,14 +246,10 @@ On first run and after resetting settings, the theme follows OS appearance. Exis
 | `Chart headroom` | `Automatic` / `Custom` and percentage | Automatic (≈ 25%) |
 | `Record current direction` | Toggle | Off |
 | `Recording limit` | Numeric input, 64–8192 MB | 512 MB |
-| `Keep temporary recovery files` | Toggle | On |
-| `Reset all settings` | Button | — |
 
 - **Chart headroom** — Leaves blank space above curves, keeping them in the upper-middle area rather than against the top. `Custom` accepts 0–100%.
 - **Record current direction** — New recordings/imports keep the sign (positive forward, negative reverse) and show arrows; disabled recording stores absolute values. **Existing data is not rewritten.** Export follows the values actually recorded.
 - **Recording limit** — Estimated from memory and CSV row sizes. Recording pauses at the limit; the status bar shows estimated remaining time.
-- **Keep temporary recovery files** — Writes to the app cache about once per second. Recover/delete unfinished recordings in Settings. Normal clear/import/exit removes files after successful synchronization; failed writes/synchronization retain them and report an error. Long-term storage still requires CSV export.
-- **Reset all settings** — Restores language, sample rate, channels, UI scale, auto pause, temperature and other defaults. Success is reported only after saving to disk. If antivirus or a sync drive holds `settings.json`, an error is shown: the interface has reset, but restarting would roll it back. Notifications appear once per failure period rather than on every control's autosave.
 
 ### Keyboard shortcuts
 
@@ -267,15 +264,29 @@ On first run and after resetting settings, the theme follows OS appearance. Exis
 
 On macOS, use Command instead of Ctrl. Settings → Keyboard shortcuts supports key capture, unassignment, individual defaults and restoring all defaults. Changes save automatically and update button hints. Conflicting bindings, modifier-only keys and close/quit shortcuts are rejected. Input controls, composition, dialogs and shortcut capture suppress business actions; held keys do not repeat them.
 
+### Recovery & reset
+
+| Setting | Control | Default |
+| --- | --- | --- |
+| `Keep temporary recovery files` | Toggle | On |
+| `Reset all settings` | Button | — |
+
+- **Keep temporary recovery files** — Writes to the app cache about once per second. Recover/delete unfinished recordings in Settings. Normal clear/import/exit removes files after successful synchronization; failed writes/synchronization retain them and report an error. Long-term storage still requires CSV export.
+- **Reset all settings** — Restores language, sample rate, channels, UI scale, auto pause, temperature and other defaults. Success is reported only after saving to disk. If antivirus or a sync drive holds `settings.json`, an error is shown: the interface has reset, but restarting would roll it back. Notifications appear once per failure period rather than on every control's autosave.
+
 ### Device
 
-Displays the connected device's `VID` / `PID` / `SN` from enumeration without interrupting the data stream.
+The information icon between Refresh and Connect in the title bar opens `VID` / `PID` / `SN` and device descriptions. It shows the connected device first, otherwise the selected device, or an empty state if none is selected, without interrupting the data stream.
 
 > WITRN USB serial numbers identify a **manufacturing batch date**, rather than an individual unit. Two meters from the same batch can share a serial number. The title-bar list therefore includes USB ports to distinguish identical models on different ports.
 
 ### About
 
-The icon appears above the version, followed by `Version` / `License` / `Repository` and third-party notices: uPlot (MIT) · Fluent System Icons (MIT).
+The application card arranges the icon, name, description, version and license horizontally; action buttons wrap in narrow windows. `GitHub` opens the project homepage in your system browser.
+
+Only clicking `Check for updates` connects to GitHub to check stable releases. Results appear within About, with no startup checks, popups or badges. If a newer version is found, `Download on GitHub` opens its release page. Connection errors, timeouts and request limits allow retrying. The app does not download or install updates automatically.
+
+The third-party card shows the versions, purposes and licenses of main components. Expand `All runtime components` for direct and indirect runtime dependencies across supported desktop platforms. This bundled list works offline and excludes development and build tools. Recovery files, the recovery list and resetting settings are grouped under `Recovery & reset`.
 
 ## File formats
 

@@ -65,22 +65,70 @@ export function referenceBuckets(f, start, end, capacity) {
   for (let from = start; from < end; from += step) {
     const to = Math.min(from + step, end);
     const min = [],
-      max = [];
+      max = [],
+      minIndex = [],
+      maxIndex = [],
+      count = [];
     for (const col of f.ys) {
       let low = NaN,
-        high = NaN;
+        high = NaN,
+        lowIndex = -1,
+        highIndex = -1,
+        finite = 0;
       for (let i = from; i < to; i++)
         if (Number.isFinite(col[i])) {
-          if (!Number.isFinite(low) || col[i] < low) low = col[i];
-          if (!Number.isFinite(high) || col[i] > high) high = col[i];
+          finite++;
+          if (lowIndex < 0 || col[i] < low) {
+            low = col[i];
+            lowIndex = i;
+          }
+          if (highIndex < 0 || col[i] > high) {
+            high = col[i];
+            highIndex = i;
+          }
         }
       min.push(low);
       max.push(high);
+      minIndex.push(lowIndex);
+      maxIndex.push(highIndex);
+      count.push(finite);
     }
-    list.push({ x0: f.x[from], x1: f.x[to - 1], n: to - from, min, max });
+    list.push({ x0: f.x[from], x1: f.x[to - 1], start: from, n: to - from, min, max, minIndex, maxIndex, count });
   }
   return list;
 }
+
+function referenceGeometry(f, buckets) {
+  const endpoints = [];
+  for (const bucket of buckets) {
+    for (const i of [bucket.start, bucket.start + bucket.n - 1]) {
+      if (endpoints.length && f.x[endpoints.at(-1)] === f.x[i]) endpoints.pop();
+      endpoints.push(i);
+    }
+  }
+  return {
+    x: Float64Array.from(endpoints, (i) => f.x[i]),
+    ys: f.ys.map((col) => Float64Array.from(endpoints, (i) => col[i])),
+    channels: f.ys.map((col, s) => {
+      const indices = buckets.flatMap((bucket) =>
+        [...new Set([bucket.start, bucket.minIndex[s], bucket.maxIndex[s], bucket.start + bucket.n - 1])]
+          .filter((i) => i >= 0)
+          .sort((a, b) => a - b),
+      );
+      return {
+        x: Float64Array.from(indices, (i) => f.x[i]),
+        y: Float64Array.from(indices, (i) => col[i]),
+        indices: Uint32Array.from(indices),
+        connect: Uint8Array.from(indices, (i, position) => {
+          if (!position) return 0;
+          for (let j = indices[position - 1]; j <= i; j++) if (!Number.isFinite(col[j])) return 0;
+          return 1;
+        }),
+      };
+    }),
+  };
+}
+
 export function golden(f, segments) {
   const cols = [f.x, f.timestamps, ...f.ys];
   const copies = cols.map((source) => {
@@ -101,16 +149,7 @@ export function golden(f, segments) {
     b.rebuild(f.x, f.ys, start, end, cap);
     const expected = referenceBuckets(f, start, end, cap);
     assert.deepStrictEqual(b.list, expected);
-    const flat = b.flatten();
-    assert.equal(flat.x.length, expected.length * 2);
-    expected.forEach((v, i) => {
-      assert.ok(Object.is(flat.x[i * 2], (v.x0 + v.x1) / 2));
-      assert.ok(Object.is(flat.x[i * 2 + 1], (v.x0 + v.x1) / 2));
-      for (let s = 0; s < 8; s++) {
-        assert.ok(Object.is(flat.ys[s][i * 2], v.min[s]));
-        assert.ok(Object.is(flat.ys[s][i * 2 + 1], v.max[s]));
-      }
-    });
+    assert.deepStrictEqual(b.flatten(), referenceGeometry(f, expected));
   }
   const energy = referenceEnergy(f.timestamps, f.ys[1], f.ys[2], 3600000);
   assert.deepStrictEqual(calculateEnergy(f.timestamps, f.ys[1], f.ys[2]), energy);

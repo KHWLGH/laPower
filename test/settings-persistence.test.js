@@ -243,6 +243,42 @@ test('legacy window style migrates, persists and resets to Windows while explici
   }
 });
 
+test('immediate marking defaults safely, persists both choices, echoes the toggle and resets', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    for (const immediateMarker of [undefined, null, 'true', 'false', 1, true, false]) {
+      window.__TAURI__.core.invoke = async (command, args = {}) => {
+        if (command === 'plugin:store|get' && args.key === 'appSettings') return [{ immediateMarker }, true];
+        return invoke(command, args);
+      };
+      await loadSettings();
+      assert.equal(state.settings.immediateMarker, immediateMarker === true);
+      assert.equal(el('immediate-marker').checked, immediateMarker === true);
+    }
+    window.__TAURI__.core.invoke = invoke;
+    for (const choice of [true, false]) {
+      state.settings.immediateMarker = choice;
+      assert.equal(await saveSettings(), true);
+      state.settings = { ...defaultSettings };
+      await loadSettings();
+      assert.equal(state.settings.immediateMarker, choice);
+      assert.equal(el('immediate-marker').checked, choice);
+    }
+    state.settings.immediateMarker = true;
+    assert.equal(await resetSettings(), true);
+    assert.equal(state.settings.immediateMarker, false);
+    assert.equal(el('immediate-marker').checked, false);
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
 test('loaded settings keep the protocol view and clamp PDM choices field by field', async () => {
   installStoreStub();
   const stored = globalThis.window.__TAURI__.core.invoke;

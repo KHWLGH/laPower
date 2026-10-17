@@ -34,6 +34,7 @@ import { defaultShortcuts } from './shortcuts-core.js';
  * @typedef {Object} Settings
  * @property {Record<string,string>} shortcuts
  * @property {import('./export-options.js').CsvExportOptions} csvExportOptions
+ * @property {boolean} immediateMarker - 使用默认标签立即打点，之后可在列表中改名
  * @property {number} rangeStart
  * @property {number} rangeEnd
  * @property {number} sampleRate      - 采样间隔 (ms)
@@ -339,6 +340,7 @@ export function setChartColumns(cols) {
 export const defaultSettings = {
   shortcuts: defaultShortcuts,
   csvExportOptions: defaultCsvExportOptions,
+  immediateMarker: false,
   rangeStart: 0,
   rangeEnd: 1000,
   sampleRate: 250,

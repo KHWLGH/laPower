@@ -89,7 +89,7 @@ export function batchEnd(accepted, timing = {}) {
   });
 }
 
-/** @param {'main'|'navigator'} role @param {{requestedAt?:number, submittedAt?:number, prepareMs?:number|null, batchId?:number, sourcePointCount?:number, displayPointCount?:number, pixelsPerBucket?:number, displayDense?:boolean, fillSuppressed?:boolean, fillSuppressionReason?:string|null, recentAppendCount?:number, refreshIntervalMs?:number, refreshSource?:'live'|'interaction'|'maintenance'}} info */
+/** @param {'main'|'navigator'} role @param {{requestedAt?:number, submittedAt?:number, prepareMs?:number|null, batchId?:number, sourcePointCount?:number, displayPointCount?:number, pixelsPerBucket?:number, displayDense?:boolean, fillSuppressed?:boolean, fillSuppressionReason?:string|null, recentAppendCount?:number, refreshIntervalMs?:number, refreshSource?:'live'|'interaction'|'maintenance',reason?:string,pauseId?:number,pauseRequestedAt?:number,pauseLength?:number,projection?:any}} info */
 export function chartRequest(role, info = {}) {
   return {
     at: Number.isFinite(info.requestedAt) ? /** @type {number} */ (info.requestedAt) : now(),
@@ -108,11 +108,16 @@ export function chartRequest(role, info = {}) {
     refreshIntervalMs: info.refreshIntervalMs ?? null,
     refreshSource: info.refreshSource ?? null,
     role,
+    reason: info.reason ?? null,
+    pauseId: info.pauseId ?? null,
+    pauseRequestedAt: info.pauseRequestedAt ?? null,
+    pauseLength: info.pauseLength ?? null,
+    projection: info.projection ? { ...info.projection } : null,
   };
 }
 
-/** @param {'main'|'navigator'} role @param {any} request @param {number} drawEndedAt @param {number|null} drawMs */
-export function chartPaint(role, request, drawEndedAt = now(), drawMs = null) {
+/** @param {'main'|'navigator'} role @param {any} request @param {number} drawEndedAt @param {number|null} drawMs @param {Record<string,number>} [stages] */
+export function chartPaint(role, request, drawEndedAt = now(), drawMs = null, stages) {
   if (!request) return;
   lastChartDrawAt = drawEndedAt;
   const sampleToPaintMs =
@@ -142,6 +147,12 @@ export function chartPaint(role, request, drawEndedAt = now(), drawMs = null) {
     refreshIntervalMs: request.refreshIntervalMs,
     refreshSource: request.refreshSource,
     drawMs,
+    stages: stages ? { ...stages } : null,
+    reason: request.reason,
+    pauseId: request.pauseId,
+    pauseLength: request.pauseLength,
+    pauseToDrawMs: Number.isFinite(request.pauseRequestedAt) ? drawEndedAt - request.pauseRequestedAt : null,
+    projection: request.projection,
     nextFrameDelayMs: /** @type {number|null} */ (null),
     frameDelayMs: /** @type {number|null} */ (null),
   };

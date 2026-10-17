@@ -4,7 +4,7 @@
  *
  * uPlot 由 vendor/uPlot.iife.min.js 以全局变量方式载入（本地文件，无网络依赖）。
  * 数据为列式（columnar）格式：state.chartSeries = { x, voltage, current, power, temp, dp, dn, cc1, cc2 }，
- * 主图绑定可见窗口的有界原始列或 min/max 桶（[x, v, c, p, t, dp, dn, cc1, cc2]）。
+ * 主图用有界原始列或独立通道的有序桶几何绘制；共享数组仅承载 uPlot 坐标与光标。
  *
  * 对外 API：
  * - initChart()           初始化主图 + 导航图
@@ -12,7 +12,7 @@
  * - updateCharts()        立即刷新
  * - syncChartSeries()     序列数组被整体替换（清空 / 导入 CSV）后重新绑定
  * 「画什么」由可见窗口和统一的显示预算决定：密集窗口折叠为 min/max 桶，
- * 全量仍在 chartSeries；拖动中与松手后走同一句，没有低质量的预览态。
+ * 全量仍在 chartSeries；拖动和松手采用同一几何规则。冷暂停复用完整录制投影，再一次升级细节。
  * 极值金字塔只作为速度选择器（见 extremaForStripes），换慢路径不改变产出值。
  * - setChartXWindow()     设置主图 X 轴可见窗口（范围滑块）
  * - setRangeDragging()    连续交互期间复用回看预算与绘制反馈（不改变曲线内容）
@@ -22,7 +22,6 @@
 
 import {
   bucketCap,
-  columnSpan,
   firstIndexAfter,
   firstIndexAtOrAfter,
   nearestIndex,
@@ -30,6 +29,7 @@ import {
   stripePpb,
 } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
+import { rasterOrderedFill } from './chart-fill.js';
 import { ChartFillPolicy, ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
 import { wheelZoomFactor } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
@@ -120,6 +120,9 @@ let displayBuckets = new SeriesBuckets();
 // Small existing paths stay synchronous. Large replacements/window scans yield.
 const COOPERATIVE_POINTS = 32_768;
 const INTERACTION_PREPARE_MS = 4;
+// A warm indexed pause normally completes within one frame. Yielding halfway
+// through a 10–12 ms query adds a timer turn before its first fine draw.
+const PAUSE_PREPARE_MS = 16;
 const recordingRenderPolicy = new ChartRenderPolicy();
 // Review keeps screen-resolution detail, including throughout a gesture. Canvas
 // pressure can suppress fill, but must not leave a static curve at 8–16 px/bucket.
@@ -134,6 +137,10 @@ let displayContext = 'review';
 let historyWork = null;
 /** @type {{generation: number, start: number, end: number, cap: number, ppb: number, cancelled: boolean}|null} */
 let projectionWork = null;
+/** @type {{generation:number,revision:number,cancelled:boolean}|null} */
+let indexWarmup = null;
+/** @type {{target:PreparationTarget,cancelled:boolean,started:boolean,start:()=>void}|null} */
+let pauseRefinement = null;
 let windowIntent = 0;
 let sourceRevision = 0;
 /** @typedef {{generation:number,intent:number,revision:number,length:number,start:number,end:number,cap:number,ppb:number,xRange:[number,number],width:number,resolution:number,density:number}} PreparationTarget */
@@ -178,12 +185,65 @@ function capturePreparationTarget(length, start, end, cap, ppb) {
 }
 
 function cancelPreparation() {
+  if (pauseRefinement) pauseRefinement.cancelled = true;
+  pauseRefinement = null;
   if (historyWork) historyWork.cancelled = true;
   if (projectionWork) projectionWork.cancelled = true;
   historyWork = null;
   projectionWork = null;
   preparationTarget = null;
   setPreparing(false);
+}
+
+function cancelIndexWarmup() {
+  if (indexWarmup) indexWarmup.cancelled = true;
+  indexWarmup = null;
+}
+
+/** Catch up a fixed prefix between paints; appends never invalidate that prefix. */
+function scheduleIndexWarmup() {
+  const length = state.chartSeries.x.length;
+  if (
+    indexWarmup ||
+    historyWork ||
+    projectionWork ||
+    rangeDragging ||
+    !state.isRecording ||
+    !monitorVisible() ||
+    length <= COOPERATIVE_POINTS ||
+    extremaIndex.blocks >= Math.floor(length / BLOCK_SIZE)
+  )
+    return;
+  const work = { generation: dataGen, revision: chartRevision(), cancelled: false };
+  indexWarmup = work;
+  const series = channelBufs();
+  const invalid = () =>
+    work.cancelled ||
+    work.generation !== dataGen ||
+    work.revision !== chartRevision() ||
+    !state.isRecording ||
+    !monitorVisible() ||
+    !!historyWork ||
+    !!projectionWork ||
+    rangeDragging;
+  void runCooperativeSlices(
+    () => {
+      const started = performance.now();
+      const complete = extremaIndex.syncStep(series, length, 32);
+      performanceDiagnostics.domCommit('chart-index-warmup', started);
+      return complete;
+    },
+    { sliceMs: 1, isCancelled: invalid },
+  )
+    .then((complete) => {
+      if (indexWarmup !== work) return;
+      indexWarmup = null;
+      if (complete) scheduleIndexWarmup();
+    })
+    .catch((error) => {
+      if (indexWarmup === work) indexWarmup = null;
+      console.error('Chart index warmup failed', error);
+    });
 }
 
 /** @param {boolean} busy */
@@ -201,6 +261,8 @@ const extremaIndex = new ExactExtremaIndex();
 let boundKind = 'raw';
 let rawStart = 0;
 let rawEnd = 0;
+/** @type {{generation:number,start:number,end:number,visible:number,width:number,height:number,raw:boolean}|null} */
+let rawWindowCache = null;
 /** 范围手柄是否正在拖动（推迟导航图重建与 Y 轴重算，不改变曲线内容）。 */
 let rangeDragging = false;
 /** 上次完整 apply 时的数据代数；主图绑定的正确性由 bindingCovers 判断，不记宽度。 */
@@ -240,118 +302,40 @@ let feedbackRepaintPending = false;
 let filledPaintConfirmed = false;
 let feedbackEpoch = 0;
 let paintBatchId = 0;
+let pauseId = 0;
+/** @type {{id:number,requestedAt:number,length:number,generation:number,intent:number}|null} */
+let pauseContext = null;
 /** @typedef {'live'|'interaction'|'maintenance'} ChartRefreshSource */
-/** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null, source: ChartRefreshSource }} PaintRequest */
+/** @typedef {{ batchId: number, requestedAt: number, prepareMs: number|null, source: ChartRefreshSource, reason:string, pause:typeof pauseContext }} PaintRequest */
 /** @type {PaintRequest|null} */
 let paintRequest = null;
 /** @type {WeakMap<object, { first: PaintRequest, last: PaintRequest, count: number, firstDiagnostic: any, lastDiagnostic: any }>} */
 const pendingDraws = new WeakMap();
 /** @type {WeakMap<object, number>} */
 const drawStarts = new WeakMap();
+/** @type {WeakMap<object, Record<string, number>>} */
+const drawStages = new WeakMap();
 let chartListenersRegistered = false;
 
 function monitorVisible() {
   return state.settings.activeView === 'monitor' && state.windowVisible && !document.hidden;
 }
 
-/**
- * 导航图 minmax 桶。采用每 2 CSS 像素一桶的固定预算；超过后按桶聚合，
- * 新点只更新最后一桶，桶数超上限则两两合并。
- * @typedef {{ x0: number, x1: number, min: number, max: number, n: number }} NavBucket
- */
-/** @type {NavBucket[]} */
-let navBucketList = [];
-let navPpb = 1;
+// The overview retains its existing bucket budget and only uses the power channel.
+const navBuckets = new SeriesBuckets();
 let navSrcLen = 0;
-/** @type {ChartColView} */
-let navX = [];
-/** @type {ChartColView} */
-let navY = [];
-/** @type {Float64Array|null} */
-let navFlatX = null;
-/** @type {Float64Array|null} */
-let navFlatY = null;
-let navFlatCap = 0;
+/** @type {import('./chart-buckets.js').OrderedGeometry|null} */
+let navGeometry = null;
 let lastNavPaint = 0;
 const NAV_PAINT_MIN_MS = 100;
-
 function navMaxBuckets() {
-  const host = document.getElementById('navigator-chart');
-  const w = host?.clientWidth || 600;
-  // A thumbnail does not need four vertices per CSS pixel. Keep its raster load
-  // bounded too, otherwise reducing the main plot leaves a dense navigator behind.
-  return bucketCap(w / 2);
+  return bucketCap((document.getElementById('navigator-chart')?.clientWidth || 600) / 2);
 }
-
 function resetNavBuckets() {
-  navBucketList = [];
-  navPpb = 1;
+  navBuckets.reset();
   navSrcLen = 0;
-  navX = [];
-  navY = [];
+  navGeometry = null;
 }
-
-/** @param {number} x @param {number} p @param {number} cap */
-function pushNavSample(x, p, cap) {
-  const v = Number.isFinite(p) ? p : 0;
-  const last = navBucketList[navBucketList.length - 1];
-  if (last && last.n < navPpb) {
-    last.x1 = x;
-    if (v < last.min) last.min = v;
-    if (v > last.max) last.max = v;
-    last.n++;
-  } else {
-    navBucketList.push({ x0: x, x1: x, min: v, max: v, n: 1 });
-    if (navBucketList.length > cap) {
-      /** @type {NavBucket[]} */
-      const merged = [];
-      for (let i = 0; i < navBucketList.length; i += 2) {
-        const a = navBucketList[i];
-        const b = navBucketList[i + 1];
-        if (!b) {
-          merged.push(a);
-          break;
-        }
-        merged.push({
-          x0: a.x0,
-          x1: b.x1,
-          min: Math.min(a.min, b.min),
-          max: Math.max(a.max, b.max),
-          n: a.n + b.n,
-        });
-      }
-      navBucketList = merged;
-      navPpb *= 2;
-    }
-  }
-  navSrcLen++;
-}
-
-function flattenNavBuckets() {
-  const n = navBucketList.length * 2;
-  if (n === 0) {
-    const empty = new Float64Array(0);
-    navX = empty;
-    navY = empty;
-    return;
-  }
-  if (!navFlatX || !navFlatY || navFlatCap < n) {
-    navFlatCap = Math.max(n, navFlatCap * 2 || 64);
-    navFlatX = new Float64Array(navFlatCap);
-    navFlatY = new Float64Array(navFlatCap);
-  }
-  let k = 0;
-  for (const b of navBucketList) {
-    navFlatX[k] = b.x0;
-    navFlatX[k + 1] = b.x1;
-    navFlatY[k] = b.min;
-    navFlatY[k + 1] = b.max;
-    k += 2;
-  }
-  navX = navFlatX.subarray(0, n);
-  navY = navFlatY.subarray(0, n);
-}
-
 /** 把新样本折进导航桶；不 flatten、不 setData。 */
 function syncNavBuckets(through = state.chartSeries.x.length) {
   const cs = state.chartSeries;
@@ -371,247 +355,407 @@ function syncNavBuckets(through = state.chartSeries.x.length) {
   }
 }
 
-/** @param {import('./state.js').F64Col} xs @param {import('./state.js').F64Col} ps @param {number} start @param {number} end @param {number} cap */
-function foldNavRange(xs, ps, start, end, cap) {
-  for (let i = start; i < end; ) {
-    const xSpan = columnSpan(xs, i, end);
-    const pSpan = columnSpan(ps, i, end);
-    const through = Math.min(xSpan.end, pSpan.end);
-    for (; i < through; i++)
-      pushNavSample(Number(xSpan.values[i - xSpan.base]), Number(pSpan.values[i - pSpan.base]), cap);
-  }
+/** @param {import('./state.js').F64Col} xs @param {import('./state.js').F64Col} ps @param {number} _start @param {number} end @param {number} cap */
+function foldNavRange(xs, ps, _start, end, cap) {
+  navBuckets.cap = cap;
+  navBuckets.appendThrough(xs, [ps], end);
+  navSrcLen = navBuckets.srcEnd;
 }
 
-/** 把导航图数据指到短历史功率列，或宽度级 minmax 桶。 */
 function bindNavData() {
-  const cs = state.chartSeries;
-  const n = cs.x.length;
-  const cap = navMaxBuckets();
+  const cs = state.chartSeries,
+    n = cs.x.length;
   syncNavBuckets();
-  if (n <= cap) {
+  if (n <= navMaxBuckets()) {
     navData = [cs.x.copyRange(0, n), cs.power.copyRange(0, n)];
-    return;
+    navGeometry = null;
+  } else {
+    const flat = navBuckets.flatten();
+    navGeometry = flat.channels[0];
+    navData = [flat.x, flat.ys[0]];
   }
-  flattenNavBuckets();
-  navData = [navX, navY];
 }
 
-/**
- * spline 平滑仅在可见点数不超过该阈值时启用。
- * 密集视图下改用 uPlot 的 linear 构建器：它按像素列聚合（每列只画 min/max 竖线），
- * 视觉上与逐点绘制无差别（非数据降采样），可流畅支撑百万级点数。
- */
-const SPLINE_MAX_POINTS = 1000;
-/** @type {any} spline 路径构建器（替代 Chart.js 的 tension 平滑曲线，稀疏视图时启用） */
-let splineBuilder = null;
-/** @type {any} linear 路径构建器（密集视图，像素列聚合） */
+/** @type {any} */
 let linearBuilder = null;
-/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number}|null} */
+/** @type {import('./chart-buckets.js').OrderedGeometry[]} */
+let mainGeometry = [];
+/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number,paintTop:number,paintBottom:number,columns:number[][],columnLengths:Uint32Array,coverage:Float64Array,pending:boolean}|null} */
 let bucketRaster = null;
-/** @type {Map<number, {base:number,segments:number[],clip:Path2D|null}>} */
-const bucketFills = new Map();
+/** @type {WeakMap<object, Map<number, any>>} */
+let orderedPaints = new WeakMap();
 
-/**
- * 自适应路径构建：稀疏时 spline 平滑，密集时 linear 聚合。
- * @param {any} u @param {number} seriesIdx @param {number} idx0 @param {number} idx1
- */
+/** @param {any} u @param {string} name @param {number} started @param {number} [count=1] */
+function recordPaintStage(u, name, started, count = 1) {
+  const stages = drawStages.get(u);
+  if (!stages) return;
+  stages[`${name}Ms`] = (stages[`${name}Ms`] || 0) + performance.now() - started;
+  stages[`${name}Count`] = (stages[`${name}Count`] || 0) + count;
+}
+
+/** The carrier is for uPlot coordinates/cursor only; every channel draws its own candidates. */
 function adaptivePaths(u, seriesIdx, idx0, idx1) {
   const main = u === state.mainChart;
-  const raw = main ? boundKind === 'raw' : state.chartSeries.x.length <= navMaxBuckets();
-  const builder =
-    raw && splineBuilder && idx1 - idx0 <= SPLINE_MAX_POINTS ? splineBuilder : (linearBuilder ?? splineBuilder);
-  const paths = builder ? builder(u, seriesIdx, idx0, idx1) : null;
-  // The overview uses uPlot strokes and has no main-chart raster/fill hooks.
-  // Its path construction must also leave cached main fill geometry untouched.
-  if (!main) return paths;
-  if (paths?.fill && boundKind === 'window' && displayContext === 'review' && u.series[seriesIdx].fill(u, seriesIdx)) {
-    bucketFills.set(seriesIdx, bucketFillGeometry(u, seriesIdx, idx0, idx1, paths.clip));
-    paths.fill = new Path2D();
-  } else bucketFills.delete(seriesIdx);
-  if (paths && useBucketRaster(u)) paths.stroke = new Path2D();
-  return paths;
-}
-
-/** Avoid a single filled contour with thousands of coincident vertical reversals. */
-function bucketFillGeometry(u, seriesIdx, idx0, idx1, clip) {
-  const segments = [];
+  const geometry = main ? (boundKind === 'window' ? mainGeometry[seriesIdx - 1] : null) : navGeometry;
+  if (!geometry) return linearBuilder ? linearBuilder(u, seriesIdx, idx0, idx1) : null;
+  const started = performance.now();
   const series = u.series[seriesIdx];
-  const xs = u.data[0];
-  const ys = u.data[seriesIdx];
-  const base = series.pxRound(u.valToPos(series.fillTo(u, seriesIdx, series.min, series.max, 0), series.scale, true));
-  if (!Number.isFinite(base)) return { base, segments, clip: clip ?? null };
-  for (let i = idx0 - (idx0 % 2); i + 2 <= idx1; i += 2) {
-    if (!Number.isFinite(ys[i + 1]) || !Number.isFinite(ys[i + 2])) continue;
-    const x0 = series.pxRound(u.valToPos(xs[i], 'x', true));
-    const x1 = series.pxRound(u.valToPos(xs[i + 2], 'x', true));
-    const y0 = series.pxRound(u.valToPos(ys[i + 1], series.scale, true));
-    const y1 = series.pxRound(u.valToPos(ys[i + 2], series.scale, true));
-    if (!Number.isFinite(x0) || !Number.isFinite(x1) || !Number.isFinite(y0) || !Number.isFinite(y1)) continue;
-    if (x0 === x1) continue;
-    segments.push(x0, y0, x1, y1);
+  const base = series.fillTo
+    ? u.valToPos(series.fillTo(u, seriesIdx, series.min, series.max, 0), series.scale, true)
+    : NaN;
+  let cache = orderedPaints.get(u);
+  if (!cache) {
+    cache = new Map();
+    orderedPaints.set(u, cache);
   }
-  return { base, segments, clip: clip ?? null };
+  const prior = cache.get(seriesIdx),
+    sx = u.scales?.x,
+    sy = u.scales?.[series.scale],
+    bbox = u.bbox ?? {},
+    key = [bbox.left, bbox.top, bbox.width, bbox.height, plotPixelRatio(), sx?.min, sx?.max, sy?.min, sy?.max, base];
+  let paint = prior;
+  if (
+    !prior ||
+    prior.geometry !== geometry ||
+    prior.project !== u.valToPos ||
+    key.some((value, i) => !Object.is(value, prior.key[i]))
+  ) {
+    const size = geometry.x.length * 2;
+    const buffer = prior?.buffer.length >= size ? prior.buffer : new Float64Array(Math.max(64, size));
+    const points = buffer.subarray(0, size);
+    let verticalTravel = 0;
+    for (let i = 0; i < geometry.x.length; i++) {
+      points[i * 2] = u.valToPos(geometry.x[i], 'x', true);
+      points[i * 2 + 1] = u.valToPos(geometry.y[i], series.scale, true);
+      if (geometry.connect[i]) verticalTravel += Math.abs(points[i * 2 + 1] - points[(i - 1) * 2 + 1]);
+    }
+    paint = {
+      geometry,
+      project: u.valToPos,
+      key,
+      buffer,
+      points,
+      connect: geometry.connect,
+      base,
+      // Highly retraced paths can defer seconds of GPU work on WebView2. Use
+      // analytic area coverage there; ordinary fills avoid the CPU mask cost.
+      rasterFill: verticalTravel > bbox.width * 64,
+      intervalBuffer: prior?.intervalBuffer,
+      offsetBuffer: prior?.offsetBuffer,
+    };
+    cache.set(seriesIdx, paint);
+    recordPaintStage(u, 'coordinates', started);
+  } else recordPaintStage(u, 'coordinatesCached', started);
+  // The bitmap path has no discarded standard stroke/fill construction.
+  if (main && useBucketRaster(u)) return { stroke: new Path2D(), fill: null };
+  if (paint.stroke)
+    return main && series.fill(u, seriesIdx)
+      ? { stroke: new Path2D(), fill: null }
+      : { stroke: paint.stroke, fill: null };
+  const { points } = paint;
+  const stroke = new Path2D();
+  for (let i = 0; i < geometry.x.length; i++) {
+    const x = points[i * 2],
+      y = points[i * 2 + 1];
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (geometry.connect[i]) stroke.lineTo(x, y);
+    else stroke.moveTo(x, y);
+  }
+  if (main && series.fill(u, seriesIdx)) {
+    // Keep fallback compositing identical: area first, then the channel stroke.
+    paint.stroke = stroke;
+    return { stroke: new Path2D(), fill: null };
+  }
+  paint.stroke = stroke;
+  return { stroke, fill: null };
 }
 
 function drawBucketFill(u, seriesIdx) {
-  if (boundKind !== 'window' || displayContext !== 'review') return;
-  const geometry = bucketFills.get(seriesIdx);
-  const series = u.series[seriesIdx];
+  if (boundKind !== 'window') return;
+  const geometry = orderedPaints.get(u)?.get(seriesIdx),
+    series = u.series[seriesIdx];
   const fill = series.fill(u, seriesIdx);
-  if (!geometry || !fill) return;
-  const ctx = u.ctx,
+  if (!geometry || !fill || !Number.isFinite(geometry.base)) return;
+  if (geometry.rasterFill && useBucketRaster(u) && /^rgba\(/.test(fill)) return;
+  if (bucketRaster?.pending) flushBucketRaster(u);
+  const started = performance.now();
+  const { points, connect, base } = geometry,
+    ctx = u.ctx,
     bbox = u.bbox;
+  if (!geometry.fill) {
+    const path = new Path2D();
+    let open = false,
+      lastX = 0;
+    const close = () => {
+      if (!open) return;
+      path.lineTo(lastX, base);
+      path.closePath();
+      open = false;
+    };
+    for (let i = 0; i < connect.length; i++) {
+      const x = points[i * 2],
+        y = points[i * 2 + 1];
+      if (!connect[i] || !Number.isFinite(x) || !Number.isFinite(y)) close();
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (!open) {
+        path.moveTo(x, base);
+        path.lineTo(x, y);
+        open = true;
+      } else path.lineTo(x, y);
+      lastX = x;
+    }
+    close();
+    geometry.fill = path;
+  }
+  // Keep the area on the destination canvas. Filling the CPU scratch before
+  // drawImage forces its pending path to rasterize synchronously on WebView2.
   ctx.save();
   ctx.beginPath();
   ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
   ctx.clip();
-  if (geometry.clip) ctx.clip(geometry.clip);
   ctx.fillStyle = fill;
   ctx.globalAlpha = series.alpha;
-  for (let i = 0; i < geometry.segments.length; i += 4) {
-    const x0 = geometry.segments[i],
-      y0 = geometry.segments[i + 1];
-    const x1 = geometry.segments[i + 2],
-      y1 = geometry.segments[i + 3];
-    ctx.beginPath();
-    ctx.moveTo(x0, geometry.base);
-    ctx.lineTo(x0, y0);
-    ctx.lineTo(x1, y1);
-    ctx.lineTo(x1, geometry.base);
-    ctx.closePath();
-    ctx.fill();
-  }
+  ctx.fill(geometry.fill);
   ctx.restore();
+  recordPaintStage(u, 'fill', started);
 }
 
 function useBucketRaster(u) {
   return (
     u === state.mainChart &&
     boundKind === 'window' &&
-    displayContext === 'review' &&
     typeof OffscreenCanvas !== 'undefined' &&
     u.series.slice(1).every((s) => !s.show || (s.alpha === 1 && /^#[\da-f]{6}$/i.test(s.stroke(u, 0))))
   );
 }
 
-/**
- * Keep the full display extrema at screen resolution when joined Canvas paths
- * are too expensive. Opaque min/max column spans share one bounded bitmap and
- * one upload; no wide buckets or source-sample changes are needed for pressure.
- */
+/** Scan-convert by x column, then union covered intervals before writing any pixels. */
 function drawBucketRaster(u, seriesIdx) {
-  if (!useBucketRaster(u)) return;
-  const bbox = u.bbox;
-  const width = Math.ceil(bbox.width),
-    height = Math.ceil(bbox.height);
-  if (!bucketRaster || bucketRaster.canvas.width !== width || bucketRaster.canvas.height !== height) {
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = /** @type {OffscreenCanvasRenderingContext2D} */ (canvas.getContext('2d'));
-    const image = ctx.createImageData(width, height);
-    bucketRaster = { canvas, ctx, image, pixels: new Uint32Array(image.data.buffer), dirtyTop: height, dirtyBottom: 0 };
+  if (!useBucketRaster(u)) {
+    if (u !== state.mainChart || boundKind !== 'window') return;
+    // Unfilled fallback paths are stroked by uPlot itself. Only a filled path
+    // defers its stroke until after our custom area composition.
+    if (!u.series[seriesIdx].fill(u, seriesIdx)) return;
+    const stroke = orderedPaints.get(u)?.get(seriesIdx)?.stroke;
+    if (!stroke) return;
+    const ctx = u.ctx,
+      bbox = u.bbox,
+      series = u.series[seriesIdx];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
+    ctx.clip();
+    ctx.strokeStyle = series.stroke(u, seriesIdx);
+    ctx.lineWidth = series.width * plotPixelRatio();
+    ctx.globalAlpha = series.alpha;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'butt';
+    ctx.stroke(stroke);
+    ctx.restore();
+    return;
   }
-  const { pixels } = bucketRaster;
-  const combined = fillSuppressed() || !hasEnabledFill();
-  const firstVisible = u.series.findIndex((series, index) => index > 0 && series.show);
-  if (!combined || seriesIdx === firstVisible) {
-    pixels.fill(0);
+  const geometry = orderedPaints.get(u)?.get(seriesIdx);
+  if (!geometry) return;
+  const started = performance.now();
+  const bbox = u.bbox,
+    width = Math.ceil(bbox.width),
+    height = Math.ceil(bbox.height);
+  if (!bucketRaster || bucketRaster.canvas.width !== height || bucketRaster.canvas.height !== width) {
+    // Transpose the scratch: each screen column becomes one contiguous row.
+    const canvas = new OffscreenCanvas(height, width);
+    // The shared scratch is rewritten by CPU pixels after every channel.
+    const ctx = /** @type {OffscreenCanvasRenderingContext2D} */ (
+      canvas.getContext('2d', { willReadFrequently: true })
+    );
+    const image = ctx.createImageData(height, width);
+    bucketRaster = {
+      canvas,
+      ctx,
+      image,
+      pixels: new Uint32Array(image.data.buffer),
+      dirtyTop: height,
+      dirtyBottom: 0,
+      paintTop: height,
+      paintBottom: 0,
+      columns: Array.from({ length: width }, () => []),
+      columnLengths: new Uint32Array(width),
+      coverage: new Float64Array((height + 1) * 3),
+      pending: false,
+    };
+  }
+  const { pixels, columns, columnLengths } = bucketRaster;
+  if (!bucketRaster.pending) {
+    if (bucketRaster.dirtyBottom > bucketRaster.dirtyTop)
+      for (let x = 0; x < width; x++)
+        pixels.fill(0, x * height + bucketRaster.dirtyTop, x * height + bucketRaster.dirtyBottom);
     bucketRaster.dirtyTop = height;
     bucketRaster.dirtyBottom = 0;
   }
+  const series = u.series[seriesIdx],
+    hex = Number.parseInt(series.stroke(u, seriesIdx).slice(1), 16);
+  const color = new Uint32Array(Uint8Array.of(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255).buffer)[0];
+  const fill = series.fill(u, seriesIdx);
+  const half = (series.width * plotPixelRatio()) / 2;
+  const intervalStarted = performance.now();
+  if (!geometry.raster || geometry.raster.half !== half) {
+    columnLengths.fill(0);
+    const { points, connect } = geometry;
+    for (let i = 0; i < connect.length; i++) {
+      const x1 = points[i * 2] - bbox.left,
+        y1 = points[i * 2 + 1] - bbox.top;
+      if (!Number.isFinite(x1) || !Number.isFinite(y1)) continue;
+      const x0 = connect[i] ? points[(i - 1) * 2] - bbox.left : x1;
+      const y0 = connect[i] ? points[(i - 1) * 2 + 1] - bbox.top : y1;
+      const dx = x1 - x0,
+        dy = y1 - y0;
+      const left = Math.max(0, Math.floor(Math.min(x0, x1) - half)),
+        right = Math.min(width, Math.ceil(Math.max(x0, x1) + half));
+      for (let x = left; x < right; x++) {
+        const ta = dx ? Math.max(0, Math.min(1, (x - half - x0) / dx)) : 0;
+        const tb = dx ? Math.max(0, Math.min(1, (x + 1 + half - x0) / dx)) : 1;
+        const a = y0 + dy * ta,
+          b = y0 + dy * tb;
+        const top = Math.max(0, Math.floor(Math.min(a, b) - half)),
+          bottom = Math.min(height, Math.ceil(Math.max(a, b) + half));
+        if (top < bottom) {
+          const n = columnLengths[x];
+          columns[x][n] = top;
+          columns[x][n + 1] = bottom;
+          columnLengths[x] = n + 2;
+        }
+      }
+    }
+    let entries = 0;
+    for (let x = 0; x < width; x++) {
+      const spans = columns[x],
+        length = columnLengths[x];
+      // In-place insertion sort of interval pairs; each column has a bounded candidate count.
+      for (let i = 2; i < length; i += 2) {
+        const a = spans[i],
+          b = spans[i + 1];
+        let j = i;
+        while (j > 0 && spans[j - 2] > a) {
+          spans[j] = spans[j - 2];
+          spans[j + 1] = spans[j - 1];
+          j -= 2;
+        }
+        spans[j] = a;
+        spans[j + 1] = b;
+      }
+      let top = spans[0],
+        bottom = spans[1];
+      let count = 0;
+      for (let i = 2; i <= length; i += 2) {
+        if (i < length && spans[i] <= bottom) {
+          bottom = Math.max(bottom, spans[i + 1]);
+          continue;
+        }
+        if (bottom > top) {
+          spans[count++] = top;
+          spans[count++] = bottom;
+        }
+        top = spans[i];
+        bottom = spans[i + 1];
+      }
+      columnLengths[x] = count;
+      entries += count;
+    }
+    geometry.intervalBuffer =
+      geometry.intervalBuffer?.length >= entries ? geometry.intervalBuffer : new Uint32Array(Math.max(64, entries));
+    geometry.offsetBuffer =
+      geometry.offsetBuffer?.length >= width + 1 ? geometry.offsetBuffer : new Uint32Array(width + 1);
+    const spans = geometry.intervalBuffer.subarray(0, entries),
+      offsets = geometry.offsetBuffer.subarray(0, width + 1);
+    let cursor = 0;
+    for (let x = 0; x < width; x++) {
+      offsets[x] = cursor;
+      for (let i = 0; i < columnLengths[x]; i++) spans[cursor++] = columns[x][i];
+    }
+    offsets[width] = cursor;
+    geometry.raster = { half, spans, offsets };
+    recordPaintStage(u, 'intervals', intervalStarted);
+  } else recordPaintStage(u, 'intervalsCached', intervalStarted);
+  const { spans, offsets } = geometry.raster;
+  if (geometry.rasterFill && Number.isFinite(geometry.base) && fill && /^rgba\(/.test(fill))
+    rasterBucketFill(u, geometry, fill);
   let { dirtyTop, dirtyBottom } = bucketRaster;
-  {
-    const s = seriesIdx;
-    const series = u.series[s];
-    if (!series.show) return;
-    const hex = Number.parseInt(series.stroke(u, s).slice(1), 16);
-    const color = new Uint32Array(Uint8Array.of(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255).buffer)[0];
-    const half = (series.width * plotPixelRatio()) / 2;
-    let previousX = Number.NaN;
-    let previousY = Number.NaN;
-    for (let i = 0; i < u.data[0].length; i += 2) {
-      const min = u.data[s][i],
-        max = u.data[s][i + 1];
-      if (!Number.isFinite(min) || !Number.isFinite(max)) {
-        previousX = previousY = Number.NaN;
-        continue;
-      }
-      const x = u.valToPos(u.data[0][i], 'x', true) - bbox.left;
-      const a = u.valToPos(min, series.scale, true) - bbox.top;
-      const b = u.valToPos(max, series.scale, true) - bbox.top;
-      if (![x, a, b].every(Number.isFinite)) {
-        previousX = previousY = Number.NaN;
-        continue;
-      }
-      // Nonuniform timestamps can leave gaps between sample-count stripes.
-      // Retain their existing connecting segment instead of turning them into dots.
-      if (Number.isFinite(previousX) && x - previousX > Math.max(2, Math.ceil(half * 2))) {
-        let enter = 0;
-        let exit = 1;
-        for (const [position, delta, limit] of [
-          [previousX, x - previousX, width],
-          [previousY, a - previousY, height],
-        ]) {
-          if (delta === 0) {
-            if (position < -half || position > limit + half) exit = -1;
-          } else {
-            const t0 = (-half - position) / delta,
-              t1 = (limit + half - position) / delta;
-            enter = Math.max(enter, Math.min(t0, t1));
-            exit = Math.min(exit, Math.max(t0, t1));
-          }
-        }
-        const steps = enter <= exit ? Math.ceil(Math.max(x - previousX, Math.abs(a - previousY)) * (exit - enter)) : 0;
-        for (let step = 1; step < steps; step++) {
-          const t = enter + ((exit - enter) * step) / steps;
-          const cx = previousX + (x - previousX) * t;
-          const cy = previousY + (a - previousY) * t;
-          const x0 = Math.max(0, Math.floor(cx - half)),
-            x1 = Math.min(width, Math.ceil(cx + half));
-          const y0 = Math.max(0, Math.floor(cy - half)),
-            y1 = Math.min(height, Math.ceil(cy + half));
-          if (x0 < x1 && y0 < y1) {
-            dirtyTop = Math.min(dirtyTop, y0);
-            dirtyBottom = Math.max(dirtyBottom, y1);
-          }
-          for (let y = y0; y < y1; y++) for (let px = x0; px < x1; px++) pixels[y * width + px] = color;
-        }
-      }
-      const left = Math.max(0, Math.floor(x - half)),
-        right = Math.min(width, Math.ceil(x + half));
-      const top = Math.max(0, Math.floor(Math.min(a, b) - half)),
-        bottom = Math.min(height, Math.ceil(Math.max(a, b) + half));
-      if (left < right && top < bottom) {
-        dirtyTop = Math.min(dirtyTop, top);
-        dirtyBottom = Math.max(dirtyBottom, bottom);
-      }
-      for (let y = top; y < bottom; y++) for (let px = left; px < right; px++) pixels[y * width + px] = color;
-      previousX = x;
-      previousY = b;
+  for (let x = 0; x < width; x++) {
+    for (let i = offsets[x]; i < offsets[x + 1]; i += 2) {
+      const top = spans[i],
+        bottom = spans[i + 1];
+      dirtyTop = Math.min(dirtyTop, top);
+      dirtyBottom = Math.max(dirtyBottom, bottom);
+      pixels.fill(color, x * height + top, x * height + bottom);
     }
   }
   bucketRaster.dirtyTop = dirtyTop;
   bucketRaster.dirtyBottom = dirtyBottom;
-  // With no fill between channels, opaque strokes can share a single upload.
-  if (combined && u.series.slice(seriesIdx + 1).some((series) => series.show)) return;
+  bucketRaster.pending = true;
+  recordPaintStage(u, 'raster', started);
+  if (u.series.slice(seriesIdx + 1).some((s) => s.show)) return;
+  flushBucketRaster(u);
+}
+
+function flushBucketRaster(u) {
+  if (!bucketRaster?.pending) return;
+  bucketRaster.pending = false;
+  const { dirtyTop, dirtyBottom } = bucketRaster,
+    bbox = u.bbox,
+    width = Math.ceil(bbox.width);
   if (dirtyBottom <= dirtyTop) return;
-  bucketRaster.ctx.putImageData(bucketRaster.image, 0, 0, 0, dirtyTop, width, dirtyBottom - dirtyTop);
+  const uploadStarted = performance.now();
+  const scratch = bucketRaster.ctx;
+  if (bucketRaster.paintBottom > bucketRaster.paintTop)
+    scratch.clearRect(bucketRaster.paintTop, 0, bucketRaster.paintBottom - bucketRaster.paintTop, width);
+  scratch.putImageData(bucketRaster.image, 0, 0, dirtyTop, 0, dirtyBottom - dirtyTop, width);
+  bucketRaster.paintTop = dirtyTop;
+  bucketRaster.paintBottom = dirtyBottom;
   const ctx = u.ctx;
   ctx.save();
   ctx.beginPath();
   ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
   ctx.clip();
+  ctx.transform(0, 1, 1, 0, bbox.left, bbox.top);
   ctx.drawImage(
     bucketRaster.canvas,
-    0,
     dirtyTop,
-    width,
+    0,
     dirtyBottom - dirtyTop,
-    bbox.left,
-    bbox.top + dirtyTop,
     width,
+    dirtyTop,
+    0,
     dirtyBottom - dirtyTop,
+    width,
   );
   ctx.restore();
+  recordPaintStage(u, 'bitmap', uploadStarted);
+}
+
+/** @param {any} u @param {any} geometry @param {string} fill */
+function rasterBucketFill(u, geometry, fill) {
+  const started = performance.now();
+  const rgba = fill.match(/[\d.]+/g)?.map(Number);
+  if (!rgba || rgba.length !== 4 || !bucketRaster) return;
+  const rgb = new Uint32Array(Uint8Array.of(rgba[0], rgba[1], rgba[2], 0).buffer)[0];
+  const bounds = rasterOrderedFill({
+    points: geometry.points,
+    connect: geometry.connect,
+    base: geometry.base - u.bbox.top,
+    leftOffset: u.bbox.left,
+    topOffset: u.bbox.top,
+    width: bucketRaster.canvas.height,
+    height: bucketRaster.canvas.width,
+    pixels: bucketRaster.pixels,
+    coverage: bucketRaster.coverage,
+    rgb,
+    opacity: rgba[3],
+    transposed: true,
+    opaque: geometry.raster,
+    composite: bucketRaster.pending,
+  });
+  bucketRaster.dirtyTop = Math.min(bucketRaster.dirtyTop, bounds.top);
+  bucketRaster.dirtyBottom = Math.max(bucketRaster.dirtyBottom, bounds.bottom);
+  recordPaintStage(u, 'fill', started);
 }
 
 // ─── Data binding ────────────────────────────────────────────────────────────
@@ -639,6 +783,9 @@ function bindMainViews(start, end) {
 }
 
 export function syncChartSeries() {
+  pauseContext = null;
+  displayFrames.cancel('chart-navigator');
+  cancelIndexWarmup();
   cancelPreparation();
   cancelFrameProbe();
   selectDisplayContext(state.isRecording ? 'recording' : 'review');
@@ -648,7 +795,8 @@ export function syncChartSeries() {
   reviewFillPolicy.reset();
   sourceRevision = chartRevision();
   bucketRaster = null;
-  bucketFills.clear();
+  orderedPaints = new WeakMap();
+  mainGeometry = [];
   submittedSourceLen = state.chartSeries.x.length;
   recentAppendCount = 0;
   feedbackRecording = state.isRecording;
@@ -656,6 +804,7 @@ export function syncChartSeries() {
   mainData = [[], [], [], [], [], [], [], [], []];
   rawStart = 0;
   rawEnd = 0;
+  rawWindowCache = null;
   extremaIndex.reset();
   displayBuckets.reset(0);
   boundKind = 'raw';
@@ -678,6 +827,7 @@ export function syncChartSeries() {
 /** @param {boolean} dragging */
 export function setRangeDragging(dragging) {
   if (dragging && !rangeDragging) {
+    cancelIndexWarmup();
     selectDisplayContext('review');
     cancelFrameProbe(false);
   }
@@ -721,6 +871,7 @@ function trackNewPoints(through = state.chartSeries.x.length) {
     seriesMin[si + 1] = min;
   }
   scannedLen = len;
+  if (changed) rawWindowCache = null;
   return changed;
 }
 
@@ -767,6 +918,56 @@ function mainBucketCap(count) {
   return bucketCap(displayResolution(width) / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1));
 }
 
+/** Keep medium zooms on real sample geometry with a bounded copy/vertex budget. */
+function mainRawLimit() {
+  return displayContext === 'review'
+    ? Math.min(16_384, Math.floor(displayResolution() * 4))
+    : Math.floor(plotCssWidth());
+}
+
+/** Bound retraced Canvas strokes as well as vertices; fixed data keeps the same choice through a gesture. */
+function useRawWindow(start, end) {
+  const count = end - start;
+  if (count > mainRawLimit()) return false;
+  if (count <= displayResolution()) return true;
+  const chart = state.mainChart;
+  if (!chart?.series || !chart.bbox?.height) return true;
+  const visible = chart.series.reduce((mask, series, s) => (s > 0 && series.show ? mask | (1 << (s - 1)) : mask), 0);
+  const width = displayResolution();
+  const height = chart.bbox.height;
+  const cached = rawWindowCache;
+  if (
+    cached?.generation === dataGen &&
+    cached.start === start &&
+    cached.end === end &&
+    cached.visible === visible &&
+    cached.width === width &&
+    cached.height === height
+  )
+    return cached.raw;
+  // Sum vertical travel relative to the full signal range. Near-flat noise can
+  // use raw geometry; repeated large swings retain the bounded bucket raster.
+  let remaining = Math.max(32, (width / height) * 48);
+  const series = channelBufs();
+  for (let s = 0; s < series.length && remaining >= 0; s++) {
+    if (!(visible & (1 << s))) continue;
+    const span = Math.max(Math.abs(seriesMin[s + 1]), Math.abs(seriesMax[s + 1]), seriesMax[s + 1] - seriesMin[s + 1]);
+    if (!Number.isFinite(span) || span === 0) continue;
+    let previous = Number.NaN;
+    for (const { values } of series[s].chunks(start, end)) {
+      for (const value of values) {
+        if (Number.isFinite(value) && Number.isFinite(previous)) remaining -= Math.abs(value - previous) / span;
+        previous = value;
+        if (remaining < 0) break;
+      }
+      if (remaining < 0) break;
+    }
+  }
+  const raw = remaining >= 0;
+  rawWindowCache = { generation: dataGen, start, end, visible, width, height, raw };
+  return raw;
+}
+
 /** Display projection and pacing eligibility; this does not suppress fill. */
 function displayDense(count = visiblePointCount, width = visiblePlotWidth) {
   return count > displayResolution(width);
@@ -774,7 +975,13 @@ function displayDense(count = visiblePointCount, width = visiblePlotWidth) {
 
 /** Fill needs a larger window AND measured pressure; raw history size alone never suppresses it. */
 function fillDense(count = visiblePointCount, width = visiblePlotWidth) {
-  return count >= Math.max(1, width) * FILL_POINTS_PER_PIXEL;
+  if (count >= Math.max(1, width) * FILL_POINTS_PER_PIXEL) return true;
+  if (count <= displayResolution(width)) return false;
+  if (displayContext !== 'review' || !state.mainChart?.bbox?.height) return false;
+  const { start, end } = sourceRange();
+  // Complexity-protected bucket windows still retrace many vertical segments.
+  // Keep measured fill protection until they can actually use the raw path.
+  return !useRawWindow(start, end);
 }
 
 function hasEnabledFill() {
@@ -810,6 +1017,7 @@ function channelBufs() {
 function bindFlattenedBuckets(buckets, kind) {
   const flat = buckets.flatten();
   mainData = [flat.x, ...flat.ys];
+  mainGeometry = flat.channels;
   boundKind = kind;
 }
 
@@ -837,8 +1045,9 @@ function extremaForStripes(series, end, ppb) {
  * Prepare full-history auxiliaries without falling back to a full raw scan in
  * the requesting frame. Appends do not invalidate the fixed prefix in progress.
  * @param {number} length @param {number} end @param {number} ppb
+ * @param {boolean} reuseProjection @param {PaintRequest} request
  */
-function prepareLargeHistory(length, end, ppb, reuseProjection = false) {
+function prepareLargeHistory(length, end, ppb, reuseProjection, request) {
   if (historyWork) return true;
   const cap = navMaxBuckets();
   const range = preparationTarget ?? sourceRange();
@@ -850,6 +1059,7 @@ function prepareLargeHistory(length, end, ppb, reuseProjection = false) {
     !needIndex
   )
     return false;
+  cancelIndexWarmup();
   const work = {
     generation: dataGen,
     start: range.start,
@@ -863,18 +1073,19 @@ function prepareLargeHistory(length, end, ppb, reuseProjection = false) {
   const series = channelBufs();
   setPreparing(true);
   void runCooperativeSlices(
-    () => {
-      if (scannedLen < length) {
-        trackNewPoints(Math.min(length, scannedLen + 4096));
-        return false;
-      }
-      if (length > cap && navSrcLen < length) {
-        const through = Math.min(length, navSrcLen + 4096);
-        foldNavRange(cs.x, cs.power, navSrcLen, through, cap);
-        return false;
-      }
-      return !needIndex || extremaIndex.syncStep(series, end);
-    },
+    () =>
+      measurePreparation(request, () => {
+        if (scannedLen < length) {
+          trackNewPoints(Math.min(length, scannedLen + 4096));
+          return false;
+        }
+        if (length > cap && navSrcLen < length) {
+          const through = Math.min(length, navSrcLen + 4096);
+          foldNavRange(cs.x, cs.power, navSrcLen, through, cap);
+          return false;
+        }
+        return !needIndex || extremaIndex.syncStep(series, end);
+      }),
     {
       isCancelled: () => {
         return work.cancelled || preparationInvalid(target);
@@ -898,6 +1109,114 @@ function prepareLargeHistory(length, end, ppb, reuseProjection = false) {
   return true;
 }
 
+/** Reuse a complete recording projection before a cold review index is ready.
+ * @param {number} start @param {number} end @param {number} cap */
+function usePausePreview(start, end, cap) {
+  const ppb = stripePpb(end - start, cap);
+  if (pauseRefinement && (state.isRecording || preparationInvalid(pauseRefinement.target))) {
+    pauseRefinement.cancelled = true;
+    pauseRefinement = null;
+    setPreparing(false);
+  }
+  if (!pauseRefinement) {
+    if (
+      state.isRecording ||
+      rangeDragging ||
+      appliedMainGen !== dataGen ||
+      boundKind !== 'window' ||
+      displayBuckets.srcStart !== start ||
+      displayBuckets.srcEnd > end ||
+      end - displayBuckets.srcEnd > 4096 ||
+      displayBuckets.ppb <= ppb ||
+      end - extremaIndex.blocks * BLOCK_SIZE <= COOPERATIVE_POINTS ||
+      !appliedXRange ||
+      appliedXRange[0] !== xRange()[0] ||
+      (appliedXRange[1] !== xRange()[1] && end === displayBuckets.srcEnd)
+    )
+      return false;
+    const target = {
+      generation: dataGen,
+      intent: windowIntent,
+      revision: chartRevision(),
+      length: state.chartSeries.x.length,
+      start,
+      end,
+      cap,
+      ppb,
+      xRange: xRange(),
+      width: plotCssWidth(),
+      resolution: displayResolution(),
+      density: renderPolicy.pixelsPerBucket,
+    };
+    const work = { target, cancelled: false, started: false, start: () => {} };
+    pauseRefinement = work;
+    const cs = state.chartSeries,
+      xs = cs.x.snapshot(),
+      series = channelBufs().map((col) => col.snapshot());
+    const buckets = new SeriesBuckets();
+    let prepareMs = 0;
+    /** @type {ReturnType<SeriesBuckets['beginRebuild']>|null} */
+    let step = null;
+    setPreparing(true);
+    work.start = () => {
+      if (work.started || work.cancelled || preparationInvalid(target)) return;
+      work.started = true;
+      void runCooperativeSlices(
+        () => {
+          const started = performance.now();
+          try {
+            if (extremaIndex.blocks < Math.floor(end / BLOCK_SIZE)) {
+              extremaIndex.syncStep(series, end, 32);
+              return false;
+            }
+            step ??= buckets.beginRebuild(xs, series, start, end, cap, extremaIndex);
+            return step(Infinity, 16);
+          } finally {
+            prepareMs += performance.now() - started;
+          }
+        },
+        { sliceMs: 1, isCancelled: () => work.cancelled || state.isRecording || preparationInvalid(target) },
+      )
+        .then((complete) => {
+          if (pauseRefinement !== work) return;
+          pauseRefinement = null;
+          setPreparing(false);
+          if (!complete || preparationInvalid(target) || state.isRecording) return;
+          const latest = sourceRange();
+          if (latest.start !== start || latest.end < end || latest.end - end > 4096) {
+            updateCharts();
+            return;
+          }
+          buckets.coarsenTo(stripePpb(latest.end - start, mainBucketCap(latest.end - start)));
+          buckets.appendThroughFixed(cs.x, channelBufs(), latest.end);
+          displayBuckets = buckets;
+          bindFlattenedBuckets(buckets, 'window');
+          appliedMainGen = -1;
+          const request = requestPaint('maintenance', 'refinement');
+          request.prepareMs = (request.prepareMs ?? 0) + prepareMs;
+          updateCharts('maintenance', { force: false, reason: 'refinement' });
+        })
+        .catch((error) => {
+          if (pauseRefinement === work) {
+            pauseRefinement = null;
+            setPreparing(false);
+          }
+          console.error('Chart pause refinement failed', error);
+        });
+    };
+  }
+  if (end < displayBuckets.srcEnd || end - displayBuckets.srcEnd > 4096 || start !== displayBuckets.srcStart) {
+    cancelPreparation();
+    return false;
+  }
+  if (end > displayBuckets.srcEnd) {
+    displayBuckets.appendThroughFixed(state.chartSeries.x, channelBufs(), end);
+    bindFlattenedBuckets(displayBuckets, 'window');
+    appliedMainGen = -1;
+  }
+  return true;
+}
+
 /** Only a full history can change density through pairwise merging. @param {number} start @param {number} end @param {number} ppb */
 function canAdvanceBuckets(start, end, ppb) {
   return (
@@ -908,8 +1227,8 @@ function canAdvanceBuckets(start, end, ppb) {
   );
 }
 
-/** @param {number} start @param {number} end @param {number} cap */
-function prepareLargeProjection(start, end, cap) {
+/** @param {number} start @param {number} end @param {number} cap @param {PaintRequest} request */
+function prepareLargeProjection(start, end, cap, request) {
   const count = end - start;
   const ppb = stripePpb(count, cap);
   if (projectionWork && (!preparationTarget || preparationInvalid(preparationTarget))) {
@@ -931,7 +1250,9 @@ function prepareLargeProjection(start, end, cap) {
   // covered sample count forced even cheap warm queries through many task yields.
   const advance = () => (index ? step(Infinity, 32) : step(4096));
   {
-    const deadline = performance.now() + INTERACTION_PREPARE_MS;
+    // A pause replaces the paced recording job. Allow a small complete warm
+    // query to finish here instead of adding a task yield and another frame.
+    const deadline = performance.now() + (request.reason === 'pause' ? PAUSE_PREPARE_MS : INTERACTION_PREPARE_MS);
     do {
       const complete = advance();
       if (preparationInvalid(target)) break;
@@ -947,7 +1268,7 @@ function prepareLargeProjection(start, end, cap) {
   const work = { generation: dataGen, start, end, cap, ppb, cancelled: false };
   projectionWork = work;
   setPreparing(true);
-  void runCooperativeSlices(advance, {
+  void runCooperativeSlices(() => measurePreparation(request, advance), {
     isCancelled: () => {
       return work.cancelled || preparationInvalid(target);
     },
@@ -994,7 +1315,7 @@ function stripesMatch(start, end, windowCount, cap) {
  * @param {number} start @param {number} end @param {number} windowCount @param {number} cap
  */
 function bindingCovers(start, end, windowCount, cap) {
-  if (windowCount <= cap) {
+  if (useRawWindow(start, end)) {
     // Keep both neighbours: uPlot needs their segments at clipped boundaries.
     return (
       boundKind === 'raw' &&
@@ -1013,14 +1334,15 @@ function applyXScale(range = xRange()) {
 
 /**
  * 「画什么」的唯一定义：把主图绑到窗口 `[start,end)` 在 `stripePpb(windowCount, cap)` 密度下的
- * min/max 条带；窗口不超过显示分辨率时复制原始样本及裁剪邻点。拖动中与松手后都只经过这里。
+ * min/max 条带；中等缩放在有界顶点预算内复制原始样本及裁剪邻点。拖动中与松手后都只经过这里。
  * @param {{ cap: number, start: number, end: number, windowCount: number, force: boolean }} args
  */
 function bindDisplayData(args) {
   const { cap, start, end, windowCount } = args;
   const cs = state.chartSeries;
 
-  if (windowCount <= cap) {
+  if (useRawWindow(start, end)) {
+    if (boundKind === 'raw' && rawStart <= Math.max(0, start - 1) && rawEnd >= Math.min(cs.x.length, end + 1)) return;
     boundKind = 'raw';
     bindMainViews(start, end);
     return;
@@ -1047,11 +1369,23 @@ function bindDisplayData(args) {
   bindFlattenedBuckets(displayBuckets, 'window');
 }
 
-/** @param {ChartRefreshSource} [source='live'] */
-function requestPaint(source = 'live') {
+/** @param {ChartRefreshSource} [source='live'] @param {string} [reason=source] */
+function requestPaint(source = 'live', reason = source) {
+  if (
+    pauseContext &&
+    (state.isRecording || pauseContext.generation !== dataGen || pauseContext.intent !== windowIntent)
+  )
+    pauseContext = null;
   if (rangeDragging) source = 'interaction';
   if (paintRequest == null) {
-    paintRequest = { batchId: ++paintBatchId, requestedAt: performance.now(), prepareMs: null, source };
+    paintRequest = {
+      batchId: ++paintBatchId,
+      requestedAt: performance.now(),
+      prepareMs: null,
+      source,
+      reason: pauseContext && reason === 'live' ? 'tail' : reason,
+      pause: pauseContext,
+    };
   } else if (source === 'interaction' || (source === 'maintenance' && paintRequest.source === 'live'))
     paintRequest.source = source;
   return paintRequest;
@@ -1060,6 +1394,9 @@ function requestPaint(source = 'live') {
 /** @param {any} chart @param {PaintRequest} request */
 function expectChartDraw(chart, request) {
   if (!chart) return;
+  chart.hooks ??= {};
+  chart.hooks.draw ??= [];
+  if (!chart.hooks.draw.includes(finishChartDraw)) chart.hooks.draw.push(finishChartDraw);
   const role = chart === state.navigatorChart ? 'navigator' : 'main';
   const pending = pendingDraws.get(chart);
   if (pending?.last === request) return;
@@ -1081,6 +1418,11 @@ function expectChartDraw(chart, request) {
     fillSuppressionReason: role === 'main' && fillSuppressed() ? fillPolicy.reason : null,
     recentAppendCount: role === 'main' ? recentAppendCount : 0,
     refreshSource: request.source,
+    reason: request.reason,
+    pauseId: request.pause?.id,
+    pauseRequestedAt: request.pause?.requestedAt,
+    pauseLength: request.pause?.length,
+    projection: chart.__chartProjection,
     refreshIntervalMs:
       role === 'main' && state.isRecording && request.source === 'live' && !rangeDragging ? liveRefreshInterval() : 0,
   });
@@ -1121,7 +1463,26 @@ function finishChartDraw(chart) {
     const role = chart === state.navigatorChart ? 'navigator' : 'main';
     // Keep the earliest request latency, with the metadata of the submitted data.
     pending.lastDiagnostic.requestedAt = pending.firstDiagnostic.requestedAt;
-    entry = performanceDiagnostics.chartPaint(role, pending.lastDiagnostic, drawEndedAt, duration);
+    const stages = drawStages.get(chart);
+    if (stages) {
+      stages.coordinateBytes = [...(orderedPaints.get(chart)?.values() ?? [])].reduce(
+        (sum, paint) => sum + paint.buffer.byteLength,
+        0,
+      );
+      stages.coverageBytes = chart === state.mainChart ? (bucketRaster?.coverage.byteLength ?? 0) : 0;
+      stages.rasterBytes = chart === state.mainChart ? (bucketRaster?.image.data.byteLength ?? 0) : 0;
+      stages.intervalBytes = [...(orderedPaints.get(chart)?.values() ?? [])].reduce(
+        (sum, paint) => sum + (paint.intervalBuffer?.byteLength ?? 0) + (paint.offsetBuffer?.byteLength ?? 0),
+        0,
+      );
+    }
+    entry = performanceDiagnostics.chartPaint(
+      role,
+      pending.lastDiagnostic,
+      drawEndedAt,
+      duration,
+      drawStages.get(chart),
+    );
     chart.__chartPaintTiming = {
       firstBatchId: pending.first.batchId,
       batchId: pending.last.batchId,
@@ -1132,6 +1493,7 @@ function finishChartDraw(chart) {
       prepareMs: pending.last.prepareMs,
     };
   }
+  if (chart === state.mainChart) pauseRefinement?.start();
   if (chart !== state.mainChart || appliedMainGen !== dataGen || !monitorVisible() || chartProbeFrame !== null) return;
   const generation = dataGen;
   const epoch = feedbackEpoch;
@@ -1272,11 +1634,22 @@ function selectDisplayContext(context) {
  * @param {number} t0 @param {PaintRequest} request
  */
 function finishPreparation(t0, request) {
-  request.prepareMs = performance.now() - t0;
+  request.prepareMs = (request.prepareMs ?? 0) + performance.now() - t0;
   for (const chart of [state.mainChart, state.navigatorChart]) {
     const pending = chart && pendingDraws.get(chart);
     if (pending?.last === request) pending.lastDiagnostic.prepareMs = request.prepareMs;
     if (pending?.first === request) pending.firstDiagnostic.prepareMs = request.prepareMs;
+  }
+}
+
+/** Account for background CPU work on its requesting paint, without timing samples individually.
+ * @param {PaintRequest} request @param {()=>boolean} step */
+function measurePreparation(request, step) {
+  const started = performance.now();
+  try {
+    return step();
+  } finally {
+    request.prepareMs = (request.prepareMs ?? 0) + performance.now() - started;
   }
 }
 
@@ -1292,6 +1665,7 @@ function applyData(opts = {}) {
   }
 
   if (sourceRevision !== chartRevision()) syncChartSeries();
+  if (!state.isRecording) cancelIndexWarmup();
   const request = requestPaint();
   paintRequest = null;
   const t0 = performance.now();
@@ -1314,9 +1688,11 @@ function applyData(opts = {}) {
   if ((!fillDense() || !hasEnabledFill()) && fillPolicy.reset()) fillPaintDirty = true;
   const cap = target?.cap ?? mainBucketCap(windowCount);
   const ppb = stripePpb(windowCount, cap);
+  const coarsePreview = usePausePreview(start, end, cap);
   if (
-    prepareLargeHistory(srcLen, end, ppb, canAdvanceBuckets(start, end, ppb)) ||
-    prepareLargeProjection(start, end, cap)
+    !coarsePreview &&
+    (prepareLargeHistory(srcLen, end, ppb, canAdvanceBuckets(start, end, ppb), request) ||
+      prepareLargeProjection(start, end, cap, request))
   ) {
     chartDirty = true;
     // Keep the original request timestamp across slices so draw latency includes
@@ -1335,7 +1711,7 @@ function applyData(opts = {}) {
 
   const nextXRange = target?.xRange ?? xRange();
   const sameXRange = appliedXRange?.[0] === nextXRange[0] && appliedXRange?.[1] === nextXRange[1];
-  const covers = bindingCovers(start, end, windowCount, cap);
+  const covers = coarsePreview || bindingCovers(start, end, windowCount, cap);
   const frozenAppend = appended && state.chartWindow.mode === 'frozen' && sameXRange && covers && !yChanged;
   const reuseBinding = !force && appliedMainGen === dataGen && covers && (!dataChanged || frozenAppend);
 
@@ -1345,8 +1721,15 @@ function applyData(opts = {}) {
       applyXScale(nextXRange);
     }
   } else {
-    bindDisplayData({ cap, start, end, windowCount, force });
+    if (!coarsePreview) bindDisplayData({ cap, start, end, windowCount, force });
     if (state.mainChart) {
+      state.mainChart.__chartProjection = {
+        quality: coarsePreview ? 'coarse' : 'fine',
+        start,
+        end,
+        ppb: boundKind === 'window' ? displayBuckets.ppb : 1,
+        candidates: boundKind === 'window' ? mainGeometry.map((g) => g.x.length) : [],
+      };
       expectChartDraw(state.mainChart, request);
       // Y 量程来自全量 seriesMax，与是否分桶无关；极值未破时跳过四轴量化。
       const mainStartedAt = performance.now();
@@ -1371,14 +1754,25 @@ function applyData(opts = {}) {
     const live = state.isRecording && !force && !preview && srcLen > cap;
     const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS || appliedNavGen !== dataGen;
     if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
-      bindNavData();
-      expectChartDraw(nav, request);
-      const navStartedAt = performance.now();
-      nav.setData(/** @type {any} */ (navData));
-      performanceDiagnostics.domCommit('navigator-chart-submit', navStartedAt);
-      appliedNavGen = dataGen;
-      appliedNavLen = srcLen;
-      lastNavPaint = now;
+      const generation = dataGen;
+      const submit = () => {
+        if (!monitorVisible() || generation !== dataGen) return;
+        const length = state.chartSeries.x.length;
+        if (appliedNavGen === dataGen && appliedNavLen === length) return;
+        bindNavData();
+        expectChartDraw(nav, request);
+        const navStartedAt = performance.now();
+        nav.setData(/** @type {any} */ (navData));
+        performanceDiagnostics.domCommit('navigator-chart-submit', navStartedAt);
+        appliedNavGen = dataGen;
+        appliedNavLen = length;
+        lastNavPaint = performance.now();
+      };
+      if (request.pause) displayFrames.schedule('chart-navigator', submit, 20);
+      else {
+        displayFrames.cancel('chart-navigator');
+        submit();
+      }
     }
   }
 
@@ -1392,11 +1786,26 @@ function applyData(opts = {}) {
 }
 
 /** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
-/** @param {ChartRefreshSource} [source='maintenance'] */
-export function updateCharts(source = 'maintenance') {
+/** @param {ChartRefreshSource} [source='maintenance'] @param {{force?:boolean,reason?:string,requestedAt?:number}} [options] */
+export function updateCharts(source = 'maintenance', { force = true, reason = source, requestedAt } = {}) {
+  chartDirty = true;
   cancelChartFrame();
-  requestPaint(source);
-  flushChart(true);
+  if (reason === 'pause') {
+    cancelIndexWarmup();
+    // A recording preparation can target an older prefix. Keep completed index
+    // blocks, but let this request capture its own complete window.
+    cancelPreparation();
+    paintRequest = null;
+    pauseContext = {
+      id: ++pauseId,
+      requestedAt: requestedAt ?? performance.now(),
+      length: state.chartSeries.x.length,
+      generation: dataGen,
+      intent: windowIntent,
+    };
+  }
+  requestPaint(source, reason);
+  flushChart(force);
 }
 
 /**
@@ -1419,6 +1828,9 @@ export function handleMonitorShown() {
 }
 
 export function handleMonitorHidden() {
+  pauseContext = null;
+  displayFrames.cancel('chart-navigator');
+  cancelIndexWarmup();
   chartDirty = true;
   paintRequest = null;
   cancelPreparation();
@@ -1442,6 +1854,9 @@ function registerChartListeners() {
   onThemeChange(applyChartTheme);
   const visibilityChanged = () => {
     if (!monitorVisible()) {
+      pauseContext = null;
+      displayFrames.cancel('chart-navigator');
+      cancelIndexWarmup();
       chartDirty = true;
       paintRequest = null;
       cancelChartFrame();
@@ -1490,6 +1905,7 @@ function flushChart(force = false) {
       liveNavDrawMs = 0;
     }
     flushingChart = false;
+    scheduleIndexWarmup();
     if (!chartDirty) paintRequest = null;
     else if (!historyWork && !projectionWork) scheduleChartUpdate();
   }
@@ -1556,6 +1972,7 @@ export function scheduleChartUpdate(source = 'live') {
  * @param {number|null} max
  */
 export function setChartXWindow(min, max) {
+  let pausedAdvance = false;
   // Natural full/follow appends retain evidence. User window changes retire it
   // in recording and review alike.
   if (xWindow.min !== min || xWindow.max !== max) {
@@ -1569,7 +1986,8 @@ export function setChartXWindow(min, max) {
       xWindow.max !== null &&
       Math.abs(max - min - (xWindow.max - xWindow.min)) < 1e-6;
     const automaticAdvance =
-      state.isRecording &&
+      (state.isRecording ||
+        (pauseContext && latest !== undefined && state.chartSeries.x.length - pauseContext.length <= 4096)) &&
       max === latest &&
       (xWindow.max === null || max >= xWindow.max) &&
       (fullAdvance || followAdvance);
@@ -1579,9 +1997,13 @@ export function setChartXWindow(min, max) {
       // raster observations; unrelated windows continue to retire old evidence.
       if (!rangeDragging) cancelFrameProbe(false);
     }
+    pausedAdvance = !!automaticAdvance && !state.isRecording;
   }
   xWindow.min = min;
   xWindow.max = max;
+  // A refinement can consume a pending chart job before the tail range UI runs.
+  // Advancing that paused window must enqueue the matching final tail paint.
+  if (pausedAdvance) scheduleChartUpdate('maintenance');
 }
 
 /**
@@ -2499,7 +2921,7 @@ function bindChartWheel(u) {
       wheelEndTimer = setTimeout(() => {
         wheelEndTimer = null;
         setRangeDragging(false);
-        updateCharts('interaction');
+        updateCharts('interaction', { force: false, reason: 'release' });
       }, 80);
     },
     { passive: false },
@@ -2542,8 +2964,11 @@ function observeResize(host, chart, onSize = null) {
   resizeTargets.set(chart, { host, onSize });
   chart.hooks.draw ??= [];
   chart.hooks.drawClear ??= [];
-  chart.hooks.drawClear.push(() => drawStarts.set(chart, performance.now()));
-  chart.hooks.draw.push(finishChartDraw);
+  chart.hooks.drawClear.push(() => {
+    drawStarts.set(chart, performance.now());
+    drawStages.set(chart, {});
+  });
+  if (!chart.hooks.draw.includes(finishChartDraw)) chart.hooks.draw.push(finishChartDraw);
   const ro = new ResizeObserver(() => {
     resizeDirty = true;
     chartDirty = true;
@@ -2569,9 +2994,8 @@ export function initChart() {
   syncChartFonts();
   syncChartSeries();
 
-  splineBuilder = uPlot.paths?.spline ? uPlot.paths.spline() : null;
   linearBuilder = uPlot.paths?.linear ? uPlot.paths.linear() : null;
-  const hasPaths = splineBuilder != null || linearBuilder != null;
+  const hasPaths = linearBuilder != null;
 
   const s = state.settings;
   fillStyles = [
@@ -2735,7 +3159,7 @@ function initNavigatorChart() {
         stroke: () => chartTheme.power,
         width: 1,
         points: { show: false },
-        ...(splineBuilder != null || linearBuilder != null ? { paths: adaptivePaths } : {}),
+        ...(linearBuilder != null ? { paths: adaptivePaths } : {}),
       },
     ],
     axes: [{ show: false }, { show: false }],

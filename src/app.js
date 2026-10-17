@@ -92,7 +92,7 @@ import {
   refreshPdLanguage,
   syncPdView,
 } from './views/pd.js';
-import { initSettingsView } from './views/settings-view.js';
+import { initSettingsView, showSettingsView } from './views/settings-view.js';
 import {
   handlePdmState,
   handleTriggerProgress,
@@ -300,7 +300,7 @@ function setupControls() {
       scheduleChartUpdate('interaction');
       return;
     }
-    updateCharts('interaction');
+    updateCharts('interaction', { force: false, reason: 'release' });
   }
 
   /** @param {'start'|'end'} leader */
@@ -339,7 +339,7 @@ function setupControls() {
         updateStatsDisplay();
         updateEnergyDisplay();
       }
-      updateCharts('interaction');
+      updateCharts('interaction', { force: false, reason: 'release' });
     };
 
     handle.addEventListener('pointerdown', (event) => {
@@ -407,7 +407,7 @@ function setupControls() {
         updateStatsDisplay();
         updateEnergyDisplay();
       }
-      updateCharts('interaction');
+      updateCharts('interaction', { force: false, reason: 'release' });
     };
 
     sliderFill.addEventListener('pointerdown', (event) => {
@@ -624,6 +624,12 @@ function setupControls() {
     if (val > 100) val = 100;
     state.settings.chartHeadroomPercent = val;
     refreshChartScales();
+    debouncedSaveSettings();
+  });
+
+  const immediateMarkerEl = /** @type {HTMLInputElement|null} */ (document.getElementById('immediate-marker'));
+  immediateMarkerEl?.addEventListener('change', () => {
+    state.settings.immediateMarker = immediateMarkerEl.checked;
     debouncedSaveSettings();
   });
 
@@ -890,12 +896,13 @@ function setupShell() {
     init: initTriggerView,
     onShow: syncTriggerView,
   });
-  // 设备信息并入设置页右栏，生命周期挂在 settings 视图上
+  // 设置页按需初始化；目录和滚动位置在同一会话内保留。
   registerView({
     id: 'settings',
     icon: 'settings',
     label: t('settings'),
     init: initSettingsView,
+    onShow: showSettingsView,
   });
 
   const tabsContainer = document.getElementById('titlebar-tabs');
@@ -927,6 +934,7 @@ function setupShell() {
   wireFlyout('btn-flyout-display', 'flyout-display');
   wireFlyout('btn-flyout-autopause', 'flyout-autopause');
   wireFlyout('btn-flyout-temp', 'flyout-temp');
+  wireFlyout('btn-device-info', 'flyout-device-info');
 
   applyWindowStyle(state.settings.windowStyle);
   initWindowControls();

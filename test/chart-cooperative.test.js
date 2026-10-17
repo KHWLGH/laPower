@@ -193,7 +193,7 @@ test('changing the window during cold indexing retains the completed prefix for 
     const done = originalStep.apply(this, args);
     if (!retired && this.blocks >= 128) {
       retired = true;
-      chart.setChartXWindow(0, 3999);
+      chart.setChartXWindow(0, 7999);
     }
     return done;
   };
@@ -209,7 +209,7 @@ test('changing the window during cold indexing retains the completed prefix for 
       columns.x,
       [columns.voltage, columns.current, columns.power, columns.temp, columns.dp, columns.dn, columns.cc1, columns.cc2],
       0,
-      4000,
+      8000,
       1200,
     );
     const flat = expected.flatten();
@@ -325,6 +325,85 @@ test('a dense follow window submits complete matching snapshots while samples ad
   }
 });
 
+test('recording warms fixed prefixes between paints and cancels background indexing before source replacement', async () => {
+  let busy = false;
+  const host = { clientWidth: 1200, setAttribute: (_key, value) => (busy = value === 'true') };
+  globalThis.document = { hidden: false, getElementById: () => host, querySelector: () => null, addEventListener() {} };
+  const { state, emptyChartColumns, setChartColumns } = await import('../src/state.js');
+  const chart = await import('../src/chart.js');
+  const columns = emptyChartColumns();
+  const append = (count) => {
+    const start = columns.x.length;
+    for (let i = start; i < start + count; i++)
+      for (const [key, col] of Object.entries(columns)) col.push(key === 'x' ? i : i % 97);
+  };
+  append(40000);
+  state.settings.activeView = 'monitor';
+  state.windowVisible = true;
+  state.isRecording = false;
+  state.chartWindow = { mode: 'frozen', duration: 999, min: 0, max: 999 };
+  state.mainChart = { width: 1200, setData() {}, setScale() {} };
+  state.navigatorChart = null;
+  setChartColumns(columns);
+  chart.syncChartSeries();
+  chart.setChartXWindow(0, 999);
+  chart.updateCharts();
+  while (busy) await new Promise((resolve) => setTimeout(resolve, 1));
+  const scheduler = globalThis.scheduler;
+  const originalStep = ExactExtremaIndex.prototype.syncStep;
+  const tasks = [];
+  let index;
+  let steps = 0;
+  let replace = false;
+  globalThis.scheduler = { postTask: (callback) => new Promise((resolve) => tasks.push(() => resolve(callback()))) };
+  ExactExtremaIndex.prototype.syncStep = function (...args) {
+    index = this;
+    steps++;
+    assert.equal(args[2], 32, 'background steps have a fixed sample budget');
+    const complete = originalStep.apply(this, args);
+    if (replace) {
+      setChartColumns(emptyChartColumns());
+      chart.syncChartSeries();
+    } else if (steps === 1) append(64);
+    return complete;
+  };
+  const drain = async () => {
+    for (let turn = 0; tasks.length && turn < 1000; turn++) {
+      tasks.shift()();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(tasks.length, 0);
+  };
+  try {
+    state.isRecording = true;
+    chart.updateCharts('live');
+    assert.equal(steps, 0, 'recording paint never starts the background scan synchronously');
+    await drain();
+    assert.equal(index.blocks, Math.floor(columns.x.length / 32), 'a new job catches appends after its fixed prefix');
+    state.isRecording = false;
+    chart.syncChartSeries();
+    chart.updateCharts();
+    while (busy) await drain();
+    state.isRecording = true;
+    const previousSteps = steps;
+    chart.updateCharts('live');
+    chart.setRangeDragging(true);
+    await drain();
+    assert.equal(steps, previousSteps, 'gestures cancel pending warmup');
+    chart.setRangeDragging(false);
+    replace = true;
+    chart.updateCharts('live');
+    await drain();
+    assert.equal(index.blocks, 0, 'cancelled work cannot repopulate the replacement index');
+  } finally {
+    chart.setRangeDragging(false);
+    state.isRecording = false;
+    chart.handleMonitorHidden();
+    globalThis.scheduler = scheduler;
+    ExactExtremaIndex.prototype.syncStep = originalStep;
+  }
+});
+
 test('a minimized native window cancels preparation even when document.hidden remains false', async () => {
   let busy = false;
   const host = {
@@ -376,6 +455,163 @@ test('a minimized native window cancels preparation even when document.hidden re
     globalThis.scheduler = previousScheduler;
     ExactExtremaIndex.prototype.syncStep = original;
     chart.handleMonitorHidden();
+    state.windowVisible = true;
+  }
+});
+test('cold pause publishes a complete coarse projection, accepts a bounded tail and upgrades exactly once', async () => {
+  let busy = false;
+  const host = {
+    clientWidth: 600,
+    setAttribute(_key, value) {
+      busy = value === 'true';
+    },
+  };
+  globalThis.document = { hidden: false, getElementById: () => host, querySelector: () => null, addEventListener() {} };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  const { state, emptyChartColumns } = await import('../src/state.js');
+  const chart = await import('../src/chart.js');
+  const cs = emptyChartColumns();
+  for (const [key, col] of Object.entries(cs))
+    col.set(Float64Array.from({ length: 100003 }, (_, i) => (key === 'x' ? i / 1000 : i % 97)));
+  state.chartSeries = cs;
+  state.windowVisible = true;
+  state.settings.activeView = 'monitor';
+  state.isRecording = true;
+  state.chartWindow = { mode: 'full', min: 0, max: 100.002, duration: 100.002 };
+  state.navigatorChart = null;
+  state.mainChart = {
+    width: 600,
+    submissions: 0,
+    setData(data) {
+      this.submissions++;
+      this.data = data;
+      queueMicrotask(() => {
+        for (const hook of this.hooks?.draw ?? []) hook(this);
+      });
+    },
+    setScale() {},
+  };
+  const original = ExactExtremaIndex.prototype.syncStep,
+    scheduler = globalThis.scheduler;
+  let index = null,
+    steps = 0;
+  ExactExtremaIndex.prototype.syncStep = function (...args) {
+    index = this;
+    steps++;
+    return original.apply(this, args);
+  };
+  const tasks = [];
+  const drain = async () => {
+    for (let i = 0; i < 500; i++) {
+      if (tasks.length) tasks.shift()();
+      await new Promise((r) => setTimeout(r, 1));
+      if (!busy && tasks.length === 0) return;
+    }
+    assert.fail('background work did not settle');
+  };
+  try {
+    chart.syncChartSeries();
+    chart.setChartXWindow(0, 100.002);
+    chart.updateCharts('live');
+    while (busy) await new Promise((r) => setTimeout(r, 2));
+    state.isRecording = false;
+    chart.updateCharts('maintenance', { force: false, reason: 'pause' });
+    await Promise.resolve();
+    assert.equal(
+      state.mainChart.__chartProjection.quality,
+      'fine',
+      'a warm pause never substitutes a coarse first frame',
+    );
+    const { performanceDiagnostics } = await import('../src/performance-diagnostics.js');
+    const warm = performanceDiagnostics.snapshot().charts.main.last;
+    assert.equal(warm.pauseLength, 100003);
+    assert.equal(warm.reason, 'pause');
+    assert.ok(warm.pauseId > 0);
+    assert.ok(warm.pauseToDrawMs >= 0);
+    state.isRecording = true;
+    chart.updateCharts('live');
+    chart.setRangeDragging(true);
+    chart.setRangeDragging(false);
+    globalThis.scheduler = { postTask: () => new Promise((resolve) => tasks.push(resolve)) };
+    index.reset();
+    steps = 0;
+    state.isRecording = false;
+    const before = state.mainChart.submissions;
+    chart.updateCharts();
+    assert.equal(steps, 0, 'first complete frame cannot scan historical index blocks');
+    assert.equal(state.mainChart.__chartProjection.quality, 'coarse');
+    assert.equal(state.mainChart.submissions, before + 1);
+    assert.equal(state.mainChart.data[0][0], 0);
+    assert.equal(state.mainChart.data[0].at(-1), 100.002);
+    assert.equal(tasks.length, 0, 'refinement waits for the actual coarse draw');
+    for (let i = 100003; i < 100010; i++)
+      for (const [key, col] of Object.entries(cs)) col.push(key === 'x' ? i / 1000 : i % 97);
+    chart.setChartXWindow(0, 100.009);
+    chart.updateCharts();
+    assert.equal(state.mainChart.data[0].at(-1), 100.009, 'retained pause tail reaches the coarse frame');
+    assert.equal(steps, 0);
+    const coarseSubmissions = state.mainChart.submissions;
+    await drain();
+    assert.equal(state.mainChart.__chartProjection.quality, 'fine');
+    const refined = performanceDiagnostics.snapshot().charts.main.last;
+    assert.ok(refined.prepareMs > 0, 'refinement accounts for its cooperative preparation CPU time');
+    assert.equal(state.mainChart.submissions, coarseSubmissions + 1, 'one atomic detail upgrade');
+    const fine = state.mainChart.data.map((col) => Array.from(col));
+    chart.setRangeDragging(true);
+    chart.updateCharts();
+    chart.setRangeDragging(false);
+    chart.updateCharts();
+    assert.deepEqual(
+      state.mainChart.data.map((col) => Array.from(col)),
+      fine,
+      'release does not change a stable window',
+    );
+    for (const cancel of ['window', 'resume', 'hidden', 'source']) {
+      state.isRecording = true;
+      chart.updateCharts('live');
+      while (busy) await drain();
+      chart.setRangeDragging(true);
+      chart.setRangeDragging(false);
+      index.reset();
+      state.isRecording = false;
+      chart.updateCharts();
+      assert.equal(state.mainChart.__chartProjection.quality, 'coarse');
+      if (cancel === 'window') {
+        chart.setChartXWindow(20, 20.01);
+        chart.updateCharts();
+      }
+      if (cancel === 'resume') {
+        state.isRecording = true;
+        chart.updateCharts('live');
+      }
+      if (cancel === 'hidden') {
+        state.windowVisible = false;
+        chart.handleMonitorHidden();
+      }
+      if (cancel === 'source') {
+        state.chartSeries = emptyChartColumns();
+        chart.syncChartSeries();
+        chart.updateCharts();
+      }
+      const submitted = state.mainChart.submissions;
+      await drain();
+      assert.equal(state.mainChart.submissions, submitted, `${cancel} retires obsolete refinement`);
+      state.windowVisible = true;
+      state.isRecording = true;
+      state.chartSeries = cs;
+      chart.syncChartSeries();
+      chart.setChartXWindow(0, 100.009);
+      globalThis.scheduler = scheduler;
+      chart.updateCharts('live');
+      while (busy) await new Promise((r) => setTimeout(r, 2));
+      globalThis.scheduler = { postTask: () => new Promise((resolve) => tasks.push(resolve)) };
+    }
+  } finally {
+    globalThis.scheduler = scheduler;
+    ExactExtremaIndex.prototype.syncStep = original;
+    chart.handleMonitorHidden();
+    state.isRecording = false;
     state.windowVisible = true;
   }
 });

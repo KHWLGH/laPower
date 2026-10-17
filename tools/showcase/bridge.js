@@ -287,6 +287,32 @@ async function invoke(command, args = {}, ipc = {}) {
     }
   }
   switch (command) {
+    case 'check_for_updates': {
+      emit('showcase:update-check', null);
+      const mode = options.get('update') || 'current';
+      if (mode === 'pending') return new Promise(() => {});
+      if (
+        [
+          'updateTimeout',
+          'updateNetworkError',
+          'updateRateLimited',
+          'updateServiceError',
+          'updateInvalidResponse',
+        ].includes(mode)
+      )
+        throw { code: mode };
+      if (mode === 'invalid') return { status: 'invalid' };
+      const newer = mode === 'available';
+      return {
+        status: mode === 'none' ? 'no_release' : newer ? 'available' : 'current',
+        current_version: __SHOWCASE_VERSION__,
+        latest_version: mode === 'none' ? null : newer ? '99.0.0' : mode === 'older' ? '0.0.1' : __SHOWCASE_VERSION__,
+        tag: mode === 'none' ? null : newer ? 'v99.0.0' : `v${__SHOWCASE_VERSION__}`,
+      };
+    }
+    case 'open_project_page':
+      emit('showcase:project-page', args);
+      return;
     case 'get_runtime_platform':
       return 'windows';
     case 'get_system_locale':

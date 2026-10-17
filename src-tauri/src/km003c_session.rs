@@ -187,6 +187,7 @@ pub(crate) fn connect(
             queue_failed: false,
             rate_override: None,
             last_temperature: None,
+            queue_diagnostics: QueueDiagnostics::default(),
         };
         (source, vec![trigger_join])
     });
@@ -345,6 +346,8 @@ struct Km003cSource {
     queue_failed: bool,
     rate_override: Option<u64>,
     last_temperature: Option<f32>,
+    /// Connection totals survive queue restarts and rate changes.
+    queue_diagnostics: QueueDiagnostics,
 }
 
 struct QueueMode {
@@ -352,9 +355,34 @@ struct QueueMode {
     started: Instant,
     saw_sample: bool,
     clock: QueueClock,
-    holes_reported: bool,
-    replays_reported: bool,
     recent: VecDeque<QueueSample>,
+}
+
+#[derive(Default)]
+struct QueueDiagnostics {
+    holes: u64,
+    replays: u64,
+    reported: (u64, u64),
+    last_report_us: u64,
+}
+
+impl QueueDiagnostics {
+    fn add(&mut self, holes: u64, replays: usize) {
+        self.holes = self.holes.saturating_add(holes);
+        self.replays = self.replays.saturating_add(replays as u64);
+    }
+
+    fn report(&mut self, now_us: u64, final_report: bool) -> Option<(u64, u64)> {
+        let totals = (self.holes, self.replays);
+        if !final_report
+            && (totals == self.reported || now_us.saturating_sub(self.last_report_us) < 5_000_000)
+        {
+            return None;
+        }
+        self.reported = totals;
+        self.last_report_us = now_us;
+        Some(totals)
+    }
 }
 
 /// Expand the meter's wrapping 1 kHz sequence into host-relative microseconds.
@@ -642,8 +670,6 @@ impl Km003cSource {
             started: Instant::now(),
             saw_sample: false,
             clock: QueueClock::default(),
-            holes_reported: false,
-            replays_reported: false,
             recent: VecDeque::with_capacity(QUEUE_HISTORY),
         });
         self.next_poll = Instant::now();
@@ -723,10 +749,6 @@ impl Km003cSource {
             mode.rate_index,
         )
         .map_err(Stop::Failed)?;
-        if skip > 0 && !mode.replays_reported {
-            mode.replays_reported = true;
-            eprintln!("KM003C AdcQueue 已核实并跳过 {skip} 个重放样本");
-        }
         for (sample, timestamp_us) in response.queue[skip..].iter().zip(timestamps) {
             if mode.recent.len() == QUEUE_HISTORY {
                 mode.recent.pop_front();
@@ -741,9 +763,9 @@ impl Km003cSource {
             mode.saw_sample = true;
         }
         let holes = mode.clock.take_holes();
-        if holes > 0 && !mode.holes_reported {
-            mode.holes_reported = true;
-            eprintln!("KM003C AdcQueue 检测到 {holes} 个序号空洞");
+        self.queue_diagnostics.add(holes, skip);
+        if let Some((holes, replays)) = self.queue_diagnostics.report(received_us, false) {
+            eprintln!("KM003C AdcQueue 连接累计: 序号空洞估计 {holes}, 已核实重放 {replays}");
         }
         self.deliver_pd(&response, received_us, out);
         Ok(())
@@ -819,6 +841,12 @@ fn queue_timestamps(
 impl Drop for Km003cSource {
     fn drop(&mut self) {
         self.stop_queue();
+        if let Some((holes, replays)) = self
+            .queue_diagnostics
+            .report(self.epoch.elapsed().as_micros() as u64, true)
+        {
+            eprintln!("KM003C AdcQueue 连接结束累计: 序号空洞估计 {holes}, 已核实重放 {replays}");
+        }
     }
 }
 
@@ -896,6 +924,25 @@ fn witrn_pd_frame(message: &PdMessage) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_diagnostics_accumulate_across_modes_and_limit_logs() {
+        let mut totals = QueueDiagnostics::default();
+        totals.add(10, 44);
+        assert_eq!(totals.report(1_000_000, false), None);
+        assert_eq!(totals.report(5_000_000, false), Some((10, 44)));
+        let mut next_clock = QueueClock::default();
+        next_clock.observe(1, 5_001_000, 3);
+        next_clock.observe(5, 5_005_000, 3);
+        totals.add(next_clock.take_holes(), 2);
+        assert_eq!(totals.report(9_999_999, false), None);
+        assert_eq!(totals.report(10_000_000, false), Some((13, 46)));
+        assert_eq!(totals.report(20_000_000, false), None);
+        assert_eq!(totals.report(20_000_001, true), Some((13, 46)));
+        totals.holes = u64::MAX;
+        totals.add(1, 0);
+        assert_eq!(totals.holes, u64::MAX);
+    }
     use crate::pd_capture::summarize;
     use witrn_hid::{decode_pd_report, Parser};
 

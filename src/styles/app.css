@@ -820,6 +820,30 @@ html[data-ui-scale-css] .app-shell {
   box-shadow: var(--shadow-16);
 }
 
+.flyout-title {
+  font: var(--type-body-strong);
+  margin-bottom: 12px;
+}
+
+html[data-ui-scale-css] .flyout-panel {
+  max-height: calc(100vh / var(--ui-scale, 1) - 120px);
+}
+
+#flyout-device-info {
+  width: min(340px, calc(100vw - 16px));
+  min-width: 0;
+}
+
+.device-info-name {
+  font: var(--type-body-strong);
+  overflow-wrap: anywhere;
+  margin-bottom: 12px;
+}
+
+#device-note {
+  margin-top: 12px;
+}
+
 /* ── 标记列表（src/marker-ui.js） ── */
 .marker-flyout {
   width: 300px;
@@ -908,26 +932,81 @@ html[data-ui-scale-css] .app-shell {
   margin-bottom: var(--space-4);
 }
 
-/* 设置：主栏选项列表 + 宽屏设备/关于侧栏 */
+/* 设置：单页滚动，目录在宽屏侧边、窄屏顶部保持可见。 */
+.settings-page > .page-title {
+  max-width: 1120px;
+  margin-inline: auto;
+  width: 100%;
+}
+
 .settings-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  grid-template-columns: 180px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
-  max-width: 1040px;
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
 }
 
 .settings-main {
   min-width: 0;
-  max-width: 720px;
 }
 
-.settings-aside {
+.settings-nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
+  padding: 4px;
+  background: var(--surface-content);
+  border-radius: var(--radius-surface);
+}
+
+.settings-nav-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  font: var(--type-body);
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-radius: var(--radius-control);
+}
+
+.settings-nav-link:hover {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+
+.settings-nav-link[aria-current="location"] {
+  color: var(--accent-text);
+  background: var(--accent-fill-faint);
+}
+
+.settings-nav-link[aria-current="location"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: var(--accent-solid);
+}
+
+.settings-nav-link .fi {
+  flex-shrink: 0;
 }
 
 .settings-section {
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-6);
+  scroll-margin-top: var(--settings-anchor-offset, 12px);
 }
 
 .settings-section:last-child {
@@ -936,8 +1015,9 @@ html[data-ui-scale-css] .app-shell {
 
 .settings-section-title {
   font: var(--type-subtitle);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   margin-bottom: var(--space-2);
+  scroll-margin-top: var(--settings-anchor-offset, 12px);
 }
 
 .settings-group {
@@ -1077,10 +1157,158 @@ html[data-ui-scale-css] .app-shell {
 
 .about-icon {
   display: block;
-  width: 80px;
-  height: 80px;
-  margin: 0 auto;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
   object-fit: contain;
+}
+
+.about-card,
+.about-components-card {
+  container-type: inline-size;
+  padding: var(--space-4);
+}
+
+.about-card {
+  margin-bottom: var(--space-3);
+}
+
+.about-summary {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.about-identity {
+  min-width: 0;
+}
+
+.about-name {
+  font: var(--type-title);
+}
+
+.about-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.about-actions,
+.about-update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.about-actions .btn,
+.about-update .btn {
+  gap: 6px;
+  min-height: 32px;
+  height: auto;
+  white-space: normal;
+}
+
+.about-update {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--stroke-divider);
+}
+
+.about-update-status {
+  flex: 1 1 240px;
+  margin: 0;
+  font: var(--type-body);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.about-update[data-state="error"] .about-update-status {
+  color: var(--status-danger);
+}
+
+.about-components,
+.about-dependency-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+}
+
+.about-components {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-5);
+}
+
+.about-component {
+  min-width: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--stroke-divider);
+  overflow-wrap: anywhere;
+}
+
+.about-component-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.about-component-name {
+  font: var(--type-body-strong);
+}
+
+.about-component-version,
+.about-component-license {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.about-component-license {
+  display: block;
+  margin-top: 4px;
+}
+
+.about-all-components {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--stroke-divider);
+}
+
+.about-all-components summary {
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+  color: var(--accent-text);
+  font: var(--type-body-strong);
+}
+
+.about-dependency-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr) minmax(0, 1.6fr);
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--stroke-divider);
+  font: var(--type-caption);
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 719.98px) {
+  .about-summary {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .about-actions {
+    grid-column: 1 / -1;
+  }
+
+  .about-components {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-kv-row {
@@ -1095,17 +1323,38 @@ html[data-ui-scale-css] .app-shell {
   color: var(--text-secondary);
 }
 
-.settings-aside .btn {
-  width: 100%;
+.settings-kv-row > :last-child {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 899.98px) {
+@media (max-width: 979.98px) {
   .settings-layout {
-    grid-template-columns: 1fr;
+    display: block;
   }
 
-  .settings-main {
-    max-width: none;
+  .settings-nav {
+    flex-direction: row;
+    margin-bottom: var(--space-3);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--stroke-divider);
+    border-radius: 0;
+  }
+
+  .settings-nav-link {
+    flex-shrink: 0;
+    white-space: nowrap;
+    min-height: 36px;
+  }
+
+  .settings-nav-link[aria-current="location"]::before {
+    top: auto;
+    bottom: 0;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    height: 3px;
   }
 }
 

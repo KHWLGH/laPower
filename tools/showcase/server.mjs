@@ -16,7 +16,8 @@ const MIME = {
   '.png': 'image/png',
 };
 
-export async function startServer({ port = 0 } = {}) {
+export async function startServer({ port = 0, distribution = false } = {}) {
+  const appSource = distribution ? resolve(ROOT, 'out') : SRC;
   const pkg = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
   const config = JSON.parse(await readFile(resolve(ROOT, 'src-tauri/tauri.conf.json'), 'utf8'));
   const bridge = await build({
@@ -27,7 +28,7 @@ export async function startServer({ port = 0 } = {}) {
     define: { __SHOWCASE_VERSION__: JSON.stringify(pkg.version) },
     logLevel: 'silent',
   });
-  const appHtml = (await readFile(resolve(SRC, 'index.html'), 'utf8')).replace(
+  const appHtml = (await readFile(resolve(appSource, 'index.html'), 'utf8')).replace(
     '<head>',
     '<head>\n<link rel="stylesheet" href="/__showcase__/controls.css">\n<script src="/__showcase__/bridge.js"></script>',
   );
@@ -50,7 +51,7 @@ export async function startServer({ port = 0 } = {}) {
         body = await readFile(resolve(ROOT, 'src-tauri/icons/128x128@2x.png'));
       } else {
         const tool = pathname.startsWith('/__showcase__/') || pathname === '/';
-        const base = tool ? HERE : SRC;
+        const base = tool ? HERE : appSource;
         const rel = pathname === '/' ? 'preview.html' : pathname.replace(/^\/(?:__showcase__\/|app\/)?/, '');
         file = resolve(base, rel);
         if (!file.startsWith(base + sep)) throw new Error('Invalid path');

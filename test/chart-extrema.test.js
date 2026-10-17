@@ -26,14 +26,10 @@ function compare(xs, series, start, end, cap, index) {
 
 function assertFlat(buckets) {
   const flat = buckets.flatten();
-  assert.equal(flat.x.length, buckets.list.length * 2);
-  for (let i = 0; i < buckets.list.length; i++) {
-    const b = buckets.list[i];
-    for (let j = 0; j < 2; j++) assert.ok(Object.is(flat.x[i * 2 + j], (b.x0 + b.x1) / 2));
-    for (let s = 0; s < 8; s++) {
-      assert.ok(Object.is(flat.ys[s][i * 2], b.min[s]));
-      assert.ok(Object.is(flat.ys[s][i * 2 + 1], b.max[s]));
-    }
+  assert.ok(flat.x.length <= buckets.list.length * 2);
+  for (const g of flat.channels) {
+    assert.ok(g.x.length <= buckets.list.length * 4);
+    for (let i = 1; i < g.indices.length; i++) assert.ok(g.indices[i] > g.indices[i - 1]);
   }
   assert.strictEqual(buckets.flatten(), flat);
 }
@@ -89,8 +85,13 @@ test('index incrementally completes blocks across raw column reallocations', () 
   const { xs, series } = data(30001);
   const index = new ExactExtremaIndex();
   for (const length of [0, 1, 31, 32, 33, 8000, 16383, 16384, 20003, 30001]) {
+    const pages = index.levels.flat();
     const copies = series.map((col) => col.slice(0, length));
     index.sync(copies, length);
+    assert.ok(
+      pages.every((page) => index.levels.flat().includes(page)),
+      'appends retain all existing index pages',
+    );
     compare(xs, copies, 0, length, 64, index);
   }
   const before = index.byteLength;
@@ -131,7 +132,7 @@ test('fold equals the raw stripe scan in every band the speed selector may choos
   }
 });
 
-test('flatten updates only dirty tails but refreshes all vertices after merges and reset', () => {
+test('flatten retains ordered geometry through dirty tails, buffer growth, merges and reset', () => {
   const buckets = new SeriesBuckets();
   buckets.cap = 64;
   for (let i = 0; i < 5000; i++) {
@@ -146,4 +147,31 @@ test('flatten updates only dirty tails but refreshes all vertices after merges a
     buckets.rebuild(xs, series, 0, end, 64);
     assertFlat(buckets);
   }
+});
+
+test('paged index stores indices/counts, preserves earliest ties across pages and fits 3.6M memory budget', () => {
+  const n = 3_600_000;
+  const col = new Float64Array(n);
+  col.fill(-0);
+  col[8191] = -4;
+  col[8192] = -4;
+  col[8200] = 7;
+  col[8201] = 7;
+  col[8194] = NaN;
+  const index = new ExactExtremaIndex();
+  index.sync([col], n);
+  assert.ok(index.levels.flat().every((page) => page instanceof Uint32Array));
+  assert.ok(index.byteLength <= 29_100_000);
+  const result = {
+    min: Array(8).fill(NaN),
+    max: Array(8).fill(NaN),
+    minIndex: Array(8).fill(-1),
+    maxIndex: Array(8).fill(-1),
+    count: Array(8).fill(0),
+  };
+  index.fold(result, [col], 8177, 8217);
+  assert.equal(result.minIndex[0], 8191);
+  assert.equal(result.maxIndex[0], 8200);
+  assert.equal(result.count[0], 39);
+  assert.equal(index.finiteCount(col, 0, 8177, 8217), 39);
 });

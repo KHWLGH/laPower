@@ -33,6 +33,9 @@
           <button type="button" class="cmd-btn cmd-btn-icon" id="btn-refresh-devices" title="Refresh device list" data-i18n-title="refreshDevices">
             <i class="fi fi-refresh" aria-hidden="true"></i>
           </button>
+          <button type="button" class="cmd-btn cmd-btn-icon" id="btn-device-info" title="Device information" data-i18n-title="deviceInfo" aria-label="Device information" data-i18n-aria-label="deviceInfo">
+            <i class="fi fi-info" aria-hidden="true"></i>
+          </button>
           <button type="button" class="cmd-btn" id="btn-connect" title="Device event listeners are not ready" data-i18n-title="listenerNotReady" disabled>
             <i class="fi fi-plug" id="btn-connect-icon" aria-hidden="true"></i><span id="btn-connect-label"><span data-i18n="connect">Connect</span></span>
           </button>
@@ -72,7 +75,7 @@
             </button>
             <span class="cmd-spacer"></span>
             <button type="button" class="cmd-btn" id="btn-flyout-display" title="Display channel settings" data-i18n-title="displayChannels"><i class="fi fi-eye" aria-hidden="true"></i><span data-i18n="display">Display</span></button>
-            <div class="cmd-action-group" id="auto-pause-actions">
+            <div class="cmd-action-group split-button" id="auto-pause-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
                 <i class="fi fi-pause" aria-hidden="true"></i>
                 <span><span data-i18n="autoPause">Auto pause</span></span>
@@ -84,10 +87,10 @@
                 aria-label="Auto pause settings" data-i18n-aria-label="autoPauseSettings"
                 title="Auto pause settings" data-i18n-title="autoPauseSettings"
               >
-                <i class="fi fi-settings" aria-hidden="true"></i>
+                <i class="fi fi-chevron-down" aria-hidden="true"></i>
               </button>
             </div>
-            <div class="cmd-action-group" id="temperature-actions">
+            <div class="cmd-action-group split-button" id="temperature-actions">
               <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
                 <i class="fi fi-fire" aria-hidden="true"></i>
                 <span id="temp-toggle-label"><span data-i18n="temperatureService">Temperature service</span></span>
@@ -99,7 +102,7 @@
                 aria-label="Temperature service settings" data-i18n-aria-label="temperatureSettings"
                 title="Temperature service settings" data-i18n-title="temperatureSettings"
               >
-                <i class="fi fi-settings" aria-hidden="true"></i>
+                <i class="fi fi-chevron-down" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -549,14 +552,21 @@
           </div>
         </section>
 
-        <!-- ── 设置（主栏选项 + 宽屏设备/关于侧栏） ── -->
+        <!-- ── 设置（单页内容 + 固定目录） ── -->
         <section class="view" id="view-settings" role="tabpanel" aria-labelledby="btn-settings-tab" hidden>
           <div class="page settings-page">
             <h1 class="page-title"><span data-i18n="settings">Settings</span></h1>
             <div class="settings-layout">
+              <nav class="settings-nav" aria-label="Settings navigation" data-i18n-aria-label="settingsNavigation">
+                <a class="settings-nav-link" href="#settings-appearance" aria-current="location"><i class="fi fi-settings" aria-hidden="true"></i><span data-i18n="appearanceAndLanguage">Appearance &amp; language</span></a>
+                <a class="settings-nav-link" href="#settings-recording"><i class="fi fi-pulse" aria-hidden="true"></i><span data-i18n="chartAndRecording">Charts &amp; recording</span></a>
+                <a class="settings-nav-link" href="#settings-shortcuts"><i class="fi fi-options" aria-hidden="true"></i><span data-i18n="shortcuts">Keyboard shortcuts</span></a>
+                <a class="settings-nav-link" href="#settings-recovery"><i class="fi fi-refresh" aria-hidden="true"></i><span data-i18n="recoveryAndReset">Recovery &amp; reset</span></a>
+                <a class="settings-nav-link" href="#settings-about"><i class="fi fi-info" aria-hidden="true"></i><span data-i18n="about">About</span></a>
+              </nav>
               <div class="settings-main">
-                <section class="settings-section">
-                  <h2 class="settings-section-title"><span data-i18n="appearance">Appearance</span></h2>
+                <section class="settings-section" id="settings-appearance" aria-labelledby="settings-appearance-title">
+                  <h2 class="settings-section-title" id="settings-appearance-title" tabindex="-1"><span data-i18n="appearanceAndLanguage">Appearance &amp; language</span></h2>
                   <div class="settings-group">
                     <div class="settings-row">
                       <div class="settings-row-text">
@@ -636,8 +646,8 @@
                     </div>
                   </div>
                 </section>
-                <section class="settings-section">
-                  <h2 class="settings-section-title"><span data-i18n="chartAndRecording">Charts &amp; recording</span></h2>
+                <section class="settings-section" id="settings-recording" aria-labelledby="settings-recording-title">
+                  <h2 class="settings-section-title" id="settings-recording-title" tabindex="-1"><span data-i18n="chartAndRecording">Charts &amp; recording</span></h2>
                   <div class="settings-group">
                     <div class="settings-row">
                       <div class="settings-row-text">
@@ -671,14 +681,28 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title"><span data-i18n="signedCurrent">Record current direction</span></div>
-                        <div class="settings-row-desc">
+                        <label class="settings-row-title" for="signed-current"><span data-i18n="signedCurrent">Record current direction</span></label>
+                        <div class="settings-row-desc" id="signed-current-hint">
                           <span data-i18n="signedCurrentHint">Keep the current sign in new recordings and imports (forward positive, reverse negative). When disabled, record absolute values. Existing data stays unchanged; exports keep recorded values.</span>
                         </div>
                       </div>
                       <div class="settings-row-control">
                         <label class="toggle">
-                          <input type="checkbox" id="signed-current" />
+                          <input type="checkbox" id="signed-current" aria-describedby="signed-current-hint" />
+                          <span class="toggle-track"></span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="immediate-marker"><span data-i18n="immediateMarker">Mark immediately</span></label>
+                        <div class="settings-row-desc" id="immediate-marker-hint">
+                          <span data-i18n="immediateMarkerHint">Add markers with a default label and rename them later in the marker list. When disabled, enter a label before adding.</span>
+                        </div>
+                      </div>
+                      <div class="settings-row-control">
+                        <label class="toggle">
+                          <input type="checkbox" id="immediate-marker" aria-describedby="immediate-marker-hint" />
                           <span class="toggle-track"></span>
                         </label>
                       </div>
@@ -704,17 +728,28 @@
                         </span>
                       </div>
                     </div>
+                  </div>
+                </section>
+                <section class="settings-section" id="settings-shortcuts" aria-labelledby="settings-shortcuts-title">
+                  <h2 class="settings-section-title" id="settings-shortcuts-title" tabindex="-1"><span data-i18n="shortcuts">Keyboard shortcuts</span></h2>
+                  <div class="settings-group" id="shortcut-bindings"></div>
+                  <div class="shortcut-footer"><span class="card-hint" data-i18n="shortcutHelp">Click a binding and press a key combination. Escape cancels.</span><button type="button" class="btn" id="btn-reset-shortcuts" data-i18n="shortcutRestoreAll">Restore defaults</button></div>
+                  <div class="card-hint shortcut-error" id="shortcut-error" role="alert"></div>
+                </section>
+                <section class="settings-section" id="settings-recovery" aria-labelledby="settings-recovery-title">
+                  <h2 class="settings-section-title" id="settings-recovery-title" tabindex="-1"><span data-i18n="recoveryAndReset">Recovery &amp; reset</span></h2>
+                  <div class="settings-group">
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <div class="settings-row-title"><span data-i18n="keepRecovery">Keep temporary recovery files</span></div>
-                        <div class="settings-row-desc">
+                        <label class="settings-row-title" for="recording-temp-spool"><span data-i18n="keepRecovery">Keep temporary recovery files</span></label>
+                        <div class="settings-row-desc" id="recording-temp-spool-hint">
                           <span data-i18n="keepRecoveryHint">Write to the app cache about once a second for crash recovery. Files are removed after a normal clear, import or exit. Export to save a user file.</span>
                         </div>
                         <div class="settings-row-desc" id="spool-recovery-status" hidden></div>
                       </div>
                       <div class="settings-row-control">
                         <label class="toggle">
-                          <input type="checkbox" id="recording-temp-spool" checked />
+                          <input type="checkbox" id="recording-temp-spool" aria-describedby="recording-temp-spool-hint" checked />
                           <span class="toggle-track"></span>
                         </label>
                       </div>
@@ -732,58 +767,42 @@
                     </div>
                   </div>
                 </section>
-                <section class="settings-section">
-                  <h2 class="settings-section-title"><span data-i18n="shortcuts">Keyboard shortcuts</span></h2>
-                  <div class="settings-group" id="shortcut-bindings"></div>
-                  <div class="shortcut-footer"><span class="card-hint" data-i18n="shortcutHelp">Click a binding and press a key combination. Escape cancels.</span><button type="button" class="btn" id="btn-reset-shortcuts" data-i18n="shortcutRestoreAll">Restore defaults</button></div>
-                  <div class="card-hint shortcut-error" id="shortcut-error" role="alert"></div>
+                <section class="settings-section" id="settings-about" aria-labelledby="settings-about-title">
+                  <h2 class="settings-section-title" id="settings-about-title" tabindex="-1"><span data-i18n="about">About</span></h2>
+                  <div class="settings-group about-card">
+                    <div class="about-summary">
+                      <img class="about-icon" src="assets/app-icon.png" width="64" height="64" alt="laPower icon" data-i18n-alt="appIcon" loading="lazy" />
+                      <div class="about-identity">
+                        <div class="about-name">laPower</div>
+                        <p class="settings-row-desc" data-i18n="aboutDescription">USB power monitoring and protocol analysis</p>
+                        <div class="about-metadata">
+                          <span><span data-i18n="version">Version</span> <span id="about-version">--</span></span>
+                          <span><span data-i18n="license">License</span> <span>GPL-3.0-only</span></span>
+                        </div>
+                      </div>
+                      <div class="about-actions">
+                        <button type="button" class="btn" id="btn-project-github" title="Open GitHub in your browser" data-i18n-title="openGitHub"><i class="fi fi-github" aria-hidden="true"></i><span>GitHub</span></button>
+                        <button type="button" class="btn" id="btn-check-updates"><i class="fi fi-refresh" aria-hidden="true"></i><span data-i18n="checkUpdates">Check for updates</span></button>
+                      </div>
+                    </div>
+                    <div class="about-update" id="about-update" hidden>
+                      <p class="about-update-status" id="about-update-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                      <button type="button" class="btn btn-accent" id="btn-download-update" hidden><i class="fi fi-github" aria-hidden="true"></i><span data-i18n="downloadUpdate">Download on GitHub</span></button>
+                    </div>
+                  </div>
+                  <div class="settings-group about-components-card">
+                    <h3 class="settings-row-title" data-i18n="thirdPartyTitle">Third-party components</h3>
+                    <p class="settings-row-desc" data-i18n="thirdPartyDescription">Open-source components that power laPower. Licenses are provided by their respective projects.</p>
+                    <ul class="about-components" id="about-components" aria-label="Main runtime components" data-i18n-aria-label="mainComponents"></ul>
+                    <details class="about-all-components" id="about-all-components">
+                      <summary id="about-components-summary" data-i18n="allRuntimeComponents">All runtime components ({count})</summary>
+                      <p class="settings-row-desc" data-i18n="runtimeComponentsHint">Includes direct and indirect runtime dependencies across supported desktop platforms. Development and build tools are excluded.</p>
+                      <ul class="about-dependency-list selectable" id="about-dependency-list"></ul>
+                    </details>
+                    <p class="settings-row-desc" id="about-components-error" role="status" hidden></p>
+                  </div>
                 </section>
               </div>
-              <aside class="settings-aside">
-                <section class="settings-section">
-                  <h2 class="settings-section-title"><span data-i18n="device">Device</span></h2>
-                  <div class="settings-group settings-group-stack">
-                    <div class="settings-kv">
-                      <div class="settings-kv-row">
-                        <span class="settings-kv-label">VID</span>
-                        <span class="settings-kv-value" id="device-vid">--</span>
-                      </div>
-                      <div class="settings-kv-row">
-                        <span class="settings-kv-label">PID</span>
-                        <span class="settings-kv-value" id="device-pid">--</span>
-                      </div>
-                      <div class="settings-kv-row">
-                        <span class="settings-kv-label">SN</span>
-                        <span class="settings-kv-value" id="device-sn" title="Device serial number" data-i18n-title="deviceSerial">--</span>
-                      </div>
-                    </div>
-                    <p class="settings-row-desc" id="device-note">
-                      <span data-i18n="deviceHidNote">Vendor ID, product ID, and USB serial number from HID enumeration. WITRN hardware serial numbers usually identify the production batch rather than an individual unit.</span>
-                    </p>
-                  </div>
-                </section>
-                <section class="settings-section">
-                  <h2 class="settings-section-title"><span data-i18n="about">About</span></h2>
-                  <div class="settings-group settings-group-stack">
-                    <img class="about-icon" src="assets/app-icon.png" width="80" height="80" alt="laPower icon" data-i18n-alt="appIcon" loading="lazy" />
-                    <div class="settings-kv">
-                      <div class="settings-kv-row">
-                        <span class="settings-kv-label"><span data-i18n="version">Version</span></span>
-                        <span>laPower <span id="about-version">--</span></span>
-                      </div>
-                      <div class="settings-kv-row">
-                        <span class="settings-kv-label"><span data-i18n="license">License</span></span>
-                        <span>GPL-3.0-only</span>
-                      </div>
-                      <div class="settings-kv-row">
-                        <span class="settings-kv-label"><span data-i18n="repository">Repository</span></span>
-                        <span class="settings-kv-value selectable">github.com/KHWLGH/laPower</span>
-                      </div>
-                    </div>
-                    <p class="settings-row-desc"><span data-i18n="thirdParty">Third-party components: uPlot (MIT) · Fluent System Icons (MIT)</span></p>
-                  </div>
-                </section>
-              </aside>
             </div>
           </div>
         </section>
@@ -877,6 +896,20 @@
           <span class="checkmark"></span>
           <span data-i18n="statsRange">Selected range only</span>
         </label>
+      </div>
+    </div>
+
+    <div id="flyout-device-info" aria-labelledby="device-info-title" hidden>
+      <h2 class="flyout-title" id="device-info-title" data-i18n="deviceInfo">Device information</h2>
+      <p class="settings-row-desc" id="device-info-empty" data-i18n="noDeviceSelected">No device selected. Refresh the device list and select a device.</p>
+      <div id="device-info-details" hidden>
+        <div class="device-info-name" id="device-info-name">--</div>
+        <dl class="settings-kv">
+          <div class="settings-kv-row"><dt class="settings-kv-label">VID</dt><dd class="settings-kv-value" id="device-vid">--</dd></div>
+          <div class="settings-kv-row"><dt class="settings-kv-label">PID</dt><dd class="settings-kv-value" id="device-pid">--</dd></div>
+          <div class="settings-kv-row"><dt class="settings-kv-label">SN</dt><dd class="settings-kv-value" id="device-sn" title="Device serial number" data-i18n-title="deviceSerial">--</dd></div>
+        </dl>
+        <p class="settings-row-desc" id="device-note"></p>
       </div>
     </div>
 

@@ -29,8 +29,7 @@ onLanguageChange(() => {
     button.title = t(!connectionReady ? 'listenerNotReady' : connected ? 'disconnectDevice' : 'connectDevice');
     button.setAttribute('aria-label', button.title);
   }
-  const selected = state.connectedDevice ?? state.deviceList.find((device) => device.path === state.selectedDevicePath);
-  setDeviceNote(selected?.family);
+  syncDeviceInfo();
   const select = document.getElementById('device-select');
   const empty = select?.querySelector('option[value=""]');
   if (empty) empty.textContent = t(state.deviceList.length ? 'scanDevices' : 'noDevice');
@@ -121,13 +120,23 @@ function setDeviceField(id, value) {
   if (el) el.textContent = value;
 }
 
-/** 设置页「设备」说明随设备家族变化。 @param {string|undefined} family */
-function setDeviceNote(family) {
-  setDeviceField('device-note', family === 'km003c' ? t('devicePowerNote') : t('deviceHidNote'));
+/** 顶栏信息优先显示已连接设备；未连接时跟随列表选中项。 */
+function syncDeviceInfo() {
+  const device = state.connectedDevice ?? state.deviceList.find((entry) => entry.path === state.selectedDevicePath);
+  const empty = document.getElementById('device-info-empty');
+  const details = document.getElementById('device-info-details');
+  if (empty) empty.hidden = !!device;
+  if (details) details.hidden = !device;
+  setDeviceField('device-info-name', device ? deviceDisplayName(device) : '--');
+  setDeviceField('device-vid', device ? `0x${device.vid.toString(16).toUpperCase().padStart(4, '0')}` : '--');
+  setDeviceField('device-pid', device ? `0x${device.pid.toString(16).toUpperCase().padStart(4, '0')}` : '--');
+  setDeviceField('device-sn', device?.serial_number || '--');
+  setDeviceField('device-note', device ? t(device.family === 'km003c' ? 'devicePowerNote' : 'deviceHidNote') : '');
 }
 
 /** 下拉框选中项或连接状态变了：协议控制 Tab 等依赖设备家族的界面据此刷新。 */
 function announceDeviceSelection() {
+  syncDeviceInfo();
   document.dispatchEvent?.(new CustomEvent('witrn:device-selection'));
 }
 
@@ -176,6 +185,9 @@ export async function refreshDeviceList() {
     console.error('枚举设备失败:', e);
     const select = /** @type {HTMLSelectElement} */ (document.getElementById('device-select'));
     select.innerHTML = `<option value="">${t('noDevice')}</option>`;
+    state.deviceList = [];
+    state.selectedDevicePath = null;
+    announceDeviceSelection();
     return [];
   }
 }
@@ -187,23 +199,7 @@ export function onDeviceSelect() {
   const select = /** @type {HTMLSelectElement} */ (document.getElementById('device-select'));
   const selectedOption = select.options[select.selectedIndex];
 
-  if (selectedOption?.value) {
-    state.selectedDevicePath = selectedOption.value;
-    const vid = selectedOption.dataset.vid || '0';
-    const pid = selectedOption.dataset.pid || '0';
-    const sn = selectedOption.dataset.sn || '--';
-
-    setDeviceField('device-vid', `0x${Number(vid).toString(16).toUpperCase().padStart(4, '0')}`);
-    setDeviceField('device-pid', `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`);
-    setDeviceField('device-sn', sn || '--');
-    setDeviceNote(selectedOption.dataset.family);
-  } else {
-    state.selectedDevicePath = null;
-    setDeviceField('device-vid', '--');
-    setDeviceField('device-pid', '--');
-    setDeviceField('device-sn', '--');
-    setDeviceNote(undefined);
-  }
+  state.selectedDevicePath = selectedOption?.value || null;
   announceDeviceSelection();
 }
 
@@ -229,14 +225,6 @@ export async function connectDevice() {
     // 获取连接后的设备信息
     const deviceInfo = await invoke('get_current_device_info');
     state.connectedDevice = /** @type {import('./state.js').DeviceInfo|null} */ (deviceInfo ?? null);
-    if (deviceInfo) {
-      const di = /** @type {import('./state.js').DeviceInfo} */ (deviceInfo);
-      setDeviceField('device-vid', `0x${di.vid.toString(16).toUpperCase().padStart(4, '0')}`);
-      setDeviceField('device-pid', `0x${di.pid.toString(16).toUpperCase().padStart(4, '0')}`);
-      setDeviceField('device-sn', di.serial_number || '--');
-      setDeviceNote(di.family);
-    }
-
     if (deviceStream.ended) throw new Error(t('deviceConnectionLost'));
     setConnected(true);
 

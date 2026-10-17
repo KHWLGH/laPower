@@ -52,15 +52,10 @@ textarea {
   background: var(--accent-fill-faint);
 }
 
-/* 滚动条（WebKit）：细、圆角、悬停加深 */
+/* 固定命中宽度：悬停不能改变滚动条尺寸或挤动相邻内容。 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
-}
-
-*:hover::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
 }
 
 ::-webkit-scrollbar-track {
@@ -68,20 +63,27 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--scrollbar-thumb) 40%, transparent);
+  background: color-mix(in srgb, var(--scrollbar-thumb) 55%, transparent);
   border-radius: var(--radius-full);
 }
 
-*:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--scrollbar-thumb) 80%, transparent);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background: color-mix(in srgb, var(--scrollbar-thumb-hover) 75%, transparent);
 }
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+.page,
+.realtime-panel,
+.pd-detail-pane,
+.trigger-controls,
+.flyout-panel,
+.cs-menu,
+.fluent-dialog-body {
+  scrollbar-gutter: stable;
 }
 
 /* 动效偏好：用户要求减弱动效时全部归零 */

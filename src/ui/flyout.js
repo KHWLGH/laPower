@@ -20,22 +20,30 @@ let closeCurrent = null;
 export function createFlyout(anchor, panel) {
   panel.classList.add('flyout-panel');
   panel.setAttribute('role', 'dialog');
-  if (!panel.getAttribute('aria-label') && anchor.textContent) {
-    panel.setAttribute('aria-label', anchor.textContent.trim());
+  if (!panel.hasAttribute('aria-label') && !panel.hasAttribute('aria-labelledby')) {
+    const label = anchor.getAttribute('aria-label') || anchor.textContent?.trim() || anchor.title;
+    if (label) panel.setAttribute('aria-label', label);
+    const key = anchor.getAttribute('data-i18n-aria-label') || anchor.getAttribute('data-i18n-title');
+    if (key) panel.setAttribute('data-i18n-aria-label', key);
   }
+  if (!panel.hasAttribute('tabindex')) panel.tabIndex = -1;
   anchor.setAttribute('aria-haspopup', 'dialog');
   anchor.setAttribute('aria-expanded', 'false');
+  if (panel.id) anchor.setAttribute('aria-controls', panel.id);
 
   function position() {
     const rect = anchor.getBoundingClientRect();
+    const scale = document.documentElement.hasAttribute('data-ui-scale-css')
+      ? Number.parseFloat(document.documentElement.style.getPropertyValue('--ui-scale')) || 1
+      : 1;
     panel.style.visibility = 'hidden';
     panel.hidden = false;
     const ph = panel.offsetHeight;
     const pw = panel.offsetWidth;
-    let top = rect.bottom + 4;
-    if (top + ph > window.innerHeight && rect.top - ph - 4 >= 0) top = rect.top - ph - 4;
-    let left = rect.left;
-    if (left + pw > window.innerWidth) left = Math.max(0, window.innerWidth - pw - 4);
+    let top = rect.bottom / scale + 4;
+    if (top + ph > window.innerHeight / scale && rect.top / scale - ph - 4 >= 0) top = rect.top / scale - ph - 4;
+    let left = rect.left / scale;
+    if (left + pw > window.innerWidth / scale) left = Math.max(0, window.innerWidth / scale - pw - 4);
     panel.style.top = `${Math.round(top)}px`;
     panel.style.left = `${Math.round(left)}px`;
     panel.style.visibility = '';
@@ -57,7 +65,13 @@ export function createFlyout(anchor, panel) {
       anchor.focus();
     }
   };
-  const onDismiss = () => close();
+  /** @param {Event} event */
+  const onDismiss = (event) => {
+    const target = event.target;
+    if (event.type === 'scroll' && target instanceof Node && panel.contains(target)) return;
+    if (target instanceof Element && target.closest('.cs-menu')) return;
+    close();
+  };
 
   function open() {
     if (!panel.hidden) return;
@@ -69,10 +83,13 @@ export function createFlyout(anchor, panel) {
     window.addEventListener('resize', onDismiss);
     window.addEventListener('scroll', onDismiss, true);
     closeCurrent = close;
-    const first = /** @type {HTMLElement|null} */ (
-      panel.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])')
+    // 自定义下拉会隐藏原生 select，键盘焦点应落在实际可见的按钮上。
+    const first = /** @type {HTMLElement|undefined} */ (
+      Array.from(panel.querySelectorAll('input:not([disabled]), select:not([disabled]), button:not([disabled])')).find(
+        (element) => element.getClientRects().length > 0,
+      )
     );
-    first?.focus();
+    (first ?? panel).focus({ preventScroll: true });
   }
 
   function close() {
