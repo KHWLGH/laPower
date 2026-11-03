@@ -65,12 +65,42 @@ npm を使用し `package-lock.json` を管理し、CI は `npm ci` を使いま
 git clone https://github.com/KHWLGH/laPower.git
 cd laPower
 npm ci
-npm run build
-npx --no-install tauri dev
-npx --no-install tauri build
+npm run dev
 ```
 
+日常開発では次のショートカットを使用できます。従来のコマンドも引き続き利用でき、npm はプロジェクトで固定した Tauri CLI を使います。
+
+| コマンド | 用途 |
+| --- | --- |
+| `npm run dev` | 開発用フロントエンドを自動生成し、ネイティブアプリを起動 |
+| `npm run dev:web` | 模擬デバイスのブラウザープレビューを起動。ポート変更は `-- --port 4174` を追加 |
+| `npm run build` | Cargo が埋め込む開発用フロントエンドのみ生成 |
+| `npm run build:app` | リリース用フロントエンドを自動生成し、ローカルのインストーラーをビルド |
+
+`dev` の `beforeDevCommand` がフロントエンドを生成するため、起動前の `npm run build` は不要です。埋め込み資源を使う従来の方式を維持し、フロントエンドのホットリロードは提供しません。変更後は `dev` を再起動するか、フロントエンドを再生成して Rust バイナリを再リンクします。
+
 ローカルで target を指定しなければ配布物は `target/release/bundle/`、CI は明示指定して `target/<target>/release/bundle/` に生成します。Tauri CLI が `beforeBuildCommand` で圧縮済みフロントエンドを生成するため、パッケージ化前の手動 `npm run build:dist` は不要です。Cargo を直接実行する場合は先に `out/` が必要です。
+
+### クリーンアップの段階
+
+各段階は前の段階を含み、削除の完了を待って終了します。既定では Rust のコンパイルキャッシュ、依存関係、インストーラーを保持します。
+
+| コマンド | 削除範囲 |
+| --- | --- |
+| `npm run clean` | `out/`、`output/`、`bench/results/`、ルートと `src/` の `.playwright-cli/`、`src-tauri/gen/schemas/` |
+| `npm run clean:incremental` | さらに `target/` と `src-tauri/target/` の `debug/release` 増分キャッシュ。クロスコンパイル対象も含む |
+| `npm run clean:build` | さらに `target/`、`src-tauri/target/` 全体と `dist/` |
+| `npm run clean:all` | さらに `node_modules/`。開発再開前に `npm ci` を実行 |
+
+どの段階でも削除せず対象を確認できます。
+
+```bash
+npm run clean:build -- --dry-run
+```
+
+Node.js と Git が必要です。スクリプトの位置からリポジトリを特定し、削除前に全対象と Git の追跡状態を確認します。対象または親階層にシンボリックリンク／junction があれば中止します。同時に処理するディレクトリは最大 4 個で、各結果と合計時間を表示します。使用中ファイルは回数を制限して再試行し、失敗が残れば非ゼロで終了します。関連する開発・ビルド・プレビューのプロセスは先に終了してください。コマンドから強制終了は行いません。
+
+`output/` の検証画像と `bench/results/` の生の結果・ローカル比較用スナップショットも削除されます。追跡済みの文書画像、`bench/baselines/`、ソース、ロックファイル、リポジトリ外のキャッシュ、アプリの復元データは保持します。独自の `CARGO_TARGET_DIR` が対象パス外にある場合は個別に管理してください。削除後の `dev` はフロントエンドを再生成します。Cargo を直接使う場合は先に `npm run build` が必要です。
 
 ### 実行時コンポーネント一覧
 
@@ -167,16 +197,15 @@ Windows に証明書署名はなく、macOS は Developer ID・公証なしの a
 
 ## 品質チェック
 
-```bash
-npm ci
-npm run build
-npm test
-npm run typecheck
-npm run lint
-cargo fmt --check --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+変更範囲に合う入口を 1 つ選びます。
+
+| コマンド | 使用場面 |
+| --- | --- |
+| `npm run check` | 日常のフロントエンドチェック |
+| `npm run check:rust` | Rust チェック。先に `out/` を自動生成 |
+| `npm run check:all` | 納品前の全コアチェック。両グループとコンポーネント一覧の照合を含む |
+
+`check` は `npm test`、`typecheck`、`lint` を順に実行し、フロントエンドの生成や Cargo の実行は行いません。`check:rust` はフロントエンドを 1 回生成してから Rust の形式確認、workspace Clippy、テストを実行します。`check:all` は両グループと `components:check` を順に実行し、フロントエンド生成は 1 回だけです。すべての入口は最初の失敗で停止します。個別コマンドも使用できます。一覧の照合には Cargo が必要で、キャッシュがなければ通信することがあります。既存の CI チェック構成は変更しません。
 
 `npm test` は Node 標準ランナーを使い、純粋ロジック、データ処理、プロトコル・ファイル契約、セキュリティ、バージョン同期を確認します。主要テストは分野ごとに整理しています。
 
@@ -231,6 +260,8 @@ npm run showcase:capture
 ```
 
 既定の URL は `http://127.0.0.1:4173`、テーマはライトです。独立アプリ表示では `/app/?theme=dark`／`/app/?theme=system` を指定できます。タイトルバーで仮想デバイスの選択・接続・切断、記録ボタンで開始・一時停止を操作できます。外側の開発ツールには 120 秒のデータ投入、凍結、シミュレーション再開、10 秒進める、リセットがあります。データ投入は選択計器とデバイス温度を接続して記録を始めます。プロトコル制御は POWER-Z 接続後に PDM を開きます。ポートは `npm run showcase:dev -- --port 4174` で変更でき、ローカルのみ待ち受けます。
+
+レポート動画のネイティブ検証ではシステムの保存ダイアログを開きません。debug ビルドの `video_export_pick` は `LAPOWER_VIDEO_TARGET` を読み、値があればそのパスに対して直接チケットを発行します。この分岐は `debug_assertions` でのみコンパイルされ、release ビルドではパスはネイティブダイアログからのみ取得します。ローカル自動化専用で、設定・同梱 UI・CI には含まれません。
 
 キャプチャは Chromium、Windows スタイル、1280×800 CSS ビューポート、2 倍ピクセル密度、100% UI 倍率を使い、2560×1600 PNG を作成します。既定で POWER-Z、デバイス温度、共通の 120 秒データを使い、仮想時間を止めてからグラフ・詳細・フォント・操作部の描画完了を待ちます。`docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png` に言語ごと 8 枚、合計 32 枚を出力します。
 

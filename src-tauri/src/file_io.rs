@@ -159,7 +159,10 @@ fn raw_body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], String> {
 }
 
 /// Run a blocking native dialog off the async runtime, parented to the main window.
-async fn dialog_path<R: Runtime + 'static>(
+///
+/// Shared with the video export: that command also lets the native picker decide the path, so
+/// the WebView never sends one.
+pub(crate) async fn dialog_path<R: Runtime + 'static>(
     app: AppHandle<R>,
     pick: impl FnOnce(tauri_plugin_dialog::FileDialogBuilder<R>) -> Option<tauri_plugin_dialog::FilePath>
         + Send

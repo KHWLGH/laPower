@@ -63,6 +63,7 @@ The bottom bar shows recording state, duration, sample rate, recorded points, re
 | `Sample rate` | Set the live sample interval; see below |
 | Main `Export CSV` button | Export the entire recording using saved options; the chart selection does not limit the export |
 | Arrow beside `Export CSV` | Open CSV content options and joint export |
+| `Report video` | Turn the whole recording into a short video; available after two recorded samples. See [Report video export](#report-video-export) |
 | `Import CSV` | Load a file; confirm replacement if data exists or recording is active. Confirmation pauses the current recording. Import stays paused and replaces existing markers with markers from the file |
 | `Reset` | Disabled while recording. Once paused, confirm to clear the chart, statistics, totals and markers. Also clears PD messages when Follow recording is enabled |
 | `Display` | Choose visible channels, fill opacity and statistics scope |
@@ -136,6 +137,28 @@ Source, IP and port cannot change while connected; disconnect with the main butt
 The three CSV options are saved: `Include temperature` is off by default; `Include device information` and `Include markers` are on. Selected temperature/marker columns remain with blank cells when data is missing. Unknown device provenance is not filled from the currently connected meter.
 
 `Export CSV and PD data…` in the same flyout requires Monitor and PD data. One destination selection creates `name.csv` and `name.pd.json`, with overwrite confirmation. Both exports use all data regardless of chart selection or PD filters. Their snapshots are fixed after destination selection; later samples are not appended to that export. When Follow recording is off, time ranges can differ and are not cropped or aligned automatically.
+
+### Report video export
+
+`Report video`, beside `Export CSV` in the command bar, turns the whole recording into a short highlight video. It becomes available once at least two samples have been recorded; the video uses the selected curves and the current markers and has no audio.
+
+| Option | Choices and defaults |
+| --- | --- |
+| `Resolution` | `1280 × 720`, `1920 × 1080` (default), `2560 × 1440`, `3840 × 2160` |
+| `Frame rate` | 24, 30 (default) or 60 fps |
+| `Codec` | `H.264` (default) or `H.265 (HEVC)` |
+| `Container` | `MP4` (default) or `MOV` |
+| `Length` | 1–60 seconds, default 5 seconds |
+| `Theme` | `Light` (default) or `Dark`, independent of the interface theme |
+| `Curves` | Voltage, current, power and temperature, all selected by default |
+
+The whole recording is compressed into the chosen length as a fast-forward; the last frame is the last sample. Cleared curves are left out of the picture, and the current markers appear on the video (up to 8). The options are saved and reused next time. `Length` only accepts whole seconds from 1 to 60: an out-of-range entry greys out `Generate video` and says why, and is never written to the saved options.
+
+`Generate video` freezes the current data, then opens the native save dialog. Encoding runs in the background with a progress bar, the encoder this run is using, and a `Cancel encoding` button. Closing the dialog does not stop encoding; clicking `Report video` again reattaches to the running job and continues to show its progress. Only one video can be generated at a time. Finishing, cancelling and failing each raise a notification.
+
+The file is written to the chosen path only after encoding succeeds. A failed or cancelled export leaves any existing file untouched and leaves no temporary file behind. A notification reports the saved file name.
+
+On Windows the export uses the graphics card when it can: Direct2D draws straight onto a D3D11 texture, the video processor converts it to NV12 on the GPU and a Media Foundation hardware encoder writes the file. When the zero-copy path is unavailable the frames are read back to system memory and still handed to the hardware encoder; only a host that cannot reach a hardware encoder at all falls back to software encoding, and the dialog then states why. Adapters are tried in enumeration order, so a machine with a virtual display driver no longer keeps falling back because the runtime picked the wrong default adapter. The dialog always shows the encoder that was actually used. macOS encodes with the system VideoToolbox: the hardware encoder is used when the Mac provides one, and the dialog reports the software fallback honestly when it does not. Linux renders with the portable rasteriser and encodes with the bundled H.264 encoder. Neither needs ffmpeg or another codec installed. `H.265 (HEVC)` is therefore available on Windows (with the HEVC video extension) and on macOS, but not on Linux, where the dialog marks those combinations unavailable and explains why.
 
 ## PD analysis workspace
 

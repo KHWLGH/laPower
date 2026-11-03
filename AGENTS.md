@@ -35,17 +35,19 @@ laPower 是基于 Tauri v2 的 USB 电力监测与 USB-PD 协议分析桌面应�
 
 ```sh
 npm ci
-npm run build
-npx --no-install tauri dev
+npm run dev
 ```
 
 - `npm run build` 从 `src/` 生成 `out/`，合并 CSS，保留原生 JS 模块。
 - `npm run build:dist` 生成压缩、合并后的发布前端。
-- `npx --no-install tauri build` 构建本机安装包；Tauri 会自动执行发布前端构建。
-- `npm run showcase:dev` 启动本机浏览器预览，默认地址为 `http://127.0.0.1:4173`。
+- `npm run dev` 使用锁定的 Tauri CLI，启动时自动构建前端，无需提前重复执行 `npm run build`。
+- `npm run build:app` 构建本机安装包；Tauri 会自动执行发布前端构建。原有 `npx --no-install tauri dev/build` 仍可使用。
+- `npm run dev:web`（或 `showcase:dev`）启动本机模拟预览，默认地址为 `http://127.0.0.1:4173`，可用 `-- --port 4174` 改端口。
 - `npm run showcase:capture` 生成文档截图；首次使用前运行 `npx playwright install chromium`。
 
 **Cargo 前置条件：** Tauri 在编译时内嵌 `out/`。在运行工作区的 `cargo build`、`cargo check`、`cargo test` 或 `cargo clippy` 前，先执行 `npm run build`。修改 `src/` 后也要重新生成 `out/` 并重新链接 Rust 二进制，才能验证原生应用中的新界面。项目未配置 `devUrl`，不要假设源码会热更新。
+
+**分级清理：** `npm run clean` 删除 `out/`、`output/`、`bench/results/`、根目录与 `src/` 下的 `.playwright-cli/` 和 Tauri schemas；`clean:incremental` 再删除仓库内 Cargo 的 `debug/release` 增量缓存（含交叉编译目标）；`clean:build` 再删除完整 `target/`、`src-tauri/target/` 与 `dist/`；`clean:all` 再删除 `node_modules/`，之后先执行 `npm ci`。所有档位支持 `-- --dry-run`，先检查全部路径与 Git 跟踪状态，拒绝目标或祖先链接，等待删除结束并报告失败。清理前关闭相关进程；保留源码、已跟踪文件、基准基线、用户测量文件、应用恢复数据和仓库外缓存，不通过 `git clean -xfd` 或全仓通配删除扩大范围。
 
 Windows 需要 MSVC 构建环境和 WebView2，macOS 需要 Xcode Command Line Tools；Linux 的系统依赖与 udev 配置见开发文档。平台专属行为应在对应平台验证。
 
@@ -74,15 +76,10 @@ Windows 需要 MSVC 构建环境和 WebView2，macOS 需要 Xcode Command Line T
 按改动范围运行相关现有检查；纯文档修改检查内容、路径、链接和差异即可。代码修改先运行对应领域测试；交付前覆盖受影响的核心检查，不能把未运行的检查记为通过。
 
 ```sh
-npm run build
-npm test
-npm run typecheck
-npm run lint
-npm run components:check
-cargo fmt --check --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+npm run check:all
 ```
+
+`check` 顺序运行 Node 测试、类型检查、lint，不执行 Cargo；`check:rust` 先构建前端，再运行 Rust 格式检查、工作区 Clippy 和测试。`check:all` 依次运行 `check`、`components:check`、`check:rust`，只构建一次前端，遇错即停。原有单项检查仍可使用。
 
 - 单独运行前端测试：`node --test test/measurement.test.js`，按领域替换文件名；协议库可用 `cargo test -p usbpd-parser` 等命令定向检查。
 - 普通功能增删改、UI 布局、样式、文案和选项变化默认不新增回归测试。仅在数据丢失或损坏、协议兼容、崩溃或死锁、安全边界、发布构建不变量或已确认的高影响历史缺陷涉及的场景补充测试。

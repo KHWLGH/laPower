@@ -83,6 +83,7 @@ import { toast } from './ui/toast.js';
 import { initWindowControls } from './ui/windowcontrols.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint, previewUiScalePercent } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
+import { initVideoExportUI } from './video-export.js';
 import {
   applyPdSplitLayout,
   clearPdEntries,
@@ -507,6 +508,7 @@ function setupControls() {
   }
 
   initExportUI();
+  initVideoExportUI();
 
   const importBtn = document.getElementById('btn-import');
   if (importBtn) importBtn.addEventListener('click', importCSV);

@@ -14,6 +14,7 @@ pub mod stream;
 mod titlebar;
 mod updates;
 mod usb_port;
+mod video_export;
 #[cfg(target_os = "windows")]
 mod windows_icon;
 
@@ -415,6 +416,8 @@ pub(crate) struct AppState {
     km003c: Mutex<Option<km003c_session::Km003cControl>>,
     /// CSV 导入 / 导出 / 临时恢复文件的文件句柄。
     files: Mutex<file_io::FileRegistry>,
+    /// 报告视频的单槽编码任务；编码线程自己持有 `Arc`，不借用 `State`。
+    video_exports: std::sync::Arc<video_export::VideoExports>,
     /// 末包已校验、进入销毁流程：置位后禁止新建连接，退出事件放行。
     shutting_down: AtomicBool,
 }
@@ -432,6 +435,7 @@ impl Default for AppState {
             pd_capture_enabled: Arc::new(AtomicBool::new(false)),
             km003c: Mutex::new(None),
             files: Mutex::new(file_io::FileRegistry::default()),
+            video_exports: std::sync::Arc::new(video_export::VideoExports::default()),
             shutting_down: AtomicBool::new(false),
         }
     }
@@ -940,6 +944,9 @@ fn shutdown(
         if let Ok(mut task) = state.temp_task.lock() {
             stop_task(&mut task);
         }
+        // 编码线程不向 WebView 发事件，因此在这里等待它不会与 IPC 发射线程互等；
+        // 超时只记日志，进程退出会回收线程，残留的暂存文件带 pid 便于识别。
+        state.video_exports.begin_shutdown();
         // 前端已写完落盘尾部；这里只兜底把缓冲写进磁盘。
         if let Ok(mut files) = state.files.lock() {
             files.close_all();
@@ -1350,6 +1357,12 @@ pub fn run() {
             file_io::spool_recovery_list,
             file_io::spool_recovery_open,
             file_io::spool_recovery_delete,
+            video_export::video_export_capability,
+            video_export::video_export_pick,
+            video_export::video_export_start,
+            video_export::video_export_status,
+            video_export::video_export_current,
+            video_export::video_export_cancel,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

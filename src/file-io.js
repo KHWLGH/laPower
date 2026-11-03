@@ -43,6 +43,51 @@ export function pickPairedExportFiles(defaultName) {
   });
 }
 
+/**
+ * 弹出原生保存对话框选择报告视频的目标位置；取消时为 null。
+ *
+ * 返回的 ticket 是后端对路径的一次性认领：前端从不自己拼路径，后续
+ * `startVideoExport` 也只能凭 ticket 指定目标。
+ * @param {string} defaultName
+ * @returns {Promise<{ticket:string, name:string}|null>}
+ */
+export function pickVideoExportFile(defaultName) {
+  return invoke('video_export_pick', {
+    defaultName,
+    title: t('videoExportTitle'),
+    filterName: t('videoFile'),
+  });
+}
+
+/** @param {{ticket:string, payload:unknown}} request @returns {Promise<unknown>} */
+export function startVideoExport(request) {
+  return invoke('video_export_start', { request });
+}
+
+/** @param {string} id @returns {Promise<unknown>} */
+export function videoExportStatus(id) {
+  return invoke('video_export_status', { id });
+}
+
+/** @returns {Promise<unknown>} 当前任务，没有时为 null。 */
+export function currentVideoExport() {
+  return invoke('video_export_current');
+}
+
+/** @param {string} id @returns {Promise<unknown>} */
+export function cancelVideoExport(id) {
+  return invoke('video_export_cancel', { id });
+}
+
+/**
+ * 某一组选项在这台机器上能否编码；后端按组合缓存，探测本身就是一次真实试编码。
+ * @param {unknown} options
+ * @returns {Promise<any>}
+ */
+export function videoExportCapability(options) {
+  return invoke('video_export_capability', { options });
+}
+
 /** @returns {Promise<OpenedFile|null>} 选择要导入的 CSV；取消时为 null。 */
 export function pickImportFile() {
   return invoke('csv_import_pick', { title: t('importCsv'), filterName: t('csvFile') });

@@ -97,6 +97,12 @@ Shutdown requires consumption and ACK of the final batch; this check applies to 
 | `open_project_page` | Open the fixed repository or a validated release page in the system browser |
 | `shutdown` | Stop all workers and destroy the main window |
 | `km003c_trigger` / `km003c_cancel_trigger` | Execute or cancel POWER-Z protocol-control commands |
+| `video_export_capabilities` | List the resolution/frame-rate/codec combinations the host can actually encode; probed once per process |
+| `video_export_pick` | Choose the destination in the native save dialog and return a single-use ticket; the path never reaches the frontend |
+| `video_export_start` | Validate the frozen payload and start encoding on a background thread; returns the job status |
+| `video_export_status` | Return job state, progress and failure details by id |
+| `video_export_current` | Return the current job so a reopened dialog can reattach |
+| `video_export_cancel` | Request cancellation; the slot stays busy until the encoder thread exits |
 
 ### `src-tauri/src/pd_capture.rs`
 
@@ -117,6 +123,18 @@ Resolves a HID path to a USB topology port (for example `4-4`) to distinguish id
 Other platforms return `None`, omitting the port suffix.
 
 > WITRN USB serial numbers are **production-batch dates**, not unique device identifiers. Two meters from the same batch can share a serial number. Enumeration groups by USB port before adding the serial to distinguish identical devices in the title bar.
+
+### `src-tauri/src/video_export.rs`
+
+Report video export is a single-slot, host-owned task. `video_export_capability` probes the one combination the user has selected with a real one-frame test and caches the result per combination, so opening the dialog costs one probe instead of all 24; `video_export_pick` opens the native save dialog and returns a single-use ticket, keeping the path in the backend so the frontend cannot aim the writer at an arbitrary file; `video_export_start` validates the frozen payload and spawns the `lapower-video` thread; `video_export_status` and `video_export_current` serve the dialog's 500 ms progress polling and reattachment after it is reopened; `video_export_cancel` only sets a cancel flag that the encode loop checks every frame. Closing the dialog or switching workspaces does not stop encoding, and only one job exists at a time — a cancellation request therefore does not free the slot until the encoder thread has actually exited. On shutdown the running job is cancelled and awaited for at most two seconds; a timeout is only logged, and a leftover staging file still carries the process id for identification.
+
+Samples exist only in the frontend's column store; the backend has no time-addressable recording store to read. `src/video-export.js` freezes column snapshots when the user confirms, and `src/video-projection.js` (pure functions) projects them once into a self-contained payload: summary statistics, a 256-bucket curve projection (each bucket keeps its first and last sample plus per-channel minima and maxima; short recordings keep raw points), per-channel readings for every video frame, with the last frame at the last sample, and at most 8 markers. `src/video-export-options.js` is the single source of the resolution/frame-rate/codec/container whitelists and the frame-count formula; `src/video-palette.js` carries both resolved theme palettes. After the payload leaves the frontend the backend reads no recording data, so recording during an export cannot change the report.
+
+`src-tauri/src/video_export.rs` and its submodules only render and package. `model.rs` validates payload structure and lengths. `scene.rs` is the single layout implementation (a fixed 1920 × 1080 logical canvas scaled by `width / 1920`) and hands it to one of two backends through the `Painter` abstraction: `windows.rs` draws with Direct2D/DirectWrite, `skia.rs` draws with tiny-skia and system fonts on macOS and Linux.
+
+Windows has two encoding tiers. `gpu.rs` draws the same layout straight into a D3D11 texture, converts it to BT.709 NV12 on the graphics card with `ID3D11VideoProcessor` and feeds Media Foundation's hardware encoder DXGI samples. When the zero-copy path is unavailable, `windows.rs` switches to a WIC bitmap plus CPU NV12 but keeps `MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS` on, so system-memory frames can still reach a hardware encoder and only a host with no hardware path at all ends up in software. Both tiers label a job hardware only when the encoder itself reports `MFT_ENUM_HARDWARE_URL_Attribute`. `gpu.rs` enumerates adapters through `IDXGIFactory1`, skips `DXGI_ADAPTER_FLAG_SOFTWARE` and tries them in order so a virtual display adapter cannot take the default device. The encoder is published to the job status before the first attempt starts, which is why the dialog can name it from the first frame, and a software fallback also records its `fallback` reason. Other hosts run the frame loop in `portable.rs`: macOS prefers the VideoToolbox hardware session in `apple.rs` (the session is created, then `UsingHardwareAcceleratedVideoEncoder` decides what is reported, with the bundled encoder as a fallback), while Linux uses the bundled `software.rs` encoder (OpenH264, compiled into the binary); `mp4.rs` writes MP4/MOV, and a MOV is written as QuickTime from the start so no post-pass is needed. `mov.rs` still only serves Media Foundation output: after `Finalize` it rewrites the `ftyp` brand and `hdlr` handler boxes in place, leaving every sample offset untouched.
+
+The destination comes from the native dialog. The encoder writes a hidden staging file in the same directory and renames it onto the destination only after a successful finalise; failure or cancellation removes the staging file, so an existing file is never replaced by a partial one and no temporary file is left behind. Capabilities are reported per combination: on Windows the zero-copy path is tried first and the CPU-frame path second, recording the encoder that actually ran; on macOS VideoToolbox really encodes one frame and `UsingHardwareAcceleratedVideoEncoder` decides the label; on Linux the bundled encoder offers H.264 as software and reports `H.265 (HEVC)` unavailable with an explanation — CSV export keeps working.
 
 ## Protocol crates
 

@@ -23,6 +23,7 @@ import { syncAutoPauseUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
+import { normalizeVideoExportOptions } from './video-export-options.js';
 import { applyWindowStyle, echoWindowStyleUI, normalizeWindowStyle } from './window-style.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ function normalizeSettings(saved) {
   const merged = { ...defaultSettings, ...source };
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
+  merged.videoExport = normalizeVideoExportOptions(source.videoExport);
   merged.immediateMarker =
     typeof source.immediateMarker === 'boolean' ? source.immediateMarker : defaultSettings.immediateMarker;
 

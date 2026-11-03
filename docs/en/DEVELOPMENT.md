@@ -65,12 +65,42 @@ The project uses npm and commits `package-lock.json`; CI uses `npm ci`. The fron
 git clone https://github.com/KHWLGH/laPower.git
 cd laPower
 npm ci
-npm run build
-npx --no-install tauri dev
-npx --no-install tauri build
+npm run dev
 ```
 
+Use these shortcuts for daily work. Existing commands remain available; npm uses the project's locked Tauri CLI:
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the native app and build the development frontend automatically |
+| `npm run dev:web` | Start the simulated-device browser preview; append `-- --port 4174` to change the port |
+| `npm run build` | Generate the development frontend for Cargo to embed |
+| `npm run build:app` | Build local installers and generate the release frontend automatically |
+
+The `beforeDevCommand` already builds the frontend, so a separate `npm run build` before `dev` is unnecessary. Development keeps embedded assets without frontend hot reload; after frontend changes, restart `dev`, or rebuild the frontend and relink the Rust binary.
+
 Without an explicit target, local release output is in `target/release/bundle/`; CI specifies targets and uses `target/<target>/release/bundle/`. Tauri CLI runs `beforeBuildCommand` automatically to generate the minified frontend, so a separate `npm run build:dist` is unnecessary before packaging. Direct Cargo checks still require `out/` first.
+
+### Cleanup levels
+
+Each level includes the previous one and waits for deletion to finish. The default preserves Rust compilation caches, dependencies and installers:
+
+| Command | Removes |
+| --- | --- |
+| `npm run clean` | `out/`, `output/`, `bench/results/`, `.playwright-cli/` at the root and under `src/`, and `src-tauri/gen/schemas/` |
+| `npm run clean:incremental` | Also removes `debug/release` incremental caches under `target/` and `src-tauri/target/`, including cross-compilation targets |
+| `npm run clean:build` | Also removes all of `target/`, `src-tauri/target/` and `dist/` |
+| `npm run clean:all` | Also removes `node_modules/`; run `npm ci` before resuming development |
+
+Every level supports a preview without deletion:
+
+```bash
+npm run clean:build -- --dry-run
+```
+
+The cleaner requires Node.js and Git, locates the checkout from the script, and validates every target and its Git tracking status before deleting anything. A symlink or junction at a target or its ancestors prevents cleanup. It deletes at most four directories concurrently and reports individual results and total time; busy-file errors have bounded retries, and remaining failures return a nonzero exit code. Close relevant development, build and preview processes first; the command does not terminate them.
+
+Cleanup also removes verification screenshots in `output/` and raw results and local comparison snapshots in `bench/results/`. Tracked documentation screenshots, `bench/baselines/`, source, lockfiles, caches outside the checkout and application recovery data are preserved. Manage a custom `CARGO_TARGET_DIR` yourself if it is outside the listed paths. Starting `dev` rebuilds the frontend after cleanup; direct Cargo commands still require `npm run build` first.
 
 ### Runtime component list
 
@@ -167,16 +197,15 @@ Windows currently lacks certificate signing; macOS uses ad-hoc signatures withou
 
 ## Quality checks
 
-```bash
-npm ci
-npm run build
-npm test
-npm run typecheck
-npm run lint
-cargo fmt --check --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+Choose one entry point for the scope of your changes:
+
+| Command | When to use |
+| --- | --- |
+| `npm run check` | Daily frontend checks |
+| `npm run check:rust` | Rust checks, generating `out/` first |
+| `npm run check:all` | All core checks before delivery, including both groups and component-list verification |
+
+`check` runs `npm test`, `typecheck` and `lint` in sequence without building the frontend or running Cargo. `check:rust` builds the frontend once, then runs Rust formatting, workspace Clippy and tests. `check:all` combines both groups with `components:check`, builds the frontend only once, and stops on the first failure. Individual commands remain available. Component-list verification needs Cargo and may fetch uncached dependencies. The existing CI check set is unchanged.
 
 `npm test` uses Node's built-in runner for pure logic, data processing, protocol/file contracts, security boundaries and version synchronization. Tests are organized by core domain; major retained files include:
 
@@ -231,6 +260,8 @@ npm run showcase:capture
 ```
 
 The preview listens on `http://127.0.0.1:4173` and defaults to light mode. Standalone app views accept `/app/?theme=dark` or `/app/?theme=system`. The title bar selects/connects/disconnects virtual devices, and recording controls start/pause. The outer development tool offers filling 120 seconds of data, freezing, resuming simulation, advancing 10 seconds and resetting the preview. Filling automatically connects the selected meter and device temperature source and starts recording. Protocol control requires connecting POWER-Z and opening PDM. Use `npm run showcase:dev -- --port 4174` to change the port; the server listens only locally.
+
+Native acceptance for the report video never opens the system save dialog: a debug build reads `LAPOWER_VIDEO_TARGET` inside `video_export_pick` and issues a ticket for that path directly. The branch is compiled only under `debug_assertions`, so a release build still takes its path from the native dialog, and it serves local automation only — not settings, the shipped interface or CI.
 
 Capture uses Chromium, Windows window style, a 1280×800 CSS viewport, 2× pixel density and 100% UI scale, producing 2560×1600 PNGs. Defaults use POWER-Z, device temperature and the same 120 seconds of simulated data. Virtual time is frozen before waiting for actual charts, details, fonts and controls to finish rendering. Output is `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`, eight images per language and 32 total.
 

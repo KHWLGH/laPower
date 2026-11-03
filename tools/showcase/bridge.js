@@ -428,6 +428,45 @@ async function invoke(command, args = {}, ipc = {}) {
       return newFile(args.defaultName);
     case 'paired_export_pick':
       return { csv: newFile(args.defaultName), pd: newFile(args.defaultName.replace(/\.csv$/i, '.pd.json')) };
+    case 'video_export_pick':
+      // The preview never writes a video: a stable virtual ticket is enough to drive the
+      // dialog's state machine, and the encoder path is native-only.
+      videoJob = null;
+      return { ticket: 'showcase-ticket', name: args.defaultName };
+    case 'video_export_capability':
+      return videoCapability(args.options ?? {});
+    case 'video_export_start': {
+      const options = args.request?.payload?.options ?? {};
+      videoJob = {
+        id: 'showcase-video',
+        state: 'encoding',
+        progress: 0,
+        options,
+        path: null,
+        name: null,
+        // Published the moment encoding starts, like the native host: the dialog must never have
+        // to guess, and a preview that reports "software" here hides real reporting bugs.
+        encoder: virtualEncoder,
+        fallback: virtualEncoder === 'software' ? 'the virtual GPU path is disabled' : null,
+        error: null,
+      };
+      videoJobStarted = performance.now();
+      return structuredClone(videoJob);
+    }
+    case 'video_export_status': {
+      if (!videoJob || videoJob.id !== args.id) throw new Error('videoJobUnknown');
+      advanceVideoJob();
+      return structuredClone(videoJob);
+    }
+    case 'video_export_current':
+      // Advancing on every read (not only on status polls) keeps the virtual job moving while the
+      // dialog is closed, which is what the native host does.
+      advanceVideoJob();
+      return videoJob ? structuredClone(videoJob) : null;
+    case 'video_export_cancel':
+      if (!videoJob || videoJob.id !== args.id) throw new Error('videoJobUnknown');
+      videoJob.state = 'cancelled';
+      return structuredClone(videoJob);
     case 'csv_import_pick': {
       const file = await chooseFile('.csv');
       return file ? newFile(file.name, false, new Uint8Array(await file.arrayBuffer())) : null;
@@ -478,6 +517,30 @@ async function invoke(command, args = {}, ipc = {}) {
       errors.push(message);
       throw new Error(message);
     }
+  }
+}
+
+/** Which encoder the preview claims; `?videoEncoder=software` exercises the fallback copy. */
+const virtualEncoder = options.get('videoEncoder') === 'software' ? 'software' : 'hardware';
+
+/** One virtual combination. Every combination the dialog offers can be encoded, like the host. */
+function videoCapability({ width, height, fps, codec }) {
+  return { width, height, fps, codec, available: true, reason: null, encoder: virtualEncoder };
+}
+
+/** The preview's single fake encode: wall-clock paced so closing the dialog still lets it finish. */
+let videoJob = null;
+let videoJobStarted = 0;
+const VIDEO_JOB_MS = 4000;
+
+function advanceVideoJob() {
+  if (!videoJob || videoJob.state !== 'encoding') return;
+  videoJob.progress = Math.min(1, (performance.now() - videoJobStarted) / VIDEO_JOB_MS);
+  if (videoJob.progress >= 1) {
+    videoJob.state = 'completed';
+    videoJob.progress = 1;
+    videoJob.name = 'lapower_video.mp4';
+    videoJob.path = 'C:/virtual/lapower_video.mp4';
   }
 }
 

@@ -67,6 +67,9 @@
             </select>
             <span class="cmd-sep"></span>
             <div class="cmd-action-group split-button" id="export-actions"><button type="button" class="cmd-btn" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button><button type="button" class="cmd-btn cmd-btn-icon cmd-settings-btn" id="btn-export-options" aria-label="Export options" data-i18n-aria-label="exportOptions" title="Export options" data-i18n-title="exportOptions"><i class="fi fi-chevron-down" aria-hidden="true"></i></button></div>
+            <button type="button" class="cmd-btn" id="btn-export-video" title="Export report video" data-i18n-title="videoExportTitle" disabled>
+              <i class="fi fi-play" aria-hidden="true"></i><span data-i18n="videoExport">Report video</span>
+            </button>
             <button type="button" class="cmd-btn" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
               <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
             </button>
@@ -980,6 +983,57 @@
       <div class="card-hint"><span data-i18n="markerListHint">Click a label to rename it. Exported CSV files keep markers in the Marker column.</span></div>
     </div>
 
+    <dialog id="video-export-dialog" class="fluent-dialog video-dialog" aria-labelledby="video-export-title">
+      <div class="fluent-dialog-header">
+        <i class="fluent-dialog-icon fi fi-play" data-kind="info" aria-hidden="true"></i>
+        <h2 id="video-export-title" class="fluent-dialog-title" data-i18n="videoExportTitle">Export report video</h2>
+      </div>
+      <p class="video-dialog-note" data-i18n="videoExportDescription">Turn the whole recording into a short highlight video with readings, curves and markers.</p>
+      <div class="video-grid">
+        <label class="video-field"><span class="video-label" data-i18n="videoResolution">Resolution</span>
+          <select id="video-resolution" class="ribbon-select" aria-label="Resolution" data-i18n-aria-label="videoResolution"></select>
+        </label>
+        <label class="video-field"><span class="video-label" data-i18n="videoFps">Frame rate</span>
+          <select id="video-fps" class="ribbon-select" aria-label="Frame rate" data-i18n-aria-label="videoFps"></select>
+        </label>
+        <label class="video-field"><span class="video-label" data-i18n="videoCodec">Codec</span>
+          <select id="video-codec" class="ribbon-select" aria-label="Codec" data-i18n-aria-label="videoCodec"></select>
+        </label>
+        <label class="video-field"><span class="video-label" data-i18n="videoContainer">Container</span>
+          <select id="video-format" class="ribbon-select" aria-label="Container" data-i18n-aria-label="videoContainer"></select>
+        </label>
+        <label class="video-field"><span class="video-label" data-i18n="videoDuration">Length (1–60 s)</span>
+          <input id="video-duration" class="ribbon-input" type="number" min="1" max="60" step="1" value="5" aria-describedby="video-duration-error" />
+          <span id="video-duration-error" class="field-error" role="alert" hidden></span>
+        </label>
+        <label class="video-field"><span class="video-label" data-i18n="videoTheme">Theme</span>
+          <select id="video-theme" class="ribbon-select" aria-label="Theme" data-i18n-aria-label="videoTheme">
+            <option value="light" data-i18n="light">Light</option>
+            <option value="dark" data-i18n="dark">Dark</option>
+          </select>
+        </label>
+      </div>
+      <fieldset class="video-series">
+        <legend class="video-label" data-i18n="videoSeriesGroup">Curves</legend>
+        <label class="ribbon-checkbox"><input type="checkbox" id="video-series-voltage" checked /><span class="checkmark"></span><span data-i18n="voltage">Voltage</span></label>
+        <label class="ribbon-checkbox"><input type="checkbox" id="video-series-current" checked /><span class="checkmark"></span><span data-i18n="current">Current</span></label>
+        <label class="ribbon-checkbox"><input type="checkbox" id="video-series-power" checked /><span class="checkmark"></span><span data-i18n="power">Power</span></label>
+        <label class="ribbon-checkbox"><input type="checkbox" id="video-series-temperature" checked /><span class="checkmark"></span><span data-i18n="temperature">Temperature</span></label>
+      </fieldset>
+      <p class="video-dialog-note" data-i18n="videoNote">No audio · Uses the current curves and markers · Keeps encoding after the dialog closes</p>
+      <div class="video-progress">
+        <progress id="video-progress" max="1" value="0" hidden></progress>
+        <p id="video-status" class="video-status" role="status"></p>
+        <p id="video-hint" class="card-hint"></p>
+        <p id="video-fallback" class="card-hint" hidden></p>
+        <p id="video-error" class="field-error" role="alert" hidden></p>
+      </div>
+      <div class="fluent-dialog-actions">
+        <button type="button" class="btn btn-accent" id="video-generate" data-i18n="videoStart">Generate video</button>
+        <button type="button" class="btn" id="video-cancel" hidden data-i18n="videoCancelEncoding">Cancel encoding</button>
+        <button type="button" class="btn" id="video-close" data-i18n="close">Close</button>
+      </div>
+    </dialog>
     <div class="toast-region" id="toast-region" aria-live="polite"></div>
   </body>
 </html>

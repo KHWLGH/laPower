@@ -50,6 +50,8 @@ tauri-plugin-opener = "=2.5.4"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "system-proxy"] }
 semver = "1"
 sys-locale.workspace = true
+# Free-space pre-check for the video report export; nothing else uses it.
+fs2 = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Set the process-wide policy once during hidapi initialization, before any opens.
@@ -63,8 +65,36 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSString",
     "NSUserDefaults",
 ] }
+[target.'cfg(not(windows))'.dependencies]
+# The video report renders with a portable rasteriser and encodes with a bundled encoder, so macOS
+# and Linux need no platform drawing API. Windows only needs these crates in tests (see
+# dev-dependencies), which keeps the C encoder out of its release build.
+tiny-skia = "0.12"
+fontdb = "0.24"
+ab_glyph = "0.2"
+openh264 = "0.9"
 
 [target.'cfg(windows)'.dependencies]
+# Video report export draws the dashboard with Direct2D / DirectWrite / WIC on a D3D11 texture and
+# encodes with Media Foundation. 0.61 rather than 0.62 keeps a single `windows` in the graph:
+# tauri already pulls 0.61 through tao/wry, and windows-numerics 0.2 is the matching crate.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Imaging",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_Variant"
+] }
+windows-numerics = "0.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_Properties",
@@ -73,6 +103,16 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging"
 ] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The portable pipeline (skia renderer, OpenH264, in-house MP4 muxer) runs on macOS and Linux; the
+# Windows test suite compiles it too so the code is type-checked against the real crates. The
+# encoder is loaded dynamically here: Windows never ships it, and this keeps a C++ toolchain out of
+# the Windows test build.
+tiny-skia = "0.12"
+fontdb = "0.24"
+ab_glyph = "0.2"
+openh264 = { version = "0.9", default-features = false, features = ["libloading"] }
 
 [dev-dependencies]
 criterion = "0.5"

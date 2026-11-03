@@ -97,6 +97,12 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `open_project_page` | 用系统浏览器打开固定仓库首页或经校验的该仓库发布页 |
 | `shutdown` | 停止全部后台线程后销毁主窗口 |
 | `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制命令 |
+| `video_export_capabilities` | 返回宿主实际可用的分辨率／帧率／编码组合；进程内只探测一次 |
+| `video_export_pick` | 用原生保存对话框选择目标位置并返回一次性 ticket；路径不经过前端 |
+| `video_export_start` | 校验冻结载荷并在后台线程开始编码，返回任务状态 |
+| `video_export_status` | 按 id 返回任务状态、进度与失败信息 |
+| `video_export_current` | 返回当前任务，供重开的对话框接回进度 |
+| `video_export_cancel` | 请求取消当前任务；编码线程退出前任务仍占用唯一的编码槽 |
 
 ### `src-tauri/src/pd_capture.rs`
 
@@ -117,6 +123,18 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 其他平台返回 `None`，设备名退化为不带端口后缀的形式。
 
 > 维简硬件的 USB 序列号是**生产批次日期**而非单机编号，同批次的两台仪表序列号相同。枚举时先按 USB 端口分组，再叠加序列号，以便标题栏区分插在不同口上的同型号仪表。
+
+### `src-tauri/src/video_export.rs`
+
+报告视频导出是宿主侧的单槽任务。`video_export_capability` 按用户当前选中的那一组选项用真实的一帧试编码探测，结果按组合缓存在进程内——一次打开对话框只探测一个组合，而不是逐个试完全部 24 个；`video_export_pick` 打开原生保存对话框并返回一次性 ticket，路径留在后端，前端无法指定任意目标；`video_export_start` 校验冻结载荷后启动 `lapower-video` 线程；`video_export_status` 与 `video_export_current` 分别服务对话框每 500 ms 一次的进度轮询和重开后的接回；`video_export_cancel` 只置位取消标志，由编码循环逐帧检查。关闭对话框或切换工作区不会中止编码；同一时刻只有一个任务，取消请求也要等编码线程真正退出才释放槽位。退出时 `shutdown` 取消当前任务并最多等待两秒回收编码线程；超时只记日志，残留的暂存文件带进程号，便于识别。
+
+采样只存在于前端的列式存储里，后端没有可按时间查询的记录库，因此 `src/video-export.js` 在用户确认时冻结列快照，`src/video-projection.js`（纯函数）一次投影出自包含的载荷：汇总统计、256 个时间桶的曲线投影（每桶保留首样本、末样本和各通道的最小／最大值，短记录直接使用原始点）、每个视频帧的一组通道读数（最后一帧对应最后一个样本）以及最多 8 个打点。`src/video-export-options.js` 是分辨率、帧率、编码、容器白名单与帧数公式的唯一来源，`src/video-palette.js` 带出浅深两套已解析的颜色。载荷交给后端后不再读取任何记录数据，编码期间继续记录也不会改变这份报告。
+
+`src-tauri/src/video_export.rs` 及其子模块只负责渲染与封装。`model.rs` 校验载荷结构与长度。`scene.rs` 是唯一的排版实现（逻辑画布固定 1920 × 1080，按 `width / 1920` 缩放），通过 `Painter` 抽象交给两个后端：Windows 的 `windows.rs` 用 Direct2D/DirectWrite 绘制，macOS 与 Linux 的 `skia.rs` 用 tiny-skia 加系统字体绘制。
+
+Windows 编码有两档：`gpu.rs` 把同一套排版直接画进 D3D11 纹理，`ID3D11VideoProcessor` 在显卡上转成 BT.709 NV12，再由 Media Foundation 的硬件编码器经 DXGI 采样写盘；零拷贝路径不可用时，`windows.rs` 改走 WIC 位图加 CPU NV12，但这条路径**仍开着** `MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS`，所以系统内存里的帧照旧可以交给硬件编码器，只有整条链路都拿不到硬件时才落到软件编码。两条路径都只用编码器自己报告的 `MFT_ENUM_HARDWARE_URL_Attribute` 判断是否算硬件。`gpu.rs` 通过 `IDXGIFactory1` 枚举适配器，跳过 `DXGI_ADAPTER_FLAG_SOFTWARE` 并逐个尝试，避免虚拟显示适配器抢到默认设备。编码器在**第一次尝试开始前**就写入任务状态，对话框从第一帧起显示的就是真实编码器；回退到软件编码时同时写入 `fallback` 原因。非 Windows 主机走 `portable.rs` 的帧循环：macOS 优先用 `apple.rs` 的 VideoToolbox 硬件会话（建会话后读取 `UsingHardwareAcceleratedVideoEncoder` 如实报告，失败则回退），Linux 用内置的 `software.rs`（OpenH264，随包编译）；`mp4.rs` 负责写 MP4／MOV（MOV 直接按 QuickTime 品牌与 `mhlr` 处理器写出，无需事后改写）。`mov.rs` 仍只服务 Media Foundation 产出的 MP4：在 `Finalize` 之后就地把 `ftyp` 品牌和 `hdlr` 处理器改写成 QuickTime 形式，样本偏移保持不变。
+
+目标路径来自原生对话框。编码器先在目标同目录创建隐藏暂存文件，成功后才重命名到目标；失败或取消会删除暂存文件，因此已有文件不会被半成品覆盖，也不会留下临时文件。能力按组合给出：Windows 先试零拷贝路径、失败再试 CPU 帧路径，记录实际生效的编码器；macOS 用 VideoToolbox 真编码一帧并读取 `UsingHardwareAcceleratedVideoEncoder`；Linux 由内置编码器提供 H.264（软件编码），`H.265 (HEVC)` 标记为不可用并在对话框说明原因。CSV 导出不受影响。
 
 ## 协议库
 

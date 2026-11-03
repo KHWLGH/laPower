@@ -137,7 +137,6 @@ export function main(args = process.argv.slice(2)) {
     readFileSync(resolve(ROOT, 'src/vendor/plugin-store.js'), 'utf8'),
     readFileSync(resolve(ROOT, 'src/assets/github-mark.svg'), 'utf8'),
   );
-  // Keep generated JSON in the same format as Biome, without requiring the formatter to generate it.
   const output = `${JSON.stringify(manifest, null, 2)}\n`;
   if (args.includes('--check')) {
     if (JSON.stringify(JSON.parse(readFileSync(OUTPUT, 'utf8'))) !== JSON.stringify(manifest)) {
@@ -146,6 +145,17 @@ export function main(args = process.argv.slice(2)) {
     console.log(`PASS: ${manifest.components.length} runtime components match all four release targets`);
   } else {
     writeFileSync(OUTPUT, output);
+    // JSON.stringify always breaks arrays, Biome keeps short ones on one line. Formatting the
+    // file here means a regeneration cannot leave the repository failing npm run lint.
+    try {
+      execFileSync(
+        process.execPath,
+        [resolve(ROOT, 'node_modules/@biomejs/biome/bin/biome'), 'format', '--write', OUTPUT],
+        { stdio: 'ignore' },
+      );
+    } catch {
+      // Without a local formatter the manifest is still valid; only its layout differs.
+    }
     console.log(`Generated ${manifest.components.length} runtime components`);
   }
 }

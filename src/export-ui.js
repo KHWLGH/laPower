@@ -27,6 +27,8 @@ export function refreshExportUI() {
     const hint = document.getElementById(`export-${key}-hint`);
     if (hint) hint.textContent = text;
   }
+  const video = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-export-video'));
+  if (video) video.disabled = state.chartSeries.x.length < 2;
   const both = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-export-both'));
   if (both) both.disabled = !canExportBoth();
   const missing = document.getElementById('export-both-missing');

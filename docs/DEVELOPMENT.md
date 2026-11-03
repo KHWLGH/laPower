@@ -66,12 +66,42 @@ npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
 git clone https://github.com/KHWLGH/laPower.git
 cd laPower
 npm ci
-npm run build
-npx --no-install tauri dev
-npx --no-install tauri build
+npm run dev
 ```
 
+日常使用以下快捷入口；原有命令继续可用，npm 使用项目内锁定的 Tauri CLI：
+
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 启动原生应用，自动构建开发前端 |
+| `npm run dev:web` | 启动模拟设备浏览器预览；可追加 `-- --port 4174` |
+| `npm run build` | 单独生成供 Cargo 内嵌的开发前端 |
+| `npm run build:app` | 构建本机安装包，自动生成发布前端 |
+
+`dev` 的 `beforeDevCommand` 已负责构建前端，启动前无需重复运行 `npm run build`。它沿用内嵌资源方式，不提供前端热更新；修改前端后重新启动 `dev`，或先构建前端再重新链接 Rust 二进制。
+
 本机未指定 target 时，发布产物位于 `target/release/bundle/`；CI 显式指定 target，产物位于 `target/<target>/release/bundle/`。Tauri CLI 会自动运行 `beforeBuildCommand` 生成压缩前端，打包前无需再手动执行 `npm run build:dist`。直接运行 Cargo 检查时仍须先生成 `out/`。
+
+### 分级清理
+
+各档累计包含前一档，等待删除完成后返回；默认保留 Rust 编译缓存、依赖和安装包：
+
+| 命令 | 删除范围 |
+| --- | --- |
+| `npm run clean` | `out/`、`output/`、`bench/results/`、根目录和 `src/` 下的 `.playwright-cli/`、`src-tauri/gen/schemas/` |
+| `npm run clean:incremental` | 再清理 `target/` 与 `src-tauri/target/` 中 `debug/release` 的增量缓存，包含交叉编译目标 |
+| `npm run clean:build` | 再清理完整 `target/`、`src-tauri/target/` 与 `dist/` |
+| `npm run clean:all` | 再清理 `node_modules/`；下次开发先运行 `npm ci` |
+
+所有档位都支持只预览路径：
+
+```bash
+npm run clean:build -- --dry-run
+```
+
+清理器需要 Node.js 与 Git，从脚本位置确定仓库根目录，执行前统一检查所有目标与 Git 跟踪状态；目标或祖先目录是符号链接／junction 时拒绝清理。最多并行处理四个目录，输出每项结果和总耗时；占用错误有限重试，最终失败返回非零退出码。先关闭相关开发、构建和预览进程；命令不会主动终止它们。
+
+`output/` 中的检查截图、`bench/results/` 中的原始结果及本地对照快照也会被删除。已跟踪的文档截图、`bench/baselines/`、源码、锁文件、仓库外缓存和应用恢复数据不会清理；自定义 `CARGO_TARGET_DIR` 不在上述路径时需自行管理。清理后启动 `dev` 会重建前端；直接执行 Cargo 仍须先运行 `npm run build`。
 
 ### 运行组件清单
 
@@ -168,16 +198,15 @@ Windows 当前不做证书签名；macOS 使用 ad-hoc 签名，没有 Developer
 
 ## 质量检查
 
-```bash
-npm ci
-npm run build
-npm test
-npm run typecheck
-npm run lint
-cargo fmt --check --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
+按改动范围选择一个入口：
+
+| 命令 | 适用场景 |
+| --- | --- |
+| `npm run check` | 日常前端检查 |
+| `npm run check:rust` | Rust 检查，自动先生成 `out/` |
+| `npm run check:all` | 交付前完整核心检查，包含前两组与组件清单核对 |
+
+`check` 依次运行 `npm test`、`typecheck`、`lint`，不构建前端或运行 Cargo；`check:rust` 先构建一次前端，再运行格式检查、工作区 Clippy 和测试。`check:all` 顺序组合两组检查与 `components:check`，只构建一次前端，所有入口遇错即停。单项命令仍可独立运行；组件清单核对需要 Cargo，缺少依赖缓存时可能联网。原有 CI 检查集合保持不变。
 
 `npm test` 使用 Node 内置测试运行器，覆盖纯逻辑、数据处理、协议/文件契约、安全边界和版本同步。测试文件按核心领域组织，当前保留的主要文件包括：
 
@@ -234,6 +263,8 @@ npm run showcase:capture
 ```
 
 预览默认监听 `http://127.0.0.1:4173`，默认显示浅色主题；独立软件视图可用 `/app/?theme=dark` 或 `/app/?theme=system` 指定深色或跟随系统。软件标题栏可选择虚拟设备、连接与断开，记录按钮可开始和暂停。开发工具外层提供「填充 120 秒展示数据」「冻结」「继续模拟」「推进 10 秒」「重置预览」；填充按钮自动连接当前选择的设备与本机温度源并开始记录。协议控制需要选择 POWER-Z 并连接，然后打开 PDM。端口可用 `npm run showcase:dev -- --port 4174` 指定，服务只监听本机。
+
+报告视频导出的原生验收不打开系统保存对话框：debug 构建在 `video_export_pick` 里读取 `LAPOWER_VIDEO_TARGET`，有值就直接为它签发 ticket。该分支只在 `debug_assertions` 下编译，release 构建里路径仍然只能来自原生对话框；它只服务本机自动化，不进设置、文档界面或 CI。
 
 截图命令使用 Chromium、Windows 风格、1280×800 CSS 视口、2 倍像素密度及 100% 界面缩放，生成 2560×1600 PNG。默认使用 POWER-Z、本机温度源与相同的 120 秒模拟数据，先冻结虚拟时间，再等待实际图表、报文详情、字体与控件渲染完成。输出为 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`，每种语言各 8 张展示图（共 32 张）。
 

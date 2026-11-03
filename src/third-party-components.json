@@ -148,6 +148,16 @@
       "license": "Apache-2.0 OR MIT"
     },
     {
+      "name": "ab_glyph",
+      "version": "0.2.32",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "ab_glyph_rasterizer",
+      "version": "0.1.10",
+      "license": "Apache-2.0"
+    },
+    {
       "name": "adler2",
       "version": "2.0.1",
       "license": "0BSD OR MIT OR Apache-2.0"
@@ -180,6 +190,16 @@
     {
       "name": "anyhow",
       "version": "1.0.104",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "arrayref",
+      "version": "0.3.9",
+      "license": "BSD-2-Clause"
+    },
+    {
+      "name": "arrayvec",
+      "version": "0.7.8",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -283,6 +303,11 @@
       "license": "MIT"
     },
     {
+      "name": "block-buffer",
+      "version": "0.10.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
       "name": "block2",
       "version": "0.6.2",
       "license": "MIT"
@@ -306,6 +331,11 @@
       "name": "bs58",
       "version": "0.5.1",
       "license": "MIT/Apache-2.0"
+    },
+    {
+      "name": "bytemuck",
+      "version": "1.25.2",
+      "license": "Zlib OR Apache-2.0 OR MIT"
     },
     {
       "name": "byteorder",
@@ -488,6 +518,11 @@
       "license": "MIT"
     },
     {
+      "name": "digest",
+      "version": "0.10.7",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
       "name": "dirs",
       "version": "6.0.0",
       "license": "MIT OR Apache-2.0"
@@ -638,6 +673,16 @@
       "license": "Zlib"
     },
     {
+      "name": "fontconfig-parser",
+      "version": "0.5.8",
+      "license": "MIT"
+    },
+    {
+      "name": "fontdb",
+      "version": "0.24.0",
+      "license": "MIT"
+    },
+    {
       "name": "foreign-types",
       "version": "0.5.0",
       "license": "MIT/Apache-2.0"
@@ -656,6 +701,11 @@
       "name": "freedesktop_entry_parser",
       "version": "1.3.0",
       "license": "MPL-2.0"
+    },
+    {
+      "name": "fs2",
+      "version": "0.4.3",
+      "license": "MIT/Apache-2.0"
     },
     {
       "name": "futures-channel",
@@ -1038,6 +1088,11 @@
       "license": "ISC"
     },
     {
+      "name": "libloading",
+      "version": "0.8.9",
+      "license": "ISC"
+    },
+    {
       "name": "libudev",
       "version": "0.3.0",
       "license": "MIT"
@@ -1110,6 +1165,11 @@
     {
       "name": "memmap2",
       "version": "0.5.10",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "memmap2",
+      "version": "0.9.12",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -1238,6 +1298,16 @@
       "license": "MIT"
     },
     {
+      "name": "openh264",
+      "version": "0.9.9",
+      "license": "BSD-2-Clause"
+    },
+    {
+      "name": "openh264-sys2",
+      "version": "0.9.9",
+      "license": "BSD-2-Clause"
+    },
+    {
       "name": "openssl-probe",
       "version": "0.2.1",
       "license": "MIT OR Apache-2.0"
@@ -1256,6 +1326,11 @@
       "name": "ordered-stream",
       "version": "0.2.0",
       "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "owned_ttf_parser",
+      "version": "0.25.1",
+      "license": "Apache-2.0"
     },
     {
       "name": "pango",
@@ -1443,6 +1518,11 @@
       "license": "Apache-2.0 AND ISC"
     },
     {
+      "name": "roxmltree",
+      "version": "0.20.0",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
       "name": "rust-ini",
       "version": "0.17.0",
       "license": "MIT"
@@ -1481,6 +1561,11 @@
       "name": "rustls-webpki",
       "version": "0.103.15",
       "license": "ISC"
+    },
+    {
+      "name": "safe_arch",
+      "version": "1.2.0",
+      "license": "Zlib OR Apache-2.0 OR MIT"
     },
     {
       "name": "same-file",
@@ -1573,6 +1658,11 @@
       "license": "MIT OR Apache-2.0"
     },
     {
+      "name": "sha2",
+      "version": "0.10.9",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
       "name": "signal-hook-registry",
       "version": "1.4.8",
       "license": "MIT OR Apache-2.0"
@@ -1596,6 +1686,11 @@
       "name": "slab",
       "version": "0.4.12",
       "license": "MIT"
+    },
+    {
+      "name": "slotmap",
+      "version": "1.1.1",
+      "license": "Zlib"
     },
     {
       "name": "smallvec",
@@ -1626,6 +1721,11 @@
       "name": "stable_deref_trait",
       "version": "1.2.1",
       "license": "MIT OR Apache-2.0"
+    },
+    {
+      "name": "strict-num",
+      "version": "0.1.1",
+      "license": "MIT"
     },
     {
       "name": "string_cache",
@@ -1743,6 +1843,16 @@
       "license": "MIT OR Apache-2.0"
     },
     {
+      "name": "tiny-skia",
+      "version": "0.12.0",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "tiny-skia-path",
+      "version": "0.12.0",
+      "license": "BSD-3-Clause"
+    },
+    {
       "name": "tinystr",
       "version": "0.8.3",
       "license": "Unicode-3.0"
@@ -1831,6 +1941,11 @@
       "name": "try-lock",
       "version": "0.2.5",
       "license": "MIT"
+    },
+    {
+      "name": "ttf-parser",
+      "version": "0.25.1",
+      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "typeid",
@@ -1946,6 +2061,16 @@
       "name": "webview2-com-sys",
       "version": "0.38.2",
       "license": "MIT"
+    },
+    {
+      "name": "wide",
+      "version": "1.7.1",
+      "license": "Zlib OR Apache-2.0 OR MIT"
+    },
+    {
+      "name": "winapi",
+      "version": "0.3.9",
+      "license": "MIT/Apache-2.0"
     },
     {
       "name": "winapi-util",
