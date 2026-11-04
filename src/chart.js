@@ -18,6 +18,7 @@
  * - setRangeDragging()    连续交互期间复用回看预算与绘制反馈（不改变曲线内容）
  * - setSeriesVisible()    显示 / 隐藏某条曲线（对应 Y 轴自动跟随显隐）
  * - setSeriesFill()       设置某条曲线的填充不透明度（0 = 关闭填充）
+ * - setChartFillEnabled() 统一启用 / 关闭监控曲线填充，保留各通道透明度
  */
 
 import {
@@ -30,7 +31,7 @@ import {
 } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { rasterOrderedFill } from './chart-fill.js';
-import { ChartFillPolicy, ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
+import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
 import { wheelZoomFactor } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { displayFrames } from './frame-scheduler.js';
@@ -125,12 +126,9 @@ const INTERACTION_PREPARE_MS = 4;
 const PAUSE_PREPARE_MS = 16;
 const recordingRenderPolicy = new ChartRenderPolicy();
 // Review keeps screen-resolution detail, including throughout a gesture. Canvas
-// pressure can suppress fill, but must not leave a static curve at 8–16 px/bucket.
+// pressure must not leave a static curve at 8–16 px/bucket.
 const reviewRenderPolicy = new ChartRenderPolicy({ initialDensity: 1, maxDensity: 1 });
-const recordingFillPolicy = new ChartFillPolicy();
-const reviewFillPolicy = new ChartFillPolicy();
 let renderPolicy = reviewRenderPolicy;
-let fillPolicy = reviewFillPolicy;
 /** @type {'recording'|'review'} */
 let displayContext = 'review';
 /** @type {{generation: number, start: number, cap: number, ppb: number, cancelled: boolean}|null} */
@@ -292,14 +290,11 @@ let visiblePlotWidth = 600;
 // Imported/preloaded history is not a live append batch. Count only since the last main submission.
 let submittedSourceLen = 0;
 let recentAppendCount = 0;
-let fillPaintDirty = false;
 let feedbackRecording = false;
-const FILL_POINTS_PER_PIXEL = 4;
 /** @type {number|null} */
 let chartProbeFrame = null;
-// Static feedback can force a confirmation draw; fill transitions must also redraw.
+// Density feedback can request a maintenance draw.
 let feedbackRepaintPending = false;
-let filledPaintConfirmed = false;
 let feedbackEpoch = 0;
 let paintBatchId = 0;
 let pauseId = 0;
@@ -791,8 +786,6 @@ export function syncChartSeries() {
   selectDisplayContext(state.isRecording ? 'recording' : 'review');
   recordingRenderPolicy.reset();
   reviewRenderPolicy.reset();
-  recordingFillPolicy.reset();
-  reviewFillPolicy.reset();
   sourceRevision = chartRevision();
   bucketRaster = null;
   orderedPaints = new WeakMap();
@@ -829,7 +822,7 @@ export function setRangeDragging(dragging) {
   if (dragging && !rangeDragging) {
     cancelIndexWarmup();
     selectDisplayContext('review');
-    cancelFrameProbe(false);
+    cancelFrameProbe();
   }
   rangeDragging = !!dragging;
   state.__rangeDragging = rangeDragging;
@@ -971,25 +964,6 @@ function useRawWindow(start, end) {
 /** Display projection and pacing eligibility; this does not suppress fill. */
 function displayDense(count = visiblePointCount, width = visiblePlotWidth) {
   return count > displayResolution(width);
-}
-
-/** Fill needs a larger window AND measured pressure; raw history size alone never suppresses it. */
-function fillDense(count = visiblePointCount, width = visiblePlotWidth) {
-  if (count >= Math.max(1, width) * FILL_POINTS_PER_PIXEL) return true;
-  if (count <= displayResolution(width)) return false;
-  if (displayContext !== 'review' || !state.mainChart?.bbox?.height) return false;
-  const { start, end } = sourceRange();
-  // Complexity-protected bucket windows still retrace many vertical segments.
-  // Keep measured fill protection until they can actually use the raw path.
-  return !useRawWindow(start, end);
-}
-
-function hasEnabledFill() {
-  return fillStyles.some((fill, i) => i > 0 && fill !== null && state.mainChart?.series?.[i]?.show !== false);
-}
-
-function fillSuppressed() {
-  return fillDense() && hasEnabledFill() && fillPolicy.suppressed;
 }
 
 function currentWindowDense() {
@@ -1414,8 +1388,9 @@ function expectChartDraw(chart, request) {
     pixelsPerBucket:
       role === 'main' ? renderPolicy.pixelsPerBucket / (displayContext === 'review' ? plotPixelRatio() : 1) : undefined,
     displayDense: role === 'main' && displayDense(),
-    fillSuppressed: role === 'main' && fillSuppressed(),
-    fillSuppressionReason: role === 'main' && fillSuppressed() ? fillPolicy.reason : null,
+    fillEnabled: role === 'main' && state.settings.chartFillEnabled,
+    fillSuppressed: false,
+    fillSuppressionReason: null,
     recentAppendCount: role === 'main' ? recentAppendCount : 0,
     refreshSource: request.source,
     reason: request.reason,
@@ -1502,22 +1477,18 @@ function finishChartDraw(chart) {
   const live = state.isRecording && displayContext === 'recording';
   const interactive = rangeDragging;
   const dense = displayDense();
-  const eligibleFill = fillDense() && hasEnabledFill();
-  const paintedFillSuppressed = fillSuppressed();
-  const appendCount = pending?.lastDiagnostic.recentAppendCount ?? 0;
   // Canvas work may stall the second or third frame after a fast first
   // callback. Treat this bounded observation window as one paint sample, so a
   // healthy intervening frame neither hides its lag nor counts one stall twice.
   // A continuous gesture supplies another paint each frame: consume each actual
   // frame once so slow draws can adjust the budget before the gesture ends.
   // Live/static paints and the final release retain the delayed-raster probe.
-  const probeFrames =
-    dense && (!interactive || (eligibleFill && !fillPolicy.suppressed && !filledPaintConfirmed)) ? 3 : 1;
+  const probeFrames = dense && !interactive ? 3 : 1;
   let observedFrames = 0;
   let previousFrameAt = drawEndedAt;
   let nextFrameDelayMs = 0;
   let frameDelayMs = 0;
-  let fillFrameDelayMs = 0;
+  let drawFrameDelayMs = 0;
   const observeFrame = () => {
     chartProbeFrame = null;
     if (epoch !== feedbackEpoch || generation !== dataGen || chart !== state.mainChart) return;
@@ -1527,7 +1498,6 @@ function finishChartDraw(chart) {
       !visible ||
       live !== (state.isRecording && displayContext === 'recording') ||
       dense !== currentWindowDense() ||
-      eligibleFill !== (fillDense() && hasEnabledFill()) ||
       density !== renderPolicy.pixelsPerBucket
     ) {
       cancelFrameProbe();
@@ -1544,8 +1514,8 @@ function finishChartDraw(chart) {
       ),
     );
     // Preparation/import work before draw cannot establish an expensive fill.
-    fillFrameDelayMs = Math.max(
-      fillFrameDelayMs,
+    drawFrameDelayMs = Math.max(
+      drawFrameDelayMs,
       delayMs,
       duration ?? 0,
       performanceDiagnostics.frameDelaySince(drawEndedAt, true, true),
@@ -1558,37 +1528,15 @@ function finishChartDraw(chart) {
       return;
     }
     const densityChanged = renderPolicy.observe({
-      // Cold preparation and other work before draw cannot establish a coarse
-      // display budget. Use the same actual-paint pressure as fill protection.
-      delayMs: fillFrameDelayMs,
+      // Cold preparation before draw cannot establish a coarse display budget.
+      delayMs: drawFrameDelayMs,
       at,
       idleFrameMs: performanceDiagnostics.idleFrameIntervalMs(),
       visible,
       dense,
       interactive,
     });
-    // Without incoming samples, a first moderately slow review draw would never
-    // receive its second observation. Force exactly one confirmation at this
-    // density; a healthy result stops, a second slow result coarsens the budget.
-    const fillChanged = fillPolicy.observe({
-      delayMs: fillFrameDelayMs,
-      at,
-      idleFrameMs: renderPolicy.idleFrameMs,
-      visible,
-      eligible: eligibleFill,
-      paintedDensity: density,
-      nextDensity: renderPolicy.pixelsPerBucket,
-      densityLimit: renderPolicy.maxDensity,
-      largeBatch: live && appendCount >= visiblePlotWidth * FILL_POINTS_PER_PIXEL,
-    });
-    const slowFill = fillFrameDelayMs > Math.max(33, renderPolicy.idleFrameMs * 2);
-    if (slowFill || (fillChanged && !fillPolicy.suppressed)) filledPaintConfirmed = false;
-    else if (eligibleFill && !paintedFillSuppressed && observedFrames >= 3) filledPaintConfirmed = true;
-    const confirmReview =
-      !live &&
-      dense &&
-      ((renderPolicy.slowFrames === 1 && density < renderPolicy.maxDensity) || fillPolicy.needsConfirmation);
-    if (densityChanged || fillChanged || confirmReview) {
+    if (densityChanged) {
       feedbackRepaintPending = true;
       scheduleChartUpdate('maintenance');
     } else if (rangeDragging && chartDirty) scheduleChartUpdate('interaction');
@@ -1596,38 +1544,20 @@ function finishChartDraw(chart) {
   chartProbeFrame = requestAnimationFrame(observeFrame);
 }
 
-/** @param {boolean} [resetFill=true] */
-function cancelFrameProbe(resetFill = true) {
+function cancelFrameProbe() {
   if (chartProbeFrame !== null) cancelAnimationFrame(chartProbeFrame);
   chartProbeFrame = null;
   feedbackRepaintPending = false;
   feedbackEpoch++;
   renderPolicy.breakFeedback();
-  if (resetFill) {
-    filledPaintConfirmed = false;
-    if (fillPolicy.reset()) fillPaintDirty = true;
-  } else fillPolicy.breakFeedback();
 }
 
 /** Display budgets from live recording never become the initial review budget. @param {'recording'|'review'} context */
 function selectDisplayContext(context) {
   if (context === displayContext) return;
-  const previousFill = fillPolicy;
-  const previousRender = renderPolicy;
-  cancelFrameProbe(false);
+  cancelFrameProbe();
   displayContext = context;
-  filledPaintConfirmed = false;
   renderPolicy = context === 'recording' ? recordingRenderPolicy : reviewRenderPolicy;
-  fillPolicy = context === 'recording' ? recordingFillPolicy : reviewFillPolicy;
-  // The source is unchanged across pause/gesture transitions. Share known fill
-  // pressure, never the recording density, to avoid retrying a costly filled
-  // path just as a finer review window is requested.
-  if (context === 'review' && (previousFill.suppressed || previousRender.nextFrameDelayMs > 100)) {
-    fillPolicy.suppressed = true;
-    fillPolicy.reason = previousFill.reason ?? 'severe-frame';
-    fillPolicy.lastSuppressedAt = previousFill.lastSuppressedAt || performance.now();
-  }
-  fillPaintDirty = true;
 }
 
 /** 同步准备耗时仅作诊断，不据此猜测 GPU / Canvas 耗时或固定降帧。
@@ -1671,7 +1601,7 @@ function applyData(opts = {}) {
   const t0 = performance.now();
   chartDirty = false;
   if (feedbackRecording !== state.isRecording) {
-    cancelFrameProbe(false);
+    cancelFrameProbe();
     feedbackRecording = state.isRecording;
     selectDisplayContext(state.isRecording && !rangeDragging ? 'recording' : 'review');
   }
@@ -1685,7 +1615,6 @@ function applyData(opts = {}) {
   const windowCount = end - start;
   visiblePointCount = windowCount;
   visiblePlotWidth = plotCssWidth();
-  if ((!fillDense() || !hasEnabledFill()) && fillPolicy.reset()) fillPaintDirty = true;
   const cap = target?.cap ?? mainBucketCap(windowCount);
   const ppb = stripePpb(windowCount, cap);
   const coarsePreview = usePausePreview(start, end, cap);
@@ -1703,8 +1632,7 @@ function applyData(opts = {}) {
   }
   const appended = srcLen > scannedLen;
   const yChanged = trackNewPoints(srcLen);
-  const force = !!opts.force || fillPaintDirty;
-  fillPaintDirty = false;
+  const force = !!opts.force;
   const dataChanged = appended || appliedMainGen !== dataGen;
   // 拖动中唯一被推迟的是导航图重扫：它与主图画什么无关。
   const preview = rangeDragging && !force;
@@ -1922,19 +1850,6 @@ export function scheduleChartUpdate(source = 'live') {
   if (flushingChart) return;
   requestPaint(source);
   if (chartFramePending) return;
-  // Do not queue several expensive filled paths before delayed raster feedback
-  // from the first one arrives. Merge the latest gesture window until the bounded
-  // probe completes; protected/unfilled and raw windows keep their normal cadence.
-  if (
-    rangeDragging &&
-    currentWindowDense() &&
-    chartProbeFrame !== null &&
-    fillDense() &&
-    hasEnabledFill() &&
-    !fillPolicy.suppressed &&
-    !filledPaintConfirmed
-  )
-    return;
   if (state.isRecording && paintRequest?.source === 'live' && !rangeDragging && !resizeDirty) {
     const delay = lastLiveFlushAt + liveRefreshInterval() - performance.now();
     if (delay > 1) {
@@ -1995,7 +1910,7 @@ export function setChartXWindow(min, max) {
       windowIntent++;
       // A gesture may move every frame. Its paints must still finish their
       // raster observations; unrelated windows continue to retire old evidence.
-      if (!rangeDragging) cancelFrameProbe(false);
+      if (!rangeDragging) cancelFrameProbe();
     }
     pausedAdvance = !!automaticAdvance && !state.isRecording;
   }
@@ -2018,6 +1933,14 @@ export function setSeriesVisible(datasetIndex, show) {
   cancelFrameProbe();
   chart.setSeries(si, { show: !!show });
   renderLegend();
+}
+
+/** Toggle all monitor fills without changing channel opacity. @param {boolean} enabled */
+export function setChartFillEnabled(enabled) {
+  state.settings.chartFillEnabled = !!enabled;
+  cancelFrameProbe();
+  // Rebuild paths as well as colours: bucket rasters may have merged unfilled channels.
+  state.mainChart?.redraw(true);
 }
 
 /**
@@ -3053,8 +2976,8 @@ export function initChart() {
         width: i >= 4 ? 1 : 1.5,
         points: { show: false },
         ...(hasPaths ? { paths: adaptivePaths } : {}),
-        // Keep the user's fill until measured pressure survives density reduction.
-        fill: () => (fillSuppressed() ? null : fillStyles[i + 1]),
+        // Every render path uses the same user-controlled shading switch.
+        fill: () => (state.settings.chartFillEnabled ? fillStyles[i + 1] : null),
         show: showInitial[i],
       })),
     ],

@@ -836,6 +836,7 @@ export const messages = {
     '新しいラベル。空にするとマーカーを削除します。',
   ],
   deleteMarker: ['Delete marker', '删除标记', '刪除標記', 'マーカーを削除'],
+  chartFillEnabled: ['Curve shading', '曲线阴影', '曲線陰影', '曲線の塗りつぶし'],
   videoExport: ['Report video', '报告视频', '報告影片', 'レポート動画'],
   videoExportTitle: ['Export report video', '导出报告视频', '匯出報告影片', 'レポート動画を書き出す'],
   videoExportDescription: [

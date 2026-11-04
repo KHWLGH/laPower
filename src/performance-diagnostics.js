@@ -89,7 +89,7 @@ export function batchEnd(accepted, timing = {}) {
   });
 }
 
-/** @param {'main'|'navigator'} role @param {{requestedAt?:number, submittedAt?:number, prepareMs?:number|null, batchId?:number, sourcePointCount?:number, displayPointCount?:number, pixelsPerBucket?:number, displayDense?:boolean, fillSuppressed?:boolean, fillSuppressionReason?:string|null, recentAppendCount?:number, refreshIntervalMs?:number, refreshSource?:'live'|'interaction'|'maintenance',reason?:string,pauseId?:number,pauseRequestedAt?:number,pauseLength?:number,projection?:any}} info */
+/** @param {'main'|'navigator'} role @param {{requestedAt?:number, submittedAt?:number, prepareMs?:number|null, batchId?:number, sourcePointCount?:number, displayPointCount?:number, pixelsPerBucket?:number, displayDense?:boolean, fillEnabled?:boolean, fillSuppressed?:boolean, fillSuppressionReason?:string|null, recentAppendCount?:number, refreshIntervalMs?:number, refreshSource?:'live'|'interaction'|'maintenance',reason?:string,pauseId?:number,pauseRequestedAt?:number,pauseLength?:number,projection?:any}} info */
 export function chartRequest(role, info = {}) {
   return {
     at: Number.isFinite(info.requestedAt) ? /** @type {number} */ (info.requestedAt) : now(),
@@ -102,6 +102,7 @@ export function chartRequest(role, info = {}) {
     displayPointCount: info.displayPointCount ?? null,
     pixelsPerBucket: info.pixelsPerBucket ?? null,
     displayDense: info.displayDense ?? false,
+    fillEnabled: info.fillEnabled ?? false,
     fillSuppressed: info.fillSuppressed ?? false,
     fillSuppressionReason: info.fillSuppressionReason ?? null,
     recentAppendCount: info.recentAppendCount ?? 0,
@@ -141,6 +142,7 @@ export function chartPaint(role, request, drawEndedAt = now(), drawMs = null, st
     displayPointCount: request.displayPointCount,
     pixelsPerBucket: request.pixelsPerBucket,
     displayDense: request.displayDense,
+    fillEnabled: request.fillEnabled,
     fillSuppressed: request.fillSuppressed,
     fillSuppressionReason: request.fillSuppressionReason,
     recentAppendCount: request.recentAppendCount,

@@ -3,7 +3,7 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { refreshChartScales, setSeriesFill, setSeriesVisible } from './chart.js';
+import { refreshChartScales, setChartFillEnabled, setSeriesFill, setSeriesVisible } from './chart.js';
 import {
   refreshRecordLimitUI,
   updateEnergyDisplay,
@@ -48,6 +48,8 @@ function normalizeSettings(saved) {
     saved && typeof saved === 'object' ? saved : {}
   );
   const merged = { ...defaultSettings, ...source };
+  merged.chartFillEnabled =
+    typeof source.chartFillEnabled === 'boolean' ? source.chartFillEnabled : defaultSettings.chartFillEnabled;
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
   merged.videoExport = normalizeVideoExportOptions(source.videoExport);
@@ -162,6 +164,7 @@ function echoSettingsUI() {
     const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
     if (el) el.checked = val;
   };
+  setChecked('chart-fill-enabled', state.settings.chartFillEnabled);
   setChecked('show-voltage', state.settings.showVoltage);
   setChecked('show-current', state.settings.showCurrent);
   setChecked('show-power', state.settings.showPower);
@@ -446,6 +449,7 @@ export async function resetSettings() {
     setSeriesVisible(5, state.settings.showDpDn);
     setSeriesVisible(6, state.settings.showCc);
     setSeriesVisible(7, state.settings.showCc);
+    setChartFillEnabled(state.settings.chartFillEnabled);
     setSeriesFill(0, state.settings.opacityVoltage);
     setSeriesFill(1, state.settings.opacityCurrent);
     setSeriesFill(2, state.settings.opacityPower);

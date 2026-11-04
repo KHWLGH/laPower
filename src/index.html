@@ -834,6 +834,13 @@
     <!-- 浮出面板内容（flyout.js 控制显隐；ID 与既有 settings/temperature 逻辑保持契约） -->
     <div id="flyout-display" hidden>
       <div class="flyout-row">
+        <label class="ribbon-checkbox">
+          <input type="checkbox" id="chart-fill-enabled" checked />
+          <span class="checkmark"></span>
+          <span data-i18n="chartFillEnabled">Curve shading</span>
+        </label>
+      </div>
+      <div class="flyout-row">
         <label class="ribbon-checkbox" title="Show/hide voltage curve" data-i18n-title="showVoltage">
           <input type="checkbox" id="show-voltage" checked />
           <span class="checkmark voltage"></span>

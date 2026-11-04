@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ChartFillPolicy, ChartRenderPolicy, liveChartIntervalMs } from '../src/chart-pacing.js';
+import { ChartRenderPolicy, liveChartIntervalMs } from '../src/chart-pacing.js';
 
 function feedback(policy, delayMs, at, overrides = {}) {
   return policy.observe({ delayMs, at, visible: true, dense: true, idleFrameMs: 16, ...overrides });
@@ -79,88 +79,4 @@ test('100Hz retains cheap dense refreshes; 1000Hz reserves 50–100ms including 
   assert.equal(liveChartIntervalMs(12, true, 16, 16, 1), 50);
   assert.equal(liveChartIntervalMs(0.4, true, 85, 16, 1), 100);
   assert.equal(liveChartIntervalMs(0.4, true, 16, 16, NaN), 0);
-});
-
-function fillFeedback(fill, render, delayMs, at, overrides = {}) {
-  const paintedDensity = render.pixelsPerBucket;
-  render.observe({ delayMs, at, idleFrameMs: 16, visible: true, dense: true });
-  return fill.observe({
-    delayMs,
-    at,
-    idleFrameMs: 16,
-    visible: true,
-    eligible: true,
-    paintedDensity,
-    nextDensity: render.pixelsPerBucket,
-    ...overrides,
-  });
-}
-
-test('fill requires a slow pair after a density reduction actually painted', () => {
-  const fill = new ChartFillPolicy(),
-    render = new ChartRenderPolicy();
-  for (const at of [100, 200]) assert.equal(fillFeedback(fill, render, 40, at), false);
-  assert.equal(render.pixelsPerBucket, 4);
-  assert.equal(fill.suppressed, false);
-  assert.equal(fillFeedback(fill, render, 40, 300), false);
-  assert.equal(fill.needsConfirmation, true);
-  assert.equal(fillFeedback(fill, render, 40, 400), true);
-  assert.equal(fill.reason, 'persistent-slow-frame');
-  assert.equal(fill.suppressed, true);
-});
-
-test('fill remembers the first gesture reduction but requires a slower paint at that density', () => {
-  const fill = new ChartFillPolicy();
-  const observe = (delayMs, at, paintedDensity, nextDensity) =>
-    fill.observe({ delayMs, at, idleFrameMs: 16, visible: true, eligible: true, paintedDensity, nextDensity });
-  assert.equal(observe(40, 100, 2, 4), false);
-  assert.equal(fill.suppressed, false);
-  assert.equal(observe(16, 150, 4, 4), false);
-  assert.equal(observe(40, 200, 4, 8), false);
-  assert.equal(observe(40, 250, 8, 16), true);
-  assert.equal(fill.reason, 'persistent-slow-frame');
-});
-
-test('severe frames protect immediately; maximum density needs a bounded confirmation', () => {
-  const fill = new ChartFillPolicy(),
-    render = new ChartRenderPolicy();
-  assert.equal(fillFeedback(fill, render, 120, 100), true);
-  assert.equal(fill.reason, 'severe-frame');
-  fill.reset();
-  render.pixelsPerBucket = 16;
-  assert.equal(fillFeedback(fill, render, 40, 200), false);
-  assert.equal(fill.needsConfirmation, true);
-  assert.equal(fillFeedback(fill, render, 40, 300), true);
-  assert.equal(fill.needsConfirmation, false);
-});
-
-test('fill trials require healthy paints for two seconds and wait five seconds after suppression', () => {
-  const fill = new ChartFillPolicy(),
-    render = new ChartRenderPolicy();
-  fillFeedback(fill, render, 120, 100);
-  for (let at = 200; at < 5100; at += 100) {
-    assert.equal(fillFeedback(fill, render, 16, at), false);
-    assert.equal(fill.suppressed, true);
-  }
-  assert.equal(fillFeedback(fill, render, 16, 5100), true);
-  assert.equal(fill.suppressed, false);
-  assert.equal(fill.reason, null);
-});
-
-test('unrelated, invalid and hidden feedback cannot suppress or restore fills', () => {
-  const fill = new ChartFillPolicy(),
-    render = new ChartRenderPolicy();
-  fillFeedback(fill, render, 40, 100);
-  fillFeedback(fill, render, 40, 1000);
-  assert.equal(fill.suppressed, false, 'a gap cannot confirm the first slow sample');
-  fillFeedback(fill, render, 120, 1100, { eligible: false });
-  assert.equal(fill.suppressed, false);
-  fillFeedback(fill, render, 120, 1200);
-  fillFeedback(fill, render, 16, 1300);
-  fillFeedback(fill, render, 16, 8000);
-  assert.equal(fill.suppressed, true, 'background-sized gaps cannot prove recovery');
-  assert.equal(fillFeedback(fill, render, 120, 8100, { visible: false }), true);
-  assert.equal(fill.reason, null);
-  fillFeedback(fill, render, NaN, 8200);
-  assert.equal(fill.suppressed, false);
 });

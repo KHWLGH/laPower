@@ -10,6 +10,7 @@ import {
   refreshChartLanguage,
   refreshChartScales,
   scheduleChartUpdate,
+  setChartFillEnabled,
   setRangeDragging,
   setSeriesFill,
   setSeriesVisible,
@@ -199,6 +200,11 @@ function setupChartToggles() {
       setSeriesVisible(index, checkbox.checked);
       debouncedSaveSettings();
     });
+  });
+
+  document.getElementById('chart-fill-enabled')?.addEventListener('change', (event) => {
+    setChartFillEnabled(/** @type {HTMLInputElement} */ (event.target).checked);
+    debouncedSaveSettings();
   });
 
   // Fill controls — opacity input drives both opacity and fill (0 = fill off)

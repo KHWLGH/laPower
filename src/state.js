@@ -44,6 +44,7 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {boolean} showCurrent
  * @property {boolean} showPower
  * @property {boolean} showTemp
+ * @property {boolean} chartFillEnabled - 监控曲线阴影总开关
  * @property {number}  opacityVoltage
  * @property {number}  opacityCurrent
  * @property {number}  opacityPower
@@ -351,6 +352,7 @@ export const defaultSettings = {
   showCurrent: true,
   showPower: true,
   showTemp: true,
+  chartFillEnabled: true,
   opacityVoltage: 15,
   opacityCurrent: 15,
   opacityPower: 15,

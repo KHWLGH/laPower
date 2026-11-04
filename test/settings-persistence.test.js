@@ -279,6 +279,42 @@ test('immediate marking defaults safely, persists both choices, echoes the toggl
   }
 });
 
+test('curve shading defaults on, preserves opacity across reloads and resets', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    for (const value of [undefined, null, 'false', 0, true, false]) {
+      window.__TAURI__.core.invoke = async (command, args = {}) => {
+        if (command === 'plugin:store|get' && args.key === 'appSettings')
+          return [{ chartFillEnabled: value, opacityVoltage: 29 }, true];
+        return invoke(command, args);
+      };
+      await loadSettings();
+      assert.equal(state.settings.chartFillEnabled, value !== false);
+      assert.equal(el('chart-fill-enabled').checked, value !== false);
+      assert.equal(state.settings.opacityVoltage, 29);
+    }
+    window.__TAURI__.core.invoke = invoke;
+    for (const enabled of [false, true]) {
+      state.settings.chartFillEnabled = enabled;
+      assert.equal(await saveSettings(), true);
+      state.settings = { ...defaultSettings };
+      await loadSettings();
+      assert.equal(state.settings.chartFillEnabled, enabled);
+      assert.equal(state.settings.opacityVoltage, 29);
+    }
+    assert.equal(await resetSettings(), true);
+    assert.equal(state.settings.chartFillEnabled, true);
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
 test('loaded settings keep the protocol view and clamp PDM choices field by field', async () => {
   installStoreStub();
   const stored = globalThis.window.__TAURI__.core.invoke;
