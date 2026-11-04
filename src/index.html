@@ -67,8 +67,8 @@
             </select>
             <span class="cmd-sep"></span>
             <div class="cmd-action-group split-button" id="export-actions"><button type="button" class="cmd-btn" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button><button type="button" class="cmd-btn cmd-btn-icon cmd-settings-btn" id="btn-export-options" aria-label="Export options" data-i18n-aria-label="exportOptions" title="Export options" data-i18n-title="exportOptions"><i class="fi fi-chevron-down" aria-hidden="true"></i></button></div>
-            <button type="button" class="cmd-btn" id="btn-export-video" title="Export report video" data-i18n-title="videoExportTitle" disabled>
-              <i class="fi fi-play" aria-hidden="true"></i><span data-i18n="videoExport">Report video</span>
+            <button type="button" class="cmd-btn" id="btn-export-video" title="Export report" data-i18n-title="videoExportTitle" disabled>
+              <i class="fi fi-report" aria-hidden="true"></i><span data-i18n="videoExport">Export report</span>
             </button>
             <button type="button" class="cmd-btn" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
               <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
@@ -992,24 +992,50 @@
 
     <dialog id="video-export-dialog" class="fluent-dialog video-dialog" aria-labelledby="video-export-title">
       <div class="fluent-dialog-header">
-        <i class="fluent-dialog-icon fi fi-play" data-kind="info" aria-hidden="true"></i>
-        <h2 id="video-export-title" class="fluent-dialog-title" data-i18n="videoExportTitle">Export report video</h2>
+        <i class="fluent-dialog-icon fi fi-report" data-kind="info" aria-hidden="true"></i>
+        <h2 id="video-export-title" class="fluent-dialog-title" data-i18n="videoExportTitle">Export report</h2>
       </div>
-      <p class="video-dialog-note" data-i18n="videoExportDescription">Turn the whole recording into a short highlight video with readings, curves and markers.</p>
+      <p class="video-dialog-note" data-i18n="videoExportDescription">Export the whole recording as an image or a short video report.</p>
       <div class="video-grid">
+        <label class="video-field"><span class="video-label" data-i18n="reportType">Report type</span>
+          <select id="report-type" class="ribbon-select" data-i18n-aria-label="reportType" aria-label="Report type">
+            <option value="image" data-i18n="reportImage">Image report (PNG)</option>
+            <option value="video" data-i18n="reportVideo">Video report</option>
+          </select>
+        </label>
+        <label class="video-field" data-report-image><span class="video-label" data-i18n="reportImageLayout">Image layout</span>
+          <select id="report-image-layout" class="ribbon-select" data-i18n-aria-label="reportImageLayout" aria-label="Image layout">
+            <option value="widescreen" data-i18n="reportWidescreen">16:9 · Up to 8 markers</option>
+            <option value="long" data-i18n="reportLongImage">Long image · All markers</option>
+          </select>
+        </label>
         <label class="video-field"><span class="video-label" data-i18n="videoResolution">Resolution</span>
           <select id="video-resolution" class="ribbon-select" aria-label="Resolution" data-i18n-aria-label="videoResolution"></select>
         </label>
-        <label class="video-field"><span class="video-label" data-i18n="videoFps">Frame rate</span>
+        <label class="video-field" data-report-video><span class="video-label" data-i18n="videoFps">Frame rate</span>
           <select id="video-fps" class="ribbon-select" aria-label="Frame rate" data-i18n-aria-label="videoFps"></select>
         </label>
-        <label class="video-field"><span class="video-label" data-i18n="videoCodec">Codec</span>
+        <label class="video-field" data-report-video><span class="video-label" data-i18n="videoCodec">Codec</span>
           <select id="video-codec" class="ribbon-select" aria-label="Codec" data-i18n-aria-label="videoCodec"></select>
         </label>
-        <label class="video-field"><span class="video-label" data-i18n="videoContainer">Container</span>
+        <label class="video-field" data-report-video><span class="video-label" data-i18n="videoContainer">Container</span>
           <select id="video-format" class="ribbon-select" aria-label="Container" data-i18n-aria-label="videoContainer"></select>
         </label>
-        <label class="video-field"><span class="video-label" data-i18n="videoDuration">Length (1–60 s)</span>
+        <label class="video-field" data-report-video><span class="video-label" data-i18n="videoEncodingMode">Encoding mode</span>
+          <select id="video-acceleration" class="ribbon-select" data-i18n-aria-label="videoEncodingMode" aria-label="Encoding mode">
+            <option value="auto" data-i18n="videoAutomatic">Automatic</option>
+            <option value="hardware" data-i18n="videoHardwareEncoder">Hardware encoding</option>
+            <option value="software" data-i18n="videoSoftwareEncoder">Software encoding</option>
+          </select>
+        </label>
+        <label class="video-field" data-report-video><span class="video-label" data-i18n="videoQuality">Quality</span>
+          <select id="video-quality" class="ribbon-select" data-i18n-aria-label="videoQuality" aria-label="Quality">
+            <option value="standard" data-i18n="videoQualityStandard">Standard</option>
+            <option value="high" data-i18n="videoQualityHigh">High</option>
+            <option value="ultra" data-i18n="videoQualityUltra">Ultra</option>
+          </select>
+        </label>
+        <label class="video-field" data-report-video><span class="video-label" data-i18n="videoDuration">Length (1–60 s)</span>
           <input id="video-duration" class="ribbon-input" type="number" min="1" max="60" step="1" value="5" aria-describedby="video-duration-error" />
           <span id="video-duration-error" class="field-error" role="alert" hidden></span>
         </label>
@@ -1026,8 +1052,11 @@
         <label class="ribbon-checkbox"><input type="checkbox" id="video-series-current" checked /><span class="checkmark"></span><span data-i18n="current">Current</span></label>
         <label class="ribbon-checkbox"><input type="checkbox" id="video-series-power" checked /><span class="checkmark"></span><span data-i18n="power">Power</span></label>
         <label class="ribbon-checkbox"><input type="checkbox" id="video-series-temperature" checked /><span class="checkmark"></span><span data-i18n="temperature">Temperature</span></label>
+        <label class="ribbon-checkbox"><input type="checkbox" id="report-markers" checked /><span class="checkmark"></span><span data-i18n="reportMarkers">Markers</span></label>
+        <label class="ribbon-checkbox"><input type="checkbox" id="report-marker-details" checked /><span class="checkmark"></span><span data-i18n="reportMarkerDetails">Marker details</span></label>
       </fieldset>
-      <p class="video-dialog-note" data-i18n="videoNote">No audio · Uses the current curves and markers · Keeps encoding after the dialog closes</p>
+      <p id="report-note" class="video-dialog-note"></p>
+      <p id="report-marker-hint" class="card-hint" hidden></p>
       <div class="video-progress">
         <progress id="video-progress" max="1" value="0" hidden></progress>
         <p id="video-status" class="video-status" role="status"></p>

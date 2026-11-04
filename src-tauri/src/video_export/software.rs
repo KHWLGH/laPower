@@ -12,15 +12,9 @@ use openh264::encoder::{
 use openh264::formats::YUVBuffer;
 use openh264::{OpenH264API, Timestamp};
 
-use super::model::{Codec, VideoOptions};
+use super::model::{Acceleration, Codec, VideoOptions};
 use super::mp4;
 use super::portable::{Encoder as Backend, Sample};
-
-/// Bitrate from the pixel rate, matching the Direct2D/Media Foundation path so files look alike.
-fn bitrate(options: &VideoOptions) -> u32 {
-    (u64::from(options.width) * u64::from(options.height) * u64::from(options.fps) / 7)
-        .clamp(4_000_000, 80_000_000) as u32
-}
 
 fn api() -> Result<OpenH264API, String> {
     // Windows ships no OpenH264: the module is compiled there only so the encoder API is type
@@ -83,6 +77,9 @@ pub(super) struct H264 {
 
 impl H264 {
     pub(super) fn new(options: &VideoOptions) -> Result<Self, String> {
+        if options.acceleration == Acceleration::Hardware {
+            return Err("the built-in H.264 encoder only provides software encoding".into());
+        }
         if options.codec != Codec::H264 {
             return Err("the built-in encoder only provides H.264".into());
         }
@@ -92,7 +89,7 @@ impl H264 {
         let config = EncoderConfig::new()
             .skip_frames(false)
             .rate_control_mode(RateControlMode::Bitrate)
-            .bitrate(BitRate::from_bps(bitrate(options)))
+            .bitrate(BitRate::from_bps(options.bitrate() as _))
             .max_frame_rate(FrameRate::from_hz(options.fps as f32))
             .intra_frame_period(IntraFramePeriod::from_num_frames(options.frames() as u32));
         let encoder = Encoder::with_api_config(api()?, config)
@@ -182,10 +179,16 @@ mod tests {
 
     fn options() -> VideoOptions {
         VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 320,
             height: 180,
             fps: 24,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format: Format::Mp4,
             duration_s: 1,
             theme: Theme::Light,

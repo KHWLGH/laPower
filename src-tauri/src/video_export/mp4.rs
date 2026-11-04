@@ -520,10 +520,16 @@ mod tests {
 
     fn options(format: Format) -> VideoOptions {
         VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 320,
             height: 180,
             fps: 10,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format,
             duration_s: 1,
             theme: Theme::Light,

@@ -21,7 +21,9 @@ use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::*;
 use windows_numerics::{Matrix3x2, Vector2};
 
-use super::model::{Codec, VideoCapability, VideoOptions, VideoPalette, VideoPayload};
+use super::model::{
+    Acceleration, Codec, VideoCapability, VideoOptions, VideoPalette, VideoPayload,
+};
 use super::scene::{self, Align, Color, Painter, Rect, FONT_SIZES};
 
 use super::failure::{Context, Failure, Result};
@@ -88,8 +90,10 @@ impl Drop for MediaSession {
 /// A render target that either owns its own WIC bitmap (the CPU path every encoder accepts) or
 /// draws straight into the encoder's D3D11 texture (the GPU path in [(super::gpu)]).
 pub(super) struct Canvas {
+    write: IDWriteFactory,
     bitmap: Option<IWICBitmap>,
     target: ID2D1RenderTarget,
+    app_icon: ID2D1Bitmap,
     brush: ID2D1SolidColorBrush,
     leading: Vec<IDWriteTextFormat>,
     trailing: Vec<IDWriteTextFormat>,
@@ -105,6 +109,18 @@ impl Painter for Canvas {
         }
     }
 
+    fn app_icon(&self, bounds: Rect) {
+        unsafe {
+            self.target.DrawBitmap(
+                &self.app_icon,
+                Some(&d2d_rect(bounds)),
+                1.0,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
+        }
+    }
+
     fn text(&self, value: &str, bounds: Rect, font: usize, ink: Color, align: Align) {
         let format = match align {
             Align::Left => &self.leading[font],
@@ -112,6 +128,23 @@ impl Painter for Canvas {
             Align::Center => &self.centered[font],
         };
         self.draw(value, d2d_rect(bounds), format, ink);
+    }
+
+    fn text_width(&self, value: &str, font: usize) -> f32 {
+        unsafe {
+            let measured = (|| -> windows::core::Result<f32> {
+                let layout = self.write.CreateTextLayout(
+                    &wide(value),
+                    &self.leading[font],
+                    100_000.0,
+                    1000.0,
+                )?;
+                let mut metrics = DWRITE_TEXT_METRICS::default();
+                layout.GetMetrics(&mut metrics)?;
+                Ok(metrics.widthIncludingTrailingWhitespace)
+            })();
+            measured.unwrap_or(f32::INFINITY)
+        }
     }
 
     fn line(&self, x1: f32, y1: f32, x2: f32, y2: f32, ink: Color, width: f32) {
@@ -185,6 +218,34 @@ impl Painter for Canvas {
 }
 
 impl Canvas {
+    fn save_png(&self, path: &Path, height: u32) -> Result<()> {
+        unsafe {
+            let factory: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let stream = factory.CreateStream()?;
+            stream.InitializeFromFilename(&HSTRING::from(path.as_os_str()), 0x4000_0000)?;
+            let encoder = factory.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
+            encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
+            let mut frame = None;
+            let mut properties = None;
+            encoder.CreateNewFrame(&mut frame, &mut properties)?;
+            let frame = frame.ok_or_else(|| Failure("cannot create the PNG frame".into()))?;
+            frame.Initialize(properties.as_ref())?;
+            frame.SetSize(self.width, height)?;
+            let mut format = GUID_WICPixelFormat32bppBGRA;
+            frame.SetPixelFormat(&mut format)?;
+            frame.WriteSource(
+                self.bitmap
+                    .as_ref()
+                    .ok_or_else(|| Failure("PNG needs a CPU canvas".into()))?,
+                std::ptr::null(),
+            )?;
+            frame.Commit()?;
+            encoder.Commit()?;
+        }
+        Ok(())
+    }
+
     pub(super) fn new(options: &VideoOptions, colors: &VideoPalette) -> Result<Self> {
         Self::with_texture(options, colors, None)
     }
@@ -239,6 +300,26 @@ impl Canvas {
             let brush = target
                 .CreateSolidColorBrush(&color(palette.ink), None)
                 .ctx("cannot create the drawing brush")?;
+            let stream = factory
+                .CreateStream()
+                .ctx("cannot create the icon stream")?;
+            stream.InitializeFromMemory(scene::APP_ICON)?;
+            let decoder = factory
+                .CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnLoad)
+                .ctx("cannot decode the application icon")?;
+            let source = decoder.GetFrame(0)?;
+            let converter = factory.CreateFormatConverter()?;
+            converter.Initialize(
+                &source,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
+            let app_icon = target
+                .CreateBitmapFromWicBitmap(&converter, None)
+                .ctx("cannot load the application icon into the report canvas")?;
             let write: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)
                 .ctx("DirectWrite is unavailable")?;
             let mut leading = Vec::with_capacity(FONT_SIZES.len());
@@ -290,8 +371,10 @@ impl Canvas {
             });
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             Ok(Self {
+                write,
                 bitmap,
                 target,
+                app_icon,
                 brush,
                 leading,
                 trailing,
@@ -339,6 +422,45 @@ impl Canvas {
         }
         Ok(())
     }
+}
+
+/// PNG rendering uses WIC and Direct2D without starting a video encoder or Media Foundation.
+pub(super) fn image_report(
+    payload: &VideoPayload,
+    path: &Path,
+    cancel: &AtomicBool,
+) -> std::result::Result<(), String> {
+    struct Apartment;
+    impl Drop for Apartment {
+        fn drop(&mut self) {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Err("report export was cancelled".into());
+    }
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED)
+            .ok()
+            .map_err(|error| error.to_string())?;
+    }
+    let _apartment = Apartment;
+    let mut options = payload.options;
+    let (width, height) = payload.output_size();
+    options.height = height;
+    let canvas = Canvas::new(&options, &payload.palette).map_err(|error| error.to_string())?;
+    let mut pixels = vec![0; width as usize * height as usize * 4];
+    canvas
+        .draw_frame(payload, 0, &mut pixels)
+        .map_err(|error| error.to_string())?;
+    if cancel.load(Ordering::Acquire) {
+        return Err("report export was cancelled".into());
+    }
+    canvas
+        .save_png(path, height)
+        .map_err(|error| error.to_string())
 }
 
 /// Top-down NV12 so no encoder has to guess RGB stride or orientation.
@@ -405,8 +527,7 @@ pub(super) fn nv12_type(options: &VideoOptions) -> Result<IMFMediaType> {
 /// Create the sink writer and its single video stream. The third value is the encoder that
 /// Media Foundation actually bound, read back from its own attributes.
 ///
-/// Bitrate is derived from the pixel rate rather than fixed per resolution: 4K60 needs about
-/// 70 Mbit/s in H.264 to stay clean, while 720p24 would be visibly padded by the same number.
+/// The shared quality policy scales bitrate with pixels and frame rate.
 fn writer(
     path: &Path,
     options: &VideoOptions,
@@ -424,11 +545,12 @@ fn writer(
         let attributes = attributes.ctx("cannot create the writer attributes")?;
         // The MOV pass rewrites the brands; the container itself is always the MP4 one.
         attributes.SetGUID(&MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_MPEG4)?;
-        // Hardware transforms stay enabled on both paths: a GPU texture upload is not required for
-        // a hardware MFT to encode, and refusing it here used to drop a host straight to software
-        // as soon as the zero-copy path had any problem. What is reported as hardware is still
-        // decided below from the encoder's own attributes.
-        attributes.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)?;
+        // CPU-rendered frames may still use hardware. Software mode alone disables hardware
+        // transforms; the actual encoder is verified below for both forced modes.
+        attributes.SetUINT32(
+            &MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+            u32::from(options.acceleration != Acceleration::Software),
+        )?;
         if let Some(frames) = gpu {
             attributes.SetUnknown(&MF_SINK_WRITER_D3D_MANAGER, &frames.gpu.manager)?;
             // Export runs as fast as the texture pool permits, not at playback speed.
@@ -436,16 +558,12 @@ fn writer(
         }
         let writer = MFCreateSinkWriterFromURL(PCWSTR(wide.as_ptr()), None, &attributes)
             .ctx("Windows Media Foundation cannot write this container")?;
-        let (subtype, divisor, minimum_bitrate) = match options.codec {
-            Codec::H264 => (MFVideoFormat_H264, 7u64, 4_000_000u64),
-            Codec::H265 => (MFVideoFormat_HEVC, 11u64, 3_000_000u64),
+        let subtype = match options.codec {
+            Codec::H264 => MFVideoFormat_H264,
+            Codec::H265 => MFVideoFormat_HEVC,
         };
         let output = media_type(&subtype, options)?;
-        let bitrate =
-            (u64::from(options.width) * u64::from(options.height) * u64::from(options.fps)
-                / divisor)
-                .clamp(minimum_bitrate, 80_000_000) as u32;
-        output.SetUINT32(&MF_MT_AVG_BITRATE, bitrate)?;
+        output.SetUINT32(&MF_MT_AVG_BITRATE, options.bitrate())?;
         let stream = writer.AddStream(&output).ctx_with(|| {
             format!(
                 "{} is unavailable for {}x{} at {} fps",
@@ -480,11 +598,16 @@ fn writer(
         let hardware = attributes
             .GetStringLength(&MFT_ENUM_HARDWARE_URL_Attribute)
             .is_ok();
-        if gpu.is_some() && !hardware {
+        if (gpu.is_some() || options.acceleration == Acceleration::Hardware) && !hardware {
             // Keep the retry honest: the zero-copy path only pays off with a hardware MFT, so a
             // software encoder here is why the CPU attempt is worth running.
             return Err(Failure::from(
                 "Media Foundation selected a software encoder for the GPU path",
+            ));
+        }
+        if options.acceleration == Acceleration::Software && hardware {
+            return Err(Failure::from(
+                "Media Foundation selected hardware for software mode",
             ));
         }
         Ok((
@@ -559,30 +682,55 @@ pub(super) fn encode(
     mut on_encoder: impl FnMut(&'static str),
     mut progress: impl FnMut(f64),
 ) -> std::result::Result<EncoderUsed, String> {
-    match encode_attempt(payload, path, cancel, &mut on_encoder, &mut progress, true) {
-        Ok(name) => Ok(EncoderUsed {
-            name,
-            fallback: None,
-        }),
-        Err(gpu) => {
-            if cancel.load(Ordering::Acquire) {
-                return Err(gpu.to_string());
-            }
-            // Recreate the container before the retry; never append to partial output.
-            let _ = std::fs::File::create(path);
-            match encode_attempt(payload, path, cancel, &mut on_encoder, &mut progress, false) {
-                Ok(name) => Ok(EncoderUsed {
+    let mut options = payload.options;
+    let mut errors = Vec::new();
+    // Hardware can accept either GPU textures or CPU-rendered frames. Only auto may cross
+    // from those attempts to a writer with hardware transforms disabled.
+    let attempts: &[(bool, Acceleration)] = match options.acceleration {
+        Acceleration::Software => &[(false, Acceleration::Software)],
+        Acceleration::Hardware => &[
+            (true, Acceleration::Hardware),
+            (false, Acceleration::Hardware),
+        ],
+        Acceleration::Auto => &[
+            (true, Acceleration::Hardware),
+            (false, Acceleration::Hardware),
+            (false, Acceleration::Software),
+        ],
+    };
+    for &(gpu, acceleration) in attempts {
+        if cancel.load(Ordering::Acquire) {
+            return Err("video encoding was cancelled".into());
+        }
+        if !errors.is_empty() {
+            std::fs::File::create(path).map_err(|error| error.to_string())?;
+            progress(0.0);
+        }
+        options.acceleration = acceleration;
+        match encode_attempt(
+            payload,
+            &options,
+            path,
+            cancel,
+            &mut on_encoder,
+            &mut progress,
+            gpu,
+        ) {
+            Ok(name) => {
+                return Ok(EncoderUsed {
                     name,
-                    fallback: (name == "software").then(|| gpu.to_string()),
-                }),
-                Err(cpu) => Err(format!("{gpu}; then {cpu}")),
+                    fallback: (name == "software" && !errors.is_empty()).then(|| errors.join("; ")),
+                })
             }
+            Err(error) => errors.push(error.to_string()),
         }
     }
+    Err(errors.join("; "))
 }
 
 fn encode_attempt(
     payload: &VideoPayload,
+    options: &VideoOptions,
     path: &Path,
     cancel: &AtomicBool,
     on_encoder: &mut dyn FnMut(&'static str),
@@ -593,7 +741,6 @@ fn encode_attempt(
         .lock()
         .map_err(|_| Failure("the video encoder state is poisoned".into()))?;
     let _session = MediaSession::start()?;
-    let options = &payload.options;
     let gpu = if gpu_path {
         Some(GpuFrames::new(options).ctx("the GPU video path is unavailable")?)
     } else {
@@ -649,7 +796,7 @@ fn encode_attempt(
 /// The probe exercises the same writer and one-frame submit path as a real export, so a
 /// combination is only reported available when encoding it actually works. Probing one
 /// combination at a time is deliberate: a first dialog open used to run up to 48 real encodes
-/// (24 combinations × hardware + software), which on a host with a virtual display adapter is
+/// (24 combinations 脳 hardware + software), which on a host with a virtual display adapter is
 /// both slow and needlessly load-dependent.
 pub(super) fn capability(options: &VideoOptions) -> VideoCapability {
     let lock = ENCODER.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -662,6 +809,7 @@ pub(super) fn capability(options: &VideoOptions) -> VideoCapability {
             fps: options.fps,
             codec: options.codec,
             available,
+            bitrate: options.bitrate(),
             reason,
             encoder,
         },
@@ -671,6 +819,7 @@ pub(super) fn capability(options: &VideoOptions) -> VideoCapability {
             fps: options.fps,
             codec: options.codec,
             available: false,
+            bitrate: options.bitrate(),
             reason: Some(error.to_string()),
             encoder: None,
         },
@@ -680,7 +829,7 @@ pub(super) fn capability(options: &VideoOptions) -> VideoCapability {
 fn probe(options: &VideoOptions) -> Result<(bool, Option<String>, Option<String>)> {
     let session = MediaSession::start().map_err(|failure| Failure(failure.to_string()))?;
     let _session = session;
-    let attempt = |gpu_path: bool| -> Result<&'static str> {
+    let attempt = |gpu_path: bool, mode: Acceleration| -> Result<&'static str> {
         let path = std::env::temp_dir().join(format!(
             "lapower-codec-probe-{}-{}-{}x{}-{}-{}-{}.mp4",
             std::process::id(),
@@ -697,6 +846,16 @@ fn probe(options: &VideoOptions) -> Result<(bool, Option<String>, Option<String>
             },
             u8::from(gpu_path),
         ));
+        struct ProbeFile(std::path::PathBuf);
+        impl Drop for ProbeFile {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = ProbeFile(path.clone());
+        let mut selected = *options;
+        selected.acceleration = mode;
+        let options = &selected;
         let gpu = if gpu_path {
             Some(GpuFrames::new(options)?)
         } else {
@@ -730,13 +889,26 @@ fn probe(options: &VideoOptions) -> Result<(bool, Option<String>, Option<String>
         }
         Ok(encoder)
     };
-    Ok(match attempt(true) {
-        Ok(encoder) => (true, Some(encoder.to_owned()), None),
-        Err(_) => match attempt(false) {
-            Ok(encoder) => (true, Some(encoder.to_owned()), None),
-            Err(error) => return Ok((false, None, Some(error.to_string()))),
-        },
-    })
+    let attempts: &[(bool, Acceleration)] = match options.acceleration {
+        Acceleration::Software => &[(false, Acceleration::Software)],
+        Acceleration::Hardware => &[
+            (true, Acceleration::Hardware),
+            (false, Acceleration::Hardware),
+        ],
+        Acceleration::Auto => &[
+            (true, Acceleration::Hardware),
+            (false, Acceleration::Hardware),
+            (false, Acceleration::Software),
+        ],
+    };
+    let mut errors = Vec::new();
+    for &(gpu, mode) in attempts {
+        match attempt(gpu, mode) {
+            Ok(encoder) => return Ok((true, Some(encoder.to_owned()), None)),
+            Err(error) => errors.push(error.to_string()),
+        }
+    }
+    Ok((false, None, Some(errors.join("; "))))
 }
 
 /// Colours the probes draw with; the real export sends the user's palette instead.
@@ -771,10 +943,16 @@ mod tests {
     /// conversion and the Media Foundation sink writer end to end, which nothing else does.
     fn payload(format: Format) -> VideoPayload {
         let options = VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 1280,
             height: 720,
             fps: 24,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format,
             duration_s: 1,
             theme: Theme::Light,
@@ -798,6 +976,10 @@ mod tests {
             unit_a: "A".into(),
             unit_c: "C".into(),
             unit_wh: "Wh".into(),
+            average: "Average".into(),
+            maximum: "Maximum".into(),
+            range: "Range".into(),
+            energy: "Energy".into(),
         };
         VideoPayload {
             options,
@@ -824,6 +1006,7 @@ mod tests {
                 ],
             },
             summary: VideoSummary {
+                average_voltage_v: Some(5.0),
                 elapsed_s: 1.0,
                 points: frames as u64,
                 average_power_w: Some(5.0),
@@ -876,7 +1059,8 @@ mod tests {
 
     #[test]
     fn software_export_writes_a_playable_mp4_and_can_switch_to_quicktime() {
-        let value = payload(Format::Mp4);
+        let mut value = payload(Format::Mp4);
+        value.options.acceleration = Acceleration::Software;
         value.validate().unwrap();
         let path = scratch("report.mp4");
         // Both callbacks land in one shared cell: an encoder name that arrives after any progress
@@ -908,7 +1092,8 @@ mod tests {
             "the encoder must be reported before the export finishes"
         );
         assert_eq!(progress_at_report, Some(0.0));
-        assert!(matches!(encoder.name, "hardware" | "software"));
+        assert_eq!(encoder.name, "software");
+        assert!(encoder.fallback.is_none());
         assert_eq!(reported.last().copied(), Some(encoder.name));
         let bytes = std::fs::read(&path).unwrap();
         assert!(
@@ -940,6 +1125,30 @@ mod tests {
         let error = encode(&value, &path, &cancel, |_| {}, |_| {}).unwrap_err();
         assert!(error.contains("cancelled"), "unexpected error: {error}");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn cancelling_a_running_attempt_does_not_retry_or_touch_the_destination() {
+        let value = payload(Format::Mp4);
+        let target = scratch("existing.mp4");
+        std::fs::write(&target, b"original recording").unwrap();
+        let staged = super::super::stage_path(&target).unwrap();
+        let cancel = AtomicBool::new(false);
+        let mut attempts = 0;
+        let result = encode(
+            &value,
+            &staged,
+            &cancel,
+            |_| attempts += 1,
+            |_| cancel.store(true, Ordering::Release),
+        );
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert_eq!(attempts, 1, "cancellation must not restart another encoder");
+        assert_eq!(std::fs::read(&target).unwrap(), b"original recording");
+        // The owning worker removes this stage after a cancelled attempt.
+        std::fs::remove_file(&staged).unwrap();
+        assert!(!staged.exists());
+        std::fs::remove_dir_all(target.parent().unwrap()).unwrap();
     }
 
     /// Both rasterisers must draw the same frame: skia is what macOS and Linux ship, so a layout
@@ -1001,10 +1210,16 @@ mod tests {
             for fps in FRAME_RATES {
                 for codec in [Codec::H264, Codec::H265] {
                     let options = VideoOptions {
+                        report_type: crate::video_export::model::ReportType::Video,
+                        image_layout: crate::video_export::model::ImageLayout::Widescreen,
+                        show_markers: true,
+                        show_marker_details: true,
                         width,
                         height,
                         fps,
                         codec,
+                        acceleration: crate::video_export::model::Acceleration::Auto,
+                        quality: crate::video_export::model::Quality::High,
                         format: Format::Mp4,
                         duration_s: 1,
                         theme: Theme::Light,

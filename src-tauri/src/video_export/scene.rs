@@ -7,9 +7,11 @@
 //! vertical scale always matches. Coordinates, font ladder and labels follow the report design
 //! that shipped in moduled-test.
 
-use super::model::{VideoPalette, VideoPayload};
+use super::model::{ImageLayout, ReportType, VideoPalette, VideoPayload};
 
 pub(super) const CANVAS_W: f32 = 1920.0;
+/// The same bundled application icon is decoded once by each report canvas.
+pub(super) const APP_ICON: &[u8] = include_bytes!("../../icons/icon.png");
 const CANVAS_H: f32 = 1080.0;
 const MARGIN: f32 = 48.0;
 const GAP: f32 = 16.0;
@@ -79,7 +81,9 @@ pub(super) enum Align {
 /// Everything the layout needs from a rasteriser.
 pub(super) trait Painter {
     fn clear(&self, ink: Color);
+    fn app_icon(&self, bounds: Rect);
     fn text(&self, value: &str, bounds: Rect, font: usize, ink: Color, align: Align);
+    fn text_width(&self, value: &str, font: usize) -> f32;
     fn line(&self, x1: f32, y1: f32, x2: f32, y2: f32, ink: Color, width: f32);
     fn rounded(&self, bounds: Rect, ink: Color, radius: f32);
     fn fill(&self, bounds: Rect, ink: Color);
@@ -261,75 +265,71 @@ pub(super) fn render(
     let elapsed_ms = (payload.frames.t[index].max(0.0) * 1000.0).round() as u64;
     let total_ms = payload.duration_ms().max(1);
     let summary = &payload.summary;
+    let image = payload.options.report_type == ReportType::Image;
     let missing = labels.missing.as_str();
     painter.clear(palette.background);
 
-    // Header: eyebrow, status pill, record name, elapsed clock, total duration, progress.
+    // Header: one identity block, with the application icon spanning both text rows.
+    // The name and title share a left edge; the report does not repeat the recording status.
+    painter.app_icon(Rect::new(MARGIN, 36.0, 80.0, 80.0));
+    let title_left = MARGIN + 104.0;
     painter.text(
         &labels.eyebrow,
-        Rect::new(MARGIN, 31.0, 108.0, 30.0),
+        Rect::new(title_left, 32.0, 1200.0, 30.0),
         1,
         palette.muted,
-        Align::Left,
-    );
-    let recording = payload.header.status_kind == "recording";
-    painter.rounded(Rect::new(166.0, 28.0, 140.0, 34.0), palette.soft, 17.0);
-    painter.text(
-        &payload.header.status,
-        Rect::new(184.0, 32.0, 110.0, 28.0),
-        0,
-        if recording {
-            palette.accent
-        } else {
-            palette.series[0]
-        },
         Align::Left,
     );
     painter.text(
         &payload.header.title,
-        Rect::new(MARGIN, 69.0, 1260.0, 55.0),
+        Rect::new(title_left, 69.0, 1200.0, 55.0),
         4,
         palette.ink,
         Align::Left,
     );
     painter.text(
-        &clock(elapsed_ms, true),
-        Rect::new(1380.0, 16.0, 492.0, 56.0),
+        &clock(if image { total_ms } else { elapsed_ms }, !image),
+        Rect::new(1380.0, 28.0, 492.0, 56.0),
         4,
         palette.ink,
         Align::Right,
     );
-    painter.text(
-        &format!("/ {}", clock(total_ms, false)),
-        Rect::new(1510.0, 74.0, 362.0, 28.0),
-        1,
-        palette.muted,
-        Align::Right,
-    );
+    if !image {
+        painter.text(
+            &format!("/ {}", clock(total_ms, false)),
+            Rect::new(1510.0, 82.0, 362.0, 28.0),
+            1,
+            palette.muted,
+            Align::Right,
+        );
+    }
     // Point count makes the report self-describing: two curves with different sampling densities
     // are not comparable otherwise. It sits above the progress bar so the bar never crosses it.
     painter.text(
         &format!("{} {}", summary.points, labels.points),
-        Rect::new(1510.0, 102.0, 362.0, 24.0),
+        Rect::new(1510.0, 110.0, 362.0, 24.0),
         0,
         palette.muted,
         Align::Right,
     );
-    painter.rounded(Rect::new(1400.0, 130.0, 472.0, 4.0), palette.border, 2.0);
-    let progress = (elapsed_ms as f32 / total_ms as f32).clamp(0.0, 1.0);
-    painter.rounded(
-        Rect::new(1400.0, 130.0, 472.0 * progress, 4.0),
-        palette.accent,
-        2.0,
-    );
+    if !image {
+        painter.rounded(Rect::new(1400.0, 138.0, 472.0, 4.0), palette.border, 2.0);
+        let progress = (elapsed_ms as f32 / total_ms as f32).clamp(0.0, 1.0);
+        painter.rounded(
+            Rect::new(1400.0, 138.0, 472.0 * progress, 4.0),
+            palette.accent,
+            2.0,
+        );
+    }
 
     // Five cards. Values come from the frame timeline, details from the whole-recording roll-up,
     // so one missing sample never blanks the card's context.
     let current_now = payload.frames.current[index].map(f64::abs);
-    let readings: [(&str, String, String, Color); 5] = [
+    let readings: [(&str, String, &str, String, Color); 5] = [
         (
             &labels.voltage,
             number(payload.frames.voltage[index], &labels.unit_v, 3, missing),
+            &labels.range,
             range(
                 summary.min_voltage_v,
                 summary.max_voltage_v,
@@ -341,12 +341,14 @@ pub(super) fn render(
         (
             &labels.current,
             number(current_now, &labels.unit_a, 3, missing),
+            &labels.maximum,
             number(summary.peak_current_a, &labels.unit_a, 3, missing),
             palette.series[1],
         ),
         (
             &labels.power,
             number(payload.frames.power[index], &labels.unit_w, 3, missing),
+            &labels.average,
             number(summary.average_power_w, &labels.unit_w, 3, missing),
             palette.series[2],
         ),
@@ -358,62 +360,145 @@ pub(super) fn render(
                 1,
                 missing,
             ),
+            &labels.maximum,
             number(summary.max_temp_c, &labels.unit_c, 1, missing),
             palette.series[3],
         ),
         (
             &labels.capacity,
             format!("{} mAh", trim(summary.capacity_mah)),
+            &labels.energy,
             format!("{} {}", trim(summary.energy_wh), labels.unit_wh),
             palette.energy,
         ),
     ];
     let card_width = (CONTENT_W - GAP * (readings.len() - 1) as f32) / readings.len() as f32;
-    for (slot, (label, value, detail, ink)) in readings.iter().enumerate() {
+    for (slot, (label, value, caption, detail, ink)) in readings.iter().enumerate() {
         let x = MARGIN + slot as f32 * (card_width + GAP);
-        painter.fill(Rect::new(x, 140.0, card_width, 116.0), palette.card);
-        painter.dot(x + 26.0, 169.0, 4.0, *ink);
+        painter.fill(Rect::new(x, 152.0, card_width, 144.0), palette.card);
+        if image {
+            let (stat, value) = match slot {
+                0 => (
+                    &labels.average,
+                    number(summary.average_voltage_v, &labels.unit_v, 3, missing),
+                ),
+                1 => (
+                    &labels.maximum,
+                    number(summary.peak_current_a, &labels.unit_a, 3, missing),
+                ),
+                2 => (
+                    &labels.average,
+                    number(summary.average_power_w, &labels.unit_w, 3, missing),
+                ),
+                3 => (
+                    &labels.maximum,
+                    number(summary.max_temp_c, &labels.unit_c, 1, missing),
+                ),
+                _ => (&labels.capacity, value.clone()),
+            };
+            let heading = if slot == 4 {
+                label.to_string()
+            } else {
+                format!("{label} · {stat}")
+            };
+            painter.text(
+                &heading,
+                Rect::new(x + 24.0, 166.0, card_width - 48.0, 30.0),
+                1,
+                palette.muted,
+                Align::Left,
+            );
+            let font = (0..=4)
+                .rev()
+                .find(|&font| painter.text_width(&value, font) <= card_width - 48.0)
+                .unwrap_or(0);
+            painter.text(
+                &value,
+                Rect::new(x + 24.0, 204.0, card_width - 48.0, 50.0),
+                font,
+                *ink,
+                Align::Left,
+            );
+            let detail = if slot == 0 || slot == 4 {
+                format!("{caption}  {detail}")
+            } else {
+                String::new()
+            };
+            painter.text(
+                &detail,
+                Rect::new(x + 24.0, 261.0, card_width - 48.0, 26.0),
+                0,
+                palette.muted,
+                Align::Left,
+            );
+            continue;
+        }
+        painter.dot(x + 24.0, 181.0, 4.0, *ink);
+        // Names and summaries own disjoint columns, even in the longer translations.
         painter.text(
             label,
-            Rect::new(x + 39.0, 156.0, card_width - 63.0, 30.0),
+            Rect::new(x + 36.0, 168.0, 132.0, 30.0),
             1,
             palette.muted,
             Align::Left,
         );
         painter.text(
-            detail,
-            Rect::new(x + 40.0, 158.0, card_width - 64.0, 28.0),
+            caption,
+            Rect::new(x + 180.0, 166.0, card_width - 204.0, 26.0),
             0,
             palette.muted,
             Align::Right,
         );
         painter.text(
+            detail,
+            Rect::new(x + 24.0, 194.0, card_width - 48.0, 26.0),
+            0,
+            palette.muted,
+            Align::Right,
+        );
+        let font = (0..FONT_SIZES.len())
+            .rev()
+            .find(|&font| painter.text_width(value, font) <= card_width - 48.0)
+            .unwrap_or(0);
+        // Keep a shared lower edge when a wide number needs a smaller font.
+        let inset = FONT_SIZES[5] - FONT_SIZES[font];
+        painter.text(
             value,
-            Rect::new(x + 24.0, 188.0, card_width - 48.0, 64.0),
-            5,
+            Rect::new(x + 24.0, 228.0 + inset, card_width - 48.0, 58.0 - inset),
+            font,
             *ink,
             Align::Left,
         );
     }
 
     // Reserve only the rows in use: eight breakpoints still leave a tall plot.
-    let rows = payload.markers.len().div_ceil(4);
-    let main_bottom = CANVAS_H
-        - 40.0
-        - if rows == 0 {
-            0.0
-        } else {
-            20.0 + rows as f32 * 112.0 + (rows - 1) as f32 * GAP
-        };
+    let rows = if payload.options.show_marker_details {
+        payload.markers.len().div_ceil(4)
+    } else {
+        0
+    };
+    let main_bottom = if image && payload.options.image_layout == ImageLayout::Long && rows > 0 {
+        816.0
+    } else {
+        CANVAS_H
+            - 40.0
+            - if rows == 0 {
+                0.0
+            } else {
+                20.0 + rows as f32 * 144.0 + (rows - 1) as f32 * GAP
+            }
+    };
     plot(
         painter,
         palette,
         payload,
         &active,
         index,
-        Rect::new(MARGIN, 276.0, CONTENT_W, main_bottom - 276.0),
+        Rect::new(MARGIN, 316.0, CONTENT_W, main_bottom - 316.0),
     );
-    breakpoints(painter, palette, payload, main_bottom + 20.0);
+    if payload.options.show_marker_details {
+        breakpoints(painter, palette, payload, main_bottom + 20.0);
+    }
 }
 
 fn plot(
@@ -426,7 +511,12 @@ fn plot(
 ) {
     let labels = &payload.labels;
     let total_ms = payload.duration_ms().max(1);
-    let cursor_ms = (payload.frames.t[index].max(0.0) * 1000.0).round() as u64;
+    let image = payload.options.report_type == ReportType::Image;
+    let cursor_ms = if image {
+        total_ms
+    } else {
+        (payload.frames.t[index].max(0.0) * 1000.0).round() as u64
+    };
     painter.fill(bounds, palette.card);
     painter.text(
         &labels.chart,
@@ -577,7 +667,7 @@ fn plot(
         ));
         trace();
         painter.unclip();
-        if let Some(value) = payload.frames.channel(channel)[index] {
+        if let Some(value) = payload.frames.channel(channel)[index].filter(|_| !image) {
             painter.dot(layout.x(cursor_ms), y(value), 5.5, palette.card);
             painter.dot(layout.x(cursor_ms), y(value), 3.5, palette.series[channel]);
         }
@@ -602,6 +692,7 @@ fn plot(
         .markers
         .iter()
         .enumerate()
+        .filter(|_| payload.options.show_markers)
         .map(|(slot, marker)| {
             (
                 slot,
@@ -612,6 +703,25 @@ fn plot(
         })
         .collect();
     badges.sort_by(|a, b| a.1.total_cmp(&b.1));
+    // Dense long-image reports retain every marker line; only number labels need thinning.
+    let mut last_label = f32::NEG_INFINITY;
+    for (slot, _) in &badges {
+        let at = layout.x((payload.markers[*slot].t_s.max(0.0) * 1000.0).round() as u64);
+        let mut y = layout.top;
+        while y < layout.bottom {
+            painter.line(at, y, at, (y + 4.0).min(layout.bottom), palette.border, 1.5);
+            y += 10.0;
+        }
+    }
+    if badges.len() > 8 {
+        badges.retain(|(_, x)| {
+            if *x < last_label + 42.0 {
+                return false;
+            }
+            last_label = *x;
+            true
+        });
+    }
     for slot in 1..badges.len() {
         badges[slot].1 = badges[slot].1.max(badges[slot - 1].1 + 30.0);
     }
@@ -622,11 +732,6 @@ fn plot(
     }
     for (slot, x) in badges {
         let at = layout.x((payload.markers[slot].t_s.max(0.0) * 1000.0).round() as u64);
-        let mut y = layout.top;
-        while y < layout.bottom {
-            painter.line(at, y, at, (y + 4.0).min(layout.bottom), palette.border, 1.5);
-            y += 10.0;
-        }
         painter.line(at, layout.top, x, layout.top - 9.0, palette.border, 1.0);
         painter.rounded(
             Rect::new(x - 12.0, layout.top - 28.0, 24.0, 24.0),
@@ -641,14 +746,16 @@ fn plot(
             Align::Center,
         );
     }
-    painter.line(
-        layout.x(cursor_ms),
-        layout.top,
-        layout.x(cursor_ms),
-        layout.bottom,
-        palette.ink,
-        1.7,
-    );
+    if !image {
+        painter.line(
+            layout.x(cursor_ms),
+            layout.top,
+            layout.x(cursor_ms),
+            layout.bottom,
+            palette.ink,
+            1.7,
+        );
+    }
 }
 
 fn breakpoints(painter: &dyn Painter, palette: &Palette, payload: &VideoPayload, top: f32) {
@@ -664,8 +771,8 @@ fn breakpoints(painter: &dyn Painter, palette: &Palette, payload: &VideoPayload,
     ];
     for (slot, marker) in payload.markers.iter().enumerate() {
         let x = MARGIN + (slot % columns) as f32 * (width + GAP);
-        let y = top + (slot / columns) as f32 * 128.0;
-        painter.fill(Rect::new(x, y, width, 112.0), palette.card);
+        let y = top + (slot / columns) as f32 * 160.0;
+        painter.fill(Rect::new(x, y, width, 144.0), palette.card);
         painter.text(
             &marker.label,
             Rect::new(x + 20.0, y + 10.0, width - 192.0, 30.0),
@@ -688,42 +795,24 @@ fn breakpoints(painter: &dyn Painter, palette: &Palette, payload: &VideoPayload,
         ];
         for (cell, (label, unit, digits)) in units.iter().enumerate() {
             let text = number(values[cell], unit, *digits, missing);
-            if width >= 700.0 {
-                let step = (width - 40.0) / 4.0;
-                let cell_x = x + 20.0 + cell as f32 * step;
-                painter.text(
-                    label,
-                    Rect::new(cell_x, y + 44.0, step - 12.0, 27.0),
-                    0,
-                    palette.muted,
-                    Align::Left,
-                );
-                painter.text(
-                    &text,
-                    Rect::new(cell_x, y + 72.0, step - 12.0, 35.0),
-                    2,
-                    palette.series[cell],
-                    Align::Left,
-                );
-            } else {
-                let step = (width - 40.0) / 2.0;
-                let cell_x = x + 20.0 + (cell % 2) as f32 * step;
-                let cell_y = y + 47.0 + (cell / 2) as f32 * 32.0;
-                painter.text(
-                    label,
-                    Rect::new(cell_x, cell_y, 63.0, 28.0),
-                    0,
-                    palette.muted,
-                    Align::Left,
-                );
-                painter.text(
-                    &text,
-                    Rect::new(cell_x + 63.0, cell_y - 1.0, step - 72.0, 30.0),
-                    1,
-                    palette.series[cell],
-                    Align::Left,
-                );
-            }
+            let columns = if width >= 700.0 { 4 } else { 2 };
+            let step = (width - 40.0) / columns as f32;
+            let cell_x = x + 20.0 + (cell % columns) as f32 * step;
+            let cell_y = y + 44.0 + (cell / columns) as f32 * 46.0;
+            painter.text(
+                label,
+                Rect::new(cell_x, cell_y, step - 12.0, 24.0),
+                0,
+                palette.muted,
+                Align::Left,
+            );
+            painter.text(
+                &text,
+                Rect::new(cell_x, cell_y + 23.0, step - 12.0, 28.0),
+                1,
+                palette.series[cell],
+                Align::Left,
+            );
         }
     }
 }

@@ -438,7 +438,7 @@ async function invoke(command, args = {}, ipc = {}) {
     case 'video_export_start': {
       const options = args.request?.payload?.options ?? {};
       videoJob = {
-        id: 'showcase-video',
+        id: `showcase-video-${++videoJobCounter}`,
         state: 'encoding',
         progress: 0,
         options,
@@ -446,8 +446,11 @@ async function invoke(command, args = {}, ipc = {}) {
         name: null,
         // Published the moment encoding starts, like the native host: the dialog must never have
         // to guess, and a preview that reports "software" here hides real reporting bugs.
-        encoder: virtualEncoder,
-        fallback: virtualEncoder === 'software' ? 'the virtual GPU path is disabled' : null,
+        encoder: options.reportType === 'image' ? 'png' : videoCapability(options).encoder,
+        fallback:
+          options.reportType !== 'image' && options.acceleration === 'auto' && virtualEncoder === 'software'
+            ? 'the virtual GPU path is disabled'
+            : null,
         error: null,
       };
       videoJobStarted = performance.now();
@@ -524,12 +527,33 @@ async function invoke(command, args = {}, ipc = {}) {
 const virtualEncoder = options.get('videoEncoder') === 'software' ? 'software' : 'hardware';
 
 /** One virtual combination. Every combination the dialog offers can be encoded, like the host. */
-function videoCapability({ width, height, fps, codec }) {
-  return { width, height, fps, codec, available: true, reason: null, encoder: virtualEncoder };
+function videoCapability({ width, height, fps, codec, acceleration = 'auto', quality = 'high' }) {
+  const base = { standard: 10_000_000, high: 20_000_000, ultra: 30_000_000 }[quality] ?? 20_000_000;
+  const bitrate = Math.round(
+    Math.min(
+      240_000_000,
+      Math.max(
+        codec === 'h265' ? 3_000_000 : 4_000_000,
+        (base * (codec === 'h265' ? 0.65 : 1) * width * height * fps) / (1920 * 1080 * 30),
+      ),
+    ),
+  );
+  const available = acceleration !== 'hardware' || virtualEncoder === 'hardware';
+  return {
+    width,
+    height,
+    fps,
+    codec,
+    bitrate,
+    available,
+    reason: available ? null : 'the virtual GPU path is disabled',
+    encoder: available ? (acceleration === 'software' ? 'software' : virtualEncoder) : null,
+  };
 }
 
 /** The preview's single fake encode: wall-clock paced so closing the dialog still lets it finish. */
 let videoJob = null;
+let videoJobCounter = 0;
 let videoJobStarted = 0;
 const VIDEO_JOB_MS = 4000;
 
@@ -539,8 +563,8 @@ function advanceVideoJob() {
   if (videoJob.progress >= 1) {
     videoJob.state = 'completed';
     videoJob.progress = 1;
-    videoJob.name = 'lapower_video.mp4';
-    videoJob.path = 'C:/virtual/lapower_video.mp4';
+    videoJob.name = `lapower_report.${videoJob.options.reportType === 'image' ? 'png' : videoJob.options.format}`;
+    videoJob.path = `C:/virtual/${videoJob.name}`;
   }
 }
 

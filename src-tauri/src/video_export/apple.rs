@@ -15,7 +15,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::model::{Codec, Format, Theme, VideoCapability, VideoOptions, FRAME_RATES, RESOLUTIONS};
+use super::model::{Acceleration, Codec, VideoCapability, VideoOptions};
 use super::mp4;
 use super::portable::{Encoder as Backend, Sample};
 
@@ -65,6 +65,9 @@ const CM_TIME_INVALID: CMTime = CMTime {
 extern "C" {
     static kCFBooleanTrue: CFTypeRef;
     static kCFBooleanFalse: CFTypeRef;
+    // CFType callbacks retain the keys and values if VideoToolbox retains the specification.
+    static kCFTypeDictionaryKeyCallBacks: [usize; 6];
+    static kCFTypeDictionaryValueCallBacks: [usize; 5];
     fn CFStringCreateWithCString(
         allocator: CFTypeRef,
         string: *const c_char,
@@ -75,6 +78,14 @@ extern "C" {
     fn CFBooleanGetValue(value: CFTypeRef) -> u8;
     fn CFArrayGetCount(array: CFArrayRef) -> isize;
     fn CFArrayGetValueAtIndex(array: CFArrayRef, index: isize) -> *const c_void;
+    fn CFDictionaryCreate(
+        allocator: CFTypeRef,
+        keys: *const CFTypeRef,
+        values: *const CFTypeRef,
+        count: isize,
+        key_callbacks: *const c_void,
+        value_callbacks: *const c_void,
+    ) -> CFDictionaryRef;
     fn CFDictionaryContainsKey(dictionary: CFDictionaryRef, key: *const c_void) -> u8;
 }
 
@@ -225,6 +236,38 @@ impl Vt {
         let refcon = Arc::into_raw(Arc::clone(&inner))
             .cast_mut()
             .cast::<c_void>();
+        let hardware = options.acceleration != Acceleration::Software;
+        let keys = [
+            cf_string("EnableHardwareAcceleratedVideoEncoder"),
+            cf_string("RequireHardwareAcceleratedVideoEncoder"),
+        ];
+        let values = unsafe {
+            let enabled = if hardware {
+                kCFBooleanTrue
+            } else {
+                kCFBooleanFalse
+            };
+            [enabled, enabled]
+        };
+        let specification = unsafe {
+            CFDictionaryCreate(
+                ptr::null(),
+                keys.as_ptr(),
+                values.as_ptr(),
+                2,
+                ptr::addr_of!(kCFTypeDictionaryKeyCallBacks).cast(),
+                ptr::addr_of!(kCFTypeDictionaryValueCallBacks).cast(),
+            )
+        };
+        if specification.is_null() {
+            unsafe {
+                for key in keys {
+                    CFRelease(key);
+                }
+                drop(Arc::from_raw(refcon.cast::<Inner>()));
+            }
+            return Err("cannot create the VideoToolbox encoder specification".into());
+        }
         let mut session: VTCompressionSessionRef = ptr::null_mut();
         let status = unsafe {
             VTCompressionSessionCreate(
@@ -232,7 +275,7 @@ impl Vt {
                 options.width as i32,
                 options.height as i32,
                 codec_type(options.codec),
-                ptr::null(),
+                specification,
                 ptr::null(),
                 ptr::null(),
                 Some(output_sample),
@@ -240,6 +283,12 @@ impl Vt {
                 &mut session,
             )
         };
+        unsafe {
+            CFRelease(specification);
+            for key in keys {
+                CFRelease(key);
+            }
+        }
         if status != 0 || session.is_null() {
             // The session never started, so reclaim the reference handed to VideoToolbox.
             unsafe { drop(Arc::from_raw(refcon.cast::<Inner>())) };
@@ -259,8 +308,7 @@ impl Vt {
         };
         encoder.set_bool("RealTime", false)?;
         encoder.set_bool("AllowFrameReordering", false)?;
-        encoder.set_bool("EnableHardwareAcceleratedVideoEncoder", true)?;
-        encoder.set_i32("AverageBitRate", bitrate(options))?;
+        encoder.set_i32("AverageBitRate", options.bitrate() as _)?;
         encoder.set_i32("ExpectedFrameRate", options.fps as i32)?;
         // One keyframe is enough for a report nobody scrubs, matching the Windows path.
         encoder.set_i32(
@@ -274,23 +322,30 @@ impl Vt {
                 options.codec.label()
             ));
         }
-        encoder.hardware = encoder.using_hardware();
+        encoder.hardware = encoder.using_hardware()?;
+        if encoder.hardware != hardware {
+            return Err("VideoToolbox did not select the requested encoding mode".into());
+        }
         Ok(encoder)
     }
 
     /// True when the session really got the hardware encoder; VideoToolbox falls back quietly.
-    fn using_hardware(&self) -> bool {
+    fn using_hardware(&self) -> Result<bool, String> {
         let key = cf_string("UsingHardwareAcceleratedVideoEncoder");
         let mut value: CFTypeRef = ptr::null();
         let status = unsafe { VTSessionCopyProperty(self.session, key, ptr::null(), &mut value) };
         unsafe { CFRelease(key) };
         if status != 0 || value.is_null() {
-            // Older systems do not answer; VideoToolbox only picks software when it has to.
-            return true;
+            if !value.is_null() {
+                unsafe { CFRelease(value) };
+            }
+            return Err(format!(
+                "cannot verify the VideoToolbox encoder (status {status})"
+            ));
         }
         let enabled = unsafe { CFBooleanGetValue(value) } != 0;
         unsafe { CFRelease(value) };
-        enabled
+        Ok(enabled)
     }
 
     fn set_bool(&self, key: &str, value: bool) -> Result<(), String> {
@@ -545,12 +600,6 @@ fn codec_type(codec: Codec) -> u32 {
     }
 }
 
-/// Bitrate from the pixel rate, matching the other backends so files look alike.
-fn bitrate(options: &VideoOptions) -> i32 {
-    let rate = u64::from(options.width) * u64::from(options.height) * u64::from(options.fps) / 7;
-    rate.clamp(4_000_000, 80_000_000).min(i32::MAX as u64) as i32
-}
-
 unsafe fn sample_bytes(sample: CMSampleBufferRef) -> Option<Vec<u8>> {
     let block = unsafe { CMSampleBufferGetDataBuffer(sample) };
     if block.is_null() {
@@ -654,56 +703,52 @@ unsafe fn parameter_set(
     Some(unsafe { std::slice::from_raw_parts(pointer, size) }.to_vec())
 }
 
-/// Probe every combination once per process, exactly like the other backends.
-pub(super) fn capabilities() -> Vec<VideoCapability> {
-    let mut out = Vec::new();
-    for (width, height) in RESOLUTIONS {
-        for fps in FRAME_RATES {
-            for codec in [Codec::H264, Codec::H265] {
-                let options = VideoOptions {
-                    width,
-                    height,
-                    fps,
-                    codec,
-                    format: Format::Mp4,
-                    duration_s: 1,
-                    theme: Theme::Light,
-                    visible_series: [true; 4],
-                };
-                let encoder = probe(&options);
-                out.push(VideoCapability {
-                    width,
-                    height,
-                    fps,
-                    codec,
-                    available: encoder.is_some(),
-                    reason: encoder.is_none().then(|| {
-                        format!(
-                            "VideoToolbox cannot encode {} at {width}x{height}",
-                            codec.label()
-                        )
-                    }),
-                    encoder: encoder.map(|hardware| {
-                        if hardware {
-                            "hardware".to_owned()
-                        } else {
-                            "software".to_owned()
-                        }
-                    }),
-                });
+/// Probe just the selected combination, including the requested mode and target bitrate.
+pub(super) fn capability(options: &VideoOptions) -> VideoCapability {
+    let modes: &[Acceleration] = match options.acceleration {
+        Acceleration::Auto => &[Acceleration::Hardware, Acceleration::Software],
+        Acceleration::Hardware => &[Acceleration::Hardware],
+        Acceleration::Software => &[Acceleration::Software],
+    };
+    let mut errors = Vec::new();
+    for &mode in modes {
+        let mut selected = *options;
+        selected.acceleration = mode;
+        let attempt = || -> Result<String, String> {
+            let mut encoder = super::mac_encoder(&selected)?;
+            let frame = vec![0u8; options.width as usize * options.height as usize * 4];
+            let mut samples = Vec::new();
+            encoder.push(&frame, 0, &AtomicBool::new(false), &mut samples)?;
+            encoder.finish(&mut samples)?;
+            if samples.is_empty() || encoder.config().is_none() {
+                return Err("the encoder produced no probe frame".into());
             }
+            Ok(encoder.name().to_owned())
+        };
+        match attempt() {
+            Ok(encoder) => {
+                return VideoCapability {
+                    width: options.width,
+                    height: options.height,
+                    fps: options.fps,
+                    codec: options.codec,
+                    available: true,
+                    bitrate: options.bitrate(),
+                    reason: None,
+                    encoder: Some(encoder),
+                }
+            }
+            Err(error) => errors.push(error),
         }
     }
-    out
-}
-
-/// One real frame decides availability; the result also says which encoder ran.
-fn probe(options: &VideoOptions) -> Option<bool> {
-    let mut encoder = Vt::new(options).ok()?;
-    let frame = vec![0u8; options.width as usize * options.height as usize * 4];
-    let mut samples = Vec::new();
-    let cancel = AtomicBool::new(false);
-    encoder.push(&frame, 0, &cancel, &mut samples).ok()?;
-    encoder.finish(&mut samples).ok()?;
-    Some(encoder.hardware)
+    VideoCapability {
+        width: options.width,
+        height: options.height,
+        fps: options.fps,
+        codec: options.codec,
+        available: false,
+        bitrate: options.bitrate(),
+        reason: Some(errors.join("; ")),
+        encoder: None,
+    }
 }

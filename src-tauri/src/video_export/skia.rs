@@ -14,7 +14,10 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 
 use ab_glyph::{Font, FontVec, GlyphId, OutlineCurve};
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{
+    FillRule, FilterQuality, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
+    Stroke, Transform,
+};
 
 use super::model::{VideoOptions, VideoPalette, VideoPayload};
 use super::scene::{self, Align, Color, Painter, Rect, FONT_SIZES};
@@ -128,6 +131,7 @@ type GlyphCache = HashMap<(fontdb::ID, u16, u32), Option<Rc<Path>>>;
 /// Rasteriser state shared by every frame of one export.
 pub(super) struct Canvas {
     pixmap: RefCell<Pixmap>,
+    app_icon: Pixmap,
     scale: f32,
     palette: scene::Palette,
     fonts: Fonts,
@@ -142,6 +146,8 @@ impl Canvas {
             .ok_or_else(|| "cannot allocate the report canvas".to_owned())?;
         Ok(Self {
             pixmap: RefCell::new(pixmap),
+            app_icon: Pixmap::decode_png(scene::APP_ICON)
+                .map_err(|error| format!("cannot decode the application icon: {error}"))?,
             scale: options.canvas_scale(),
             palette: scene::Palette::new(colors)?,
             fonts: Fonts::load()?,
@@ -161,7 +167,6 @@ impl Canvas {
         out.copy_from_slice(self.pixmap.borrow().data());
     }
 
-    #[cfg(test)]
     pub(super) fn save_png(&self, path: &std::path::Path) -> Result<(), String> {
         self.pixmap
             .borrow()
@@ -368,6 +373,21 @@ impl Painter for Canvas {
         self.pixmap.borrow_mut().fill(sk_color(ink));
     }
 
+    fn app_icon(&self, bounds: Rect) {
+        let transform = Transform::from_scale(
+            self.device(bounds.w) / self.app_icon.width() as f32,
+            self.device(bounds.h) / self.app_icon.height() as f32,
+        )
+        .post_translate(self.device(bounds.x), self.device(bounds.y));
+        let paint = PixmapPaint {
+            quality: FilterQuality::Bilinear,
+            ..Default::default()
+        };
+        self.pixmap
+            .borrow_mut()
+            .draw_pixmap(0, 0, self.app_icon.as_ref(), &paint, transform, None);
+    }
+
     fn text(&self, value: &str, bounds: Rect, font: usize, ink: Color, align: Align) {
         if value.is_empty() {
             return;
@@ -385,12 +405,14 @@ impl Painter for Canvas {
         let mut chars: Vec<char> = value.chars().collect();
         let mut measured = self.measure(group, &chars, size);
         if measured > width && chars.len() > 1 {
-            while measured > width && chars.len() > 1 {
-                chars.pop();
-                measured = self.measure(group, &chars, size);
-            }
             chars.push('…');
-            measured = self.measure(group, &chars, size);
+            loop {
+                measured = self.measure(group, &chars, size);
+                if measured <= width || chars.len() <= 1 {
+                    break;
+                }
+                chars.remove(chars.len() - 2);
+            }
         }
         let left = self.device(bounds.x);
         let mut pen = match align {
@@ -435,6 +457,15 @@ impl Painter for Canvas {
             }
             pen += advance;
         }
+    }
+
+    fn text_width(&self, value: &str, font: usize) -> f32 {
+        let group = if FONT_SIZES[font] >= 24.0 {
+            &self.fonts.strong
+        } else {
+            &self.fonts.normal
+        };
+        self.measure(group, &value.chars().collect::<Vec<_>>(), FONT_SIZES[font])
     }
 
     fn line(&self, x1: f32, y1: f32, x2: f32, y2: f32, ink: Color, width: f32) {
@@ -553,10 +584,16 @@ mod tests {
 
     fn payload() -> VideoPayload {
         let options = VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 640,
             height: 360,
             fps: 10,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format: Format::Mp4,
             duration_s: 1,
             theme: Theme::Dark,
@@ -587,6 +624,10 @@ mod tests {
                 unit_a: "A".into(),
                 unit_c: "C".into(),
                 unit_wh: "Wh".into(),
+                average: "Average".into(),
+                maximum: "Maximum".into(),
+                range: "Range".into(),
+                energy: "Energy".into(),
             },
             palette: VideoPalette {
                 background: "#292929".into(),
@@ -605,6 +646,7 @@ mod tests {
                 ],
             },
             summary: VideoSummary {
+                average_voltage_v: Some(5.0),
                 elapsed_s: 1.0,
                 points: frames as u64,
                 average_power_w: Some(7.5),

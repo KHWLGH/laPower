@@ -55,7 +55,7 @@ export function pickVideoExportFile(defaultName) {
   return invoke('video_export_pick', {
     defaultName,
     title: t('videoExportTitle'),
-    filterName: t('videoFile'),
+    filterName: t(defaultName.endsWith('.png') ? 'reportPngFile' : 'videoFile'),
   });
 }
 

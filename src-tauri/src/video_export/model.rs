@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 pub const MAX_DURATION_S: u32 = 60;
 pub const MAX_MARKERS: usize = 8;
-pub const MAX_OVERVIEW_POINTS: usize = 256 * 4;
+/// First/last plus the minimum and maximum of each of four channels per bucket.
+pub const MAX_OVERVIEW_POINTS: usize = 256 * 10;
 pub const RESOLUTIONS: [(u32, u32); 4] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
 pub const FRAME_RATES: [u32; 3] = [24, 30, 60];
 
@@ -50,13 +51,63 @@ pub enum Theme {
     Dark,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Acceleration {
+    #[default]
+    Auto,
+    Hardware,
+    Software,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Quality {
+    Standard,
+    #[default]
+    High,
+    Ultra,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReportType {
+    Image,
+    #[default]
+    Video,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageLayout {
+    #[default]
+    Widescreen,
+    Long,
+}
+
+fn enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VideoOptions {
+    #[serde(default)]
+    pub report_type: ReportType,
+    #[serde(default)]
+    pub image_layout: ImageLayout,
+    #[serde(default = "enabled")]
+    pub show_markers: bool,
+    #[serde(default = "enabled")]
+    pub show_marker_details: bool,
     pub width: u32,
     pub height: u32,
     pub fps: u32,
     pub codec: Codec,
+    #[serde(default)]
+    pub acceleration: Acceleration,
+    #[serde(default)]
+    pub quality: Quality,
     pub format: Format,
     pub duration_s: u32,
     pub theme: Theme,
@@ -78,8 +129,27 @@ impl VideoOptions {
         Ok(())
     }
 
+    /// Target average bitrate shared by every native encoder, in bits per second.
+    pub fn bitrate(&self) -> u32 {
+        let base: u64 = match self.quality {
+            Quality::Standard => 10_000_000,
+            Quality::High => 20_000_000,
+            Quality::Ultra => 30_000_000,
+        };
+        let (base, minimum) = match self.codec {
+            Codec::H264 => (base, 4_000_000),
+            Codec::H265 => (base * 65 / 100, 3_000_000),
+        };
+        (base * u64::from(self.width) * u64::from(self.height) * u64::from(self.fps)
+            / (1920 * 1080 * 30))
+            .clamp(minimum, 240_000_000) as u32
+    }
+
     /// Exact frame count for this request; the encoder indexes frames directly.
     pub fn frames(&self) -> usize {
+        if self.report_type == ReportType::Image {
+            return 1;
+        }
         self.duration_s as usize * self.fps as usize
     }
 
@@ -110,6 +180,10 @@ pub struct VideoLabels {
     pub unit_a: String,
     pub unit_c: String,
     pub unit_wh: String,
+    pub average: String,
+    pub maximum: String,
+    pub range: String,
+    pub energy: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -118,7 +192,8 @@ pub struct VideoHeader {
     /// Record name, drawn as the report title.
     pub title: String,
     pub status: String,
-    /// `recording` keeps the accent colour; every other value uses the warning colour.
+    /// Retained for compatibility with frozen payloads; the report no longer draws a status badge.
+    #[allow(dead_code)]
     pub status_kind: String,
 }
 
@@ -152,6 +227,8 @@ pub struct VideoSummary {
     pub elapsed_s: f64,
     pub points: u64,
     pub average_power_w: Option<f64>,
+    #[serde(default)]
+    pub average_voltage_v: Option<f64>,
     pub min_voltage_v: Option<f64>,
     pub max_voltage_v: Option<f64>,
     pub peak_current_a: Option<f64>,
@@ -267,11 +344,28 @@ impl VideoPayload {
         {
             return Err(invalid("overview points must be sorted"));
         }
-        if self.markers.len() > MAX_MARKERS {
+        let long_image = self.options.report_type == ReportType::Image
+            && self.options.image_layout == ImageLayout::Long;
+        if self.markers.len() > if long_image { 10_000 } else { MAX_MARKERS } {
             return Err(invalid("too many breakpoints for one report"));
         }
+        let (width, height) = self.output_size();
+        if height > 32_767 || u64::from(width) * u64::from(height) > 64 * 1024 * 1024 {
+            return Err(invalid(
+                "image is too large; choose a lower resolution or hide marker details",
+            ));
+        }
         if self.markers.iter().any(|marker| {
-            !marker.t_s.is_finite() || marker.t_s < 0.0 || marker.label.trim().is_empty()
+            !marker.t_s.is_finite()
+                || marker.t_s < 0.0
+                || marker.label.trim().is_empty()
+                || marker.label.len() > 4096
+                || !optional_finite([
+                    marker.voltage,
+                    marker.current,
+                    marker.power,
+                    marker.temperature,
+                ])
         }) {
             return Err(invalid("breakpoint is invalid"));
         }
@@ -280,6 +374,7 @@ impl VideoPayload {
             Some(self.summary.energy_wh),
             Some(self.summary.capacity_mah),
             self.summary.average_power_w,
+            self.summary.average_voltage_v,
             self.summary.min_voltage_v,
             self.summary.max_voltage_v,
             self.summary.peak_current_a,
@@ -324,6 +419,23 @@ impl VideoPayload {
 
     pub fn duration_ms(&self) -> u64 {
         (self.summary.elapsed_s.max(0.0) * 1000.0).round() as u64
+    }
+
+    /// Long images extend only the details area, keeping the overview chart readable.
+    pub fn output_size(&self) -> (u32, u32) {
+        let logical_height = if self.options.report_type == ReportType::Image
+            && self.options.image_layout == ImageLayout::Long
+            && self.options.show_marker_details
+            && !self.markers.is_empty()
+        {
+            (860 + self.markers.len().div_ceil(4) as u32 * 160).max(1080)
+        } else {
+            1080
+        };
+        (
+            self.options.width,
+            logical_height * self.options.width / 1920,
+        )
     }
 
     /// Millisecond span each overview bucket covers; the plot uses it to decide which gaps are
@@ -401,6 +513,7 @@ pub struct VideoCapability {
     pub fps: u32,
     pub codec: Codec,
     pub available: bool,
+    pub bitrate: u32,
     /// Diagnostic reason; the frontend pairs it with a translated prefix.
     pub reason: Option<String>,
     pub encoder: Option<String>,
@@ -421,10 +534,16 @@ mod tests {
 
     fn options() -> VideoOptions {
         VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 1280,
             height: 720,
             fps: 24,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format: Format::Mp4,
             duration_s: 1,
             theme: Theme::Light,
@@ -475,8 +594,13 @@ mod tests {
                 unit_a: "A".into(),
                 unit_c: "C".into(),
                 unit_wh: "Wh".into(),
+                average: "Average".into(),
+                maximum: "Maximum".into(),
+                range: "Range".into(),
+                energy: "Energy".into(),
             },
             summary: VideoSummary {
+                average_voltage_v: Some(5.0),
                 elapsed_s: 1.0,
                 points: frames as u64,
                 energy_wh: 0.5,
@@ -552,6 +676,23 @@ mod tests {
         let mut value = payload();
         value.markers = (0..9).map(|index| marker(index as f64, "point")).collect();
         assert!(value.validate().is_err());
+        value.options.report_type = ReportType::Image;
+        value.frames.t.truncate(1);
+        value.frames.voltage.truncate(1);
+        value.frames.current.truncate(1);
+        value.frames.power.truncate(1);
+        value.frames.temperature.truncate(1);
+        assert!(value.validate().is_err());
+        value.options.image_layout = ImageLayout::Long;
+        value.validate().unwrap();
+        value.markers = (0..10_000)
+            .map(|index| marker(index as f64, "point"))
+            .collect();
+        assert!(value.validate().unwrap_err().contains("too large"));
+        value.options.show_marker_details = false;
+        value.validate().unwrap();
+        value.markers.push(marker(0.0, "point"));
+        assert!(value.validate().is_err());
         let mut value = payload();
         value.markers.push(marker(0.5, "  "));
         assert!(value.validate().is_err());
@@ -567,6 +708,37 @@ mod tests {
         value.validate().unwrap();
         value.overview.points.swap(0, 1);
         assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn four_channel_overviews_accept_the_full_budget_but_reject_overflow() {
+        let mut value = payload();
+        value.overview.points = (0..2560)
+            .map(|index| {
+                [
+                    Some(index as f64),
+                    Some(5.0),
+                    Some(1.0),
+                    Some(5.0),
+                    Some(30.0),
+                ]
+            })
+            .collect();
+        value.validate().unwrap();
+        value
+            .overview
+            .points
+            .push([Some(2560.0), None, None, None, None]);
+        assert_eq!(
+            value.validate().unwrap_err(),
+            "overview point count is out of range"
+        );
+        value.overview.points.pop();
+        value.overview.points[100][1] = Some(f64::NAN);
+        assert_eq!(
+            value.validate().unwrap_err(),
+            "overview point value is invalid"
+        );
     }
 
     /// The exact wire shape `src/video-projection.js` produces. `deny_unknown_fields` on every
@@ -585,7 +757,8 @@ mod tests {
                 "power": "Power", "voltage": "Voltage", "current": "Current",
                 "temperature": "Temperature", "capacity": "Capacity", "points": "points",
                 "noSeries": "No curves", "missing": "No reading",
-                "unitW": "W", "unitV": "V", "unitA": "A", "unitC": "C", "unitWh": "Wh"
+                "unitW": "W", "unitV": "V", "unitA": "A", "unitC": "C", "unitWh": "Wh",
+                "average": "Average", "maximum": "Maximum", "range": "Range", "energy": "Energy"
             },
             "palette": {
                 "background": "#ffffff", "card": "#fafafa", "ink": "#242424",

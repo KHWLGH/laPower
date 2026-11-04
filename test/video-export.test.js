@@ -7,6 +7,7 @@ import {
   defaultVideoExportOptions,
   normalizeVideoExportOptions,
   parseDurationInput,
+  VIDEO_MAX_OVERVIEW_POINTS,
   videoFrameCount,
 } from '../src/video-export-options.js';
 import { VIDEO_PALETTE_DARK, VIDEO_PALETTE_LIGHT, videoPalette } from '../src/video-palette.js';
@@ -186,6 +187,37 @@ test('overview keeps the extrema of every bucket', () => {
   );
 });
 
+test('independent four-channel extrema fit the host budget without losing peaks or endpoints', () => {
+  // Sixteen samples per bucket, with each channel's min/max at different rows.
+  const rows = Array.from({ length: 4096 }, (_, index) => {
+    const slot = index % 16;
+    return [
+      index / 1000,
+      ...[0, 1, 2, 3].map((channel) =>
+        slot === 1 + channel * 2 ? -100 - channel : slot === 2 + channel * 2 ? 100 + channel : 0,
+      ),
+    ];
+  });
+  const cols = columns(rows, { intervalMs: 1 });
+  const projection = projectVideo({ columns: snapshots(cols), length: rows.length, frameCount: 150, intervalMs: 1 });
+  const points = projection.overview;
+  assert.ok(points.length > 1024, 'four-channel extrema exceed the obsolete host limit');
+  assert.ok(points.length <= VIDEO_MAX_OVERVIEW_POINTS);
+  assert.equal(points[0][0], 0);
+  assert.equal(points.at(-1)[0], 4095);
+  assert.equal(projection.frames.t.at(-1), rows.at(-1)[0]);
+  for (let channel = 0; channel < 4; channel++) {
+    const raw = rows.map((row) => row[channel + 1]);
+    const projected = points.map((point) => point[channel + 1]);
+    assert.equal(Math.min(...projected), Math.min(...raw));
+    assert.equal(Math.max(...projected), Math.max(...raw));
+  }
+  assert.deepEqual(
+    points.map((point) => point[0]),
+    points.map((point) => point[0]).sort((a, b) => a - b),
+  );
+});
+
 test('short recordings are projected sample by sample', () => {
   const cols = columns(record(40));
   const projection = projectVideo({
@@ -303,6 +335,10 @@ test('payload keys match the IPC contract the backend deserialises', () => {
     unitA: 'A',
     unitC: 'C',
     unitWh: 'Wh',
+    average: 'Average',
+    maximum: 'Maximum',
+    range: 'Range',
+    energy: 'Energy',
   };
   const payload = buildVideoPayload({
     options: defaultVideoExportOptions,
@@ -324,17 +360,24 @@ test('payload keys match the IPC contract the backend deserialises', () => {
     'summary',
   ]);
   assert.deepEqual(Object.keys(payload.options).sort(), [
+    'acceleration',
     'codec',
     'durationS',
     'format',
     'fps',
     'height',
+    'imageLayout',
+    'quality',
+    'reportType',
+    'showMarkerDetails',
+    'showMarkers',
     'theme',
     'visibleSeries',
     'width',
   ]);
   assert.deepEqual(Object.keys(payload.summary).sort(), [
     'averagePowerW',
+    'averageVoltageV',
     'capacityMah',
     'elapsedS',
     'energyWh',

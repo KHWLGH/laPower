@@ -161,10 +161,16 @@ mod tests {
 
     fn payload(format: Format) -> VideoPayload {
         let options = VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 320,
             height: 180,
             fps: 10,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format,
             duration_s: 1,
             theme: Theme::Light,
@@ -195,6 +201,10 @@ mod tests {
                 unit_a: "A".into(),
                 unit_c: "C".into(),
                 unit_wh: "Wh".into(),
+                average: "Average".into(),
+                maximum: "Maximum".into(),
+                range: "Range".into(),
+                energy: "Energy".into(),
             },
             palette: VideoPalette {
                 background: "#ffffff".into(),
@@ -213,6 +223,7 @@ mod tests {
                 ],
             },
             summary: crate::video_export::model::VideoSummary {
+                average_voltage_v: Some(5.0),
                 elapsed_s: 1.0,
                 points: frames as u64,
                 average_power_w: Some(5.0),

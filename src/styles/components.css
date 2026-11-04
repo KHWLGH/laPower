@@ -174,11 +174,13 @@
   max-width: 50%;
 }
 
-/* ── 报告视频导出对话框（src/video-export.js） ─────────────────── */
+/* ── 图片与视频报告导出对话框（src/video-export.js） ──────────── */
 
 .video-dialog {
   width: min(560px, 92vw);
   --dialog-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .video-dialog-note {
@@ -249,6 +251,8 @@
 
 .video-progress .field-error {
   margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {

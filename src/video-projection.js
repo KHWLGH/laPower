@@ -34,6 +34,7 @@ import { VIDEO_MAX_MARKERS, VIDEO_OVERVIEW_BINS } from './video-export-options.j
  * @property {{t:number[], voltage:(number|null)[], current:(number|null)[],
  *             power:(number|null)[], temperature:(number|null)[]}} frames
  * @property {{elapsedS:number, points:number, averagePowerW:number|null, minVoltageV:number|null,
+ *             averageVoltageV:number|null,
  *             maxVoltageV:number|null, peakCurrentA:number|null, maxTempC:number|null,
  *             energyWh:number, capacityMah:number, hasTemperature:boolean}} summary
  * @property {{tS:number, label:string, voltage:number|null, current:number|null,
@@ -71,6 +72,7 @@ function nullable(value) {
  * @param {number} input.frameCount 总帧数（durationS × fps）
  * @param {number} [input.binCount]
  * @param {boolean} [input.hasTemperature] 记录里是否出现过温度；缺省按数据推断
+ * @param {number} [input.markerLimit]
  * @returns {VideoProjection}
  */
 export function projectVideo(input) {
@@ -90,6 +92,8 @@ export function projectVideo(input) {
   // 时间加权平均功率：和能量积分一样跳过空档，否则一次休眠会把平均值拉低一整天。
   let area = 0;
   let weighted = 0;
+  let voltageArea = 0;
+  let voltageWeighted = 0;
   let previousX = Number.NaN;
   for (let index = 0; index < length; index++) {
     const voltage = read(columns.voltage, index);
@@ -106,6 +110,11 @@ export function projectVideo(input) {
     if (index > 0 && dt > 0 && dt <= maxAgeS && Number.isFinite(power)) {
       area += power * dt;
       weighted += dt;
+    }
+    const previousVoltage = read(columns.voltage, index - 1);
+    if (index > 0 && dt > 0 && dt <= maxAgeS && Number.isFinite(previousVoltage)) {
+      voltageArea += previousVoltage * dt;
+      voltageWeighted += dt;
     }
     previousX = x;
   }
@@ -130,6 +139,7 @@ export function projectVideo(input) {
       elapsedS: lastX,
       points: length,
       averagePowerW: weighted > 0 ? area / weighted : null,
+      averageVoltageV: voltageWeighted > 0 ? voltageArea / voltageWeighted : null,
       minVoltageV: nullable(minVoltageV),
       maxVoltageV: nullable(maxVoltageV),
       peakCurrentA: nullable(peakCurrentA),
@@ -138,7 +148,7 @@ export function projectVideo(input) {
       capacityMah: mah,
       hasTemperature: input.hasTemperature ?? hasTemperature,
     },
-    markers: projectMarkers(columns, length, markers),
+    markers: projectMarkers(columns, length, markers, input.markerLimit ?? VIDEO_MAX_MARKERS),
   };
 }
 
@@ -236,11 +246,13 @@ function sampleFrames(columns, length, frameCount, maxAgeS) {
  * @param {Record<string, any>} columns
  * @param {number} length
  * @param {readonly import('./markers.js').Marker[]} markers
+ * @param {number} limit
  */
-function projectMarkers(columns, length, markers) {
+function projectMarkers(columns, length, markers, limit) {
   /** @type {{tS:number, label:string, voltage:number|null, current:number|null,
    *           power:number|null, temperature:number|null}[]} */
   const out = [];
+  if (limit <= 0) return out;
   for (const marker of markers) {
     const index = Number(marker?.index);
     if (!Number.isSafeInteger(index) || index < 0 || index >= length) continue;
@@ -254,11 +266,10 @@ function projectMarkers(columns, length, markers) {
       power: nullable(read(columns.power, index)),
       temperature: nullable(read(columns.temp, index)),
     });
-    if (out.length >= VIDEO_MAX_MARKERS) break;
   }
   // 标记按行号保存、行号与时间同序；仍然排一次，防止导入数据里出现乱序 x。
   out.sort((a, b) => a.tS - b.tS);
-  return out;
+  return out.slice(0, limit);
 }
 /**
  * 把投影结果与界面文案组装成 `video_export_start` 的载荷。
@@ -275,10 +286,16 @@ function projectMarkers(columns, length, markers) {
 export function buildVideoPayload({ options, projection, header, labels, palette }) {
   return {
     options: {
+      reportType: options.reportType,
+      imageLayout: options.imageLayout,
+      showMarkers: options.showMarkers,
+      showMarkerDetails: options.showMarkerDetails,
       width: options.width,
       height: options.height,
       fps: options.fps,
       codec: options.codec,
+      acceleration: options.acceleration,
+      quality: options.quality,
       format: options.format,
       durationS: options.durationS,
       theme: options.theme,
@@ -291,6 +308,7 @@ export function buildVideoPayload({ options, projection, header, labels, palette
       elapsedS: projection.summary.elapsedS,
       points: projection.summary.points,
       averagePowerW: projection.summary.averagePowerW,
+      averageVoltageV: projection.summary.averageVoltageV,
       minVoltageV: projection.summary.minVoltageV,
       maxVoltageV: projection.summary.maxVoltageV,
       peakCurrentA: projection.summary.peakCurrentA,

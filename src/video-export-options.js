@@ -11,17 +11,25 @@
 /** @typedef {'h264'|'h265'} VideoCodec */
 /** @typedef {'mp4'|'mov'} VideoFormat */
 /** @typedef {'dark'|'light'} VideoTheme */
+/** @typedef {'auto'|'hardware'|'software'} VideoAcceleration */
+/** @typedef {'standard'|'high'|'ultra'} VideoQuality */
 
 /**
  * @typedef {Object} VideoExportOptions
  * @property {number} width
  * @property {number} height
  * @property {number} fps
+ * @property {VideoAcceleration} acceleration
+ * @property {VideoQuality} quality
  * @property {VideoCodec} codec
  * @property {VideoFormat} format
  * @property {number} durationS
  * @property {VideoTheme} theme
  * @property {boolean[]} visibleSeries 电压 / 电流 / 功率 / 温度
+ * @property {'image'|'video'} reportType
+ * @property {'widescreen'|'long'} imageLayout
+ * @property {boolean} showMarkers
+ * @property {boolean} showMarkerDetails
  */
 
 /** @type {VideoResolution[]} */
@@ -50,13 +58,21 @@ export const VIDEO_MAX_MARKERS = 8;
 
 /** 曲线投影桶数；与后端 `MAX_OVERVIEW_POINTS` 的上限相容。 */
 export const VIDEO_OVERVIEW_BINS = 256;
+/** First/last plus min/max of four channels per bucket; mirrored by the host. */
+export const VIDEO_MAX_OVERVIEW_POINTS = VIDEO_OVERVIEW_BINS * 10;
 
 /** @type {VideoExportOptions} */
 export const defaultVideoExportOptions = {
+  reportType: 'image',
+  imageLayout: 'widescreen',
+  showMarkers: true,
+  showMarkerDetails: true,
   width: 1920,
   height: 1080,
   fps: 30,
   codec: 'h264',
+  acceleration: 'auto',
+  quality: 'high',
   format: 'mp4',
   durationS: 5,
   theme: 'light',
@@ -90,6 +106,13 @@ export function normalizeVideoExportOptions(saved) {
   const visible = Array.isArray(source.visibleSeries) ? source.visibleSeries : [];
   return {
     ...resolution,
+    reportType: source.reportType === 'video' ? 'video' : 'image',
+    imageLayout: source.imageLayout === 'long' ? 'long' : 'widescreen',
+    showMarkers: typeof source.showMarkers === 'boolean' ? source.showMarkers : true,
+    showMarkerDetails: typeof source.showMarkerDetails === 'boolean' ? source.showMarkerDetails : true,
+    acceleration:
+      source.acceleration === 'hardware' || source.acceleration === 'software' ? source.acceleration : 'auto',
+    quality: source.quality === 'standard' || source.quality === 'ultra' ? source.quality : 'high',
     fps: VIDEO_FRAME_RATES.includes(/** @type {number} */ (source.fps))
       ? /** @type {number} */ (source.fps)
       : defaultVideoExportOptions.fps,
@@ -116,6 +139,7 @@ export function normalizeVideoExportOptions(saved) {
  * @returns {number}
  */
 export function videoFrameCount(options) {
+  if ('reportType' in options && options.reportType === 'image') return 1;
   return options.durationS * options.fps;
 }
 

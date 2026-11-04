@@ -41,6 +41,9 @@
 .fi-export {
   --fi: url("fluent-icons/arrow-export.svg");
 }
+.fi-report {
+  --fi: url("report.svg");
+}
 .fi-github {
   --fi: url("github-mark.svg");
 }

@@ -126,7 +126,13 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 
 ### `src-tauri/src/video_export.rs`
 
+报告入口统一为“导出报告”，图片和视频复用冻结快照、单任务状态、原生目标 ticket、暂存文件与成功后提交机制。内部 IPC 名称保留 `video_export_*` 以兼容现有调用。`VideoOptions` 增加 `reportType`（image/video）、`imageLayout`（widescreen/long）及独立的 `showMarkers`、`showMarkerDetails`；缺字段的旧后端载荷按 video、widescreen、两项开启解释，前端首次使用默认 image。设置仍保存在原 `videoExport` 块中，不丢弃已有视频选项。PNG 绕过视频能力探测与编码器，Windows 用 Direct2D/WIC，其他平台用 tiny-skia 保存无损 PNG。
+
+静态报告展示整段统计、完整曲线与总时长，不绘制播放光标、动态读数和进度条。平均电压按有效时间加权，统计与曲线沿用原始数据及缺测语义；两个打点开关分别控制曲线标记和下方详情。视频及 16:9 图片最多含前八个打点，长图保留全部打点并按详情行扩展高度。后端限制载荷数量、图片高度和总像素，超限显式失败，取消或失败不覆盖原目标。
+
 报告视频导出是宿主侧的单槽任务。`video_export_capability` 按用户当前选中的那一组选项用真实的一帧试编码探测，结果按组合缓存在进程内——一次打开对话框只探测一个组合，而不是逐个试完全部 24 个；`video_export_pick` 打开原生保存对话框并返回一次性 ticket，路径留在后端，前端无法指定任意目标；`video_export_start` 校验冻结载荷后启动 `lapower-video` 线程；`video_export_status` 与 `video_export_current` 分别服务对话框每 500 ms 一次的进度轮询和重开后的接回；`video_export_cancel` 只置位取消标志，由编码循环逐帧检查。关闭对话框或切换工作区不会中止编码；同一时刻只有一个任务，取消请求也要等编码线程真正退出才释放槽位。退出时 `shutdown` 取消当前任务并最多等待两秒回收编码线程；超时只记日志，残留的暂存文件带进程号，便于识别。
+
+前后端投影上限统一为 256 桶 × 10 点（首尾与四通道极值），共 2560 点。能力探测完成后才允许提交；对话框关闭后仍每 500 ms 跟踪活动任务并只通知一次终态。查询使用任务版本和请求序号忽略过期结果，临时失败保留任务重试；错误展示保留原始诊断。
 
 采样只存在于前端的列式存储里，后端没有可按时间查询的记录库，因此 `src/video-export.js` 在用户确认时冻结列快照，`src/video-projection.js`（纯函数）一次投影出自包含的载荷：汇总统计、256 个时间桶的曲线投影（每桶保留首样本、末样本和各通道的最小／最大值，短记录直接使用原始点）、每个视频帧的一组通道读数（最后一帧对应最后一个样本）以及最多 8 个打点。`src/video-export-options.js` 是分辨率、帧率、编码、容器白名单与帧数公式的唯一来源，`src/video-palette.js` 带出浅深两套已解析的颜色。载荷交给后端后不再读取任何记录数据，编码期间继续记录也不会改变这份报告。
 
@@ -135,6 +141,10 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 Windows 编码有两档：`gpu.rs` 把同一套排版直接画进 D3D11 纹理，`ID3D11VideoProcessor` 在显卡上转成 BT.709 NV12，再由 Media Foundation 的硬件编码器经 DXGI 采样写盘；零拷贝路径不可用时，`windows.rs` 改走 WIC 位图加 CPU NV12，但这条路径**仍开着** `MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS`，所以系统内存里的帧照旧可以交给硬件编码器，只有整条链路都拿不到硬件时才落到软件编码。两条路径都只用编码器自己报告的 `MFT_ENUM_HARDWARE_URL_Attribute` 判断是否算硬件。`gpu.rs` 通过 `IDXGIFactory1` 枚举适配器，跳过 `DXGI_ADAPTER_FLAG_SOFTWARE` 并逐个尝试，避免虚拟显示适配器抢到默认设备。编码器在**第一次尝试开始前**就写入任务状态，对话框从第一帧起显示的就是真实编码器；回退到软件编码时同时写入 `fallback` 原因。非 Windows 主机走 `portable.rs` 的帧循环：macOS 优先用 `apple.rs` 的 VideoToolbox 硬件会话（建会话后读取 `UsingHardwareAcceleratedVideoEncoder` 如实报告，失败则回退），Linux 用内置的 `software.rs`（OpenH264，随包编译）；`mp4.rs` 负责写 MP4／MOV（MOV 直接按 QuickTime 品牌与 `mhlr` 处理器写出，无需事后改写）。`mov.rs` 仍只服务 Media Foundation 产出的 MP4：在 `Finalize` 之后就地把 `ftyp` 品牌和 `hdlr` 处理器改写成 QuickTime 形式，样本偏移保持不变。
 
 目标路径来自原生对话框。编码器先在目标同目录创建隐藏暂存文件，成功后才重命名到目标；失败或取消会删除暂存文件，因此已有文件不会被半成品覆盖，也不会留下临时文件。能力按组合给出：Windows 先试零拷贝路径、失败再试 CPU 帧路径，记录实际生效的编码器；macOS 用 VideoToolbox 真编码一帧并读取 `UsingHardwareAcceleratedVideoEncoder`；Linux 由内置编码器提供 H.264（软件编码），`H.265 (HEVC)` 标记为不可用并在对话框说明原因。CSV 导出不受影响。
+
+报告视频选项新增 `acceleration`（auto / hardware / software，默认 auto）和 `quality`（standard / high / ultra，默认 high），包含在冻结载荷和任务状态中。前后端能力缓存均按分辨率、帧率、编码、模式和画质区分；探测与实际编码采用相同的选择策略。Windows 自动模式依次尝试 GPU 纹理硬件、CPU 帧硬件、禁用硬件变换的软件编码；强制模式只尝试对应编码器，并核验真实属性。macOS 在创建 VideoToolbox 会话时通过 encoder specification 要求或禁用硬件，再读取实际模式；软件 H.264 可使用内置 OpenH264，HEVC 软件模式必须通过真实探测。Linux 明确拒绝硬件模式。只有自动模式跨硬件／软件重试，取消后不再重试，重试前清空暂存容器。
+
+`VideoOptions::bitrate()` 统一三种编码器的目标码率。1080p30 的 H.264 标准／高清／极清为 10／20／30 Mbps，HEVC 为其 65%；按像素数和帧率线性缩放，分别最低 4／3 Mbps，最高 240 Mbps。能力响应增加 `bitrate`，供界面显示；空间预检查使用目标流大小的 125% 加 64 MiB 预留。共享排版使用 144 高参数卡和独立的名称、摘要、主读数区域，`VideoLabels` 新增 average / maximum / range / energy，保持统计口径不变。
 
 ## 协议库
 

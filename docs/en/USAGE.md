@@ -98,6 +98,7 @@ Drag the panel's right divider to resize it; narrow windows limit the resulting 
 ### Display, chart and timeline
 
 - Open `Display` to choose curves. Voltage, current, power and temperature are selected by default; D+/D- and CC1/CC2 are off. Selecting the temperature curve does not connect its source.
+- The Curve shading switch at the top of Display defaults on and saves your choice. Turning it off preserves each main channel’s opacity; turning it back on restores those values. Recording, pausing, dragging and zooming never change shading automatically. This switch affects the monitor chart only.
 - Each main channel has a fill opacity from 0–100%, default 15%. Zero removes fill, not the curve. The legend identifies visible channels; it does not toggle them.
 - Hover for enabled channels with valid values at that time. The mouse wheel zooms the main chart around the pointer.
 - Drag the bottom timeline's end handles to resize the range or its middle to pan. A range touching the newest point follows new data; a historical range stays in place.
@@ -138,27 +139,37 @@ The three CSV options are saved: `Include temperature` is off by default; `Inclu
 
 `Export CSV and PD data…` in the same flyout requires Monitor and PD data. One destination selection creates `name.csv` and `name.pd.json`, with overwrite confirmation. Both exports use all data regardless of chart selection or PD filters. Their snapshots are fixed after destination selection; later samples are not appended to that export. When Follow recording is off, time ranges can differ and are not cropped or aligned automatically.
 
-### Report video export
+### Export report
 
-`Report video`, beside `Export CSV` in the command bar, turns the whole recording into a short highlight video. It becomes available once at least two samples have been recorded; the video uses the selected curves and the current markers and has no audio.
+Use the document-chart icon beside CSV export to open **Export report**. Choose a lossless PNG image or a short video of the whole frozen recording. The first use defaults to image; subsequent uses remember the selected type, resolution (720p–4K), theme and content.
 
-| Option | Choices and defaults |
-| --- | --- |
-| `Resolution` | `1280 × 720`, `1920 × 1080` (default), `2560 × 1440`, `3840 × 2160` |
-| `Frame rate` | 24, 30 (default) or 60 fps |
-| `Codec` | `H.264` (default) or `H.265 (HEVC)` |
-| `Container` | `MP4` (default) or `MOV` |
-| `Length` | 1–60 seconds, default 5 seconds |
-| `Theme` | `Light` (default) or `Dark`, independent of the interface theme |
-| `Curves` | Voltage, current, power and temperature, all selected by default |
+**Report content** provides matching checkboxes for voltage, current, power, temperature, **Markers** and **Marker details**. The two marker controls are independent: markers alone appear only on the chart; details add names, times and readings below it. Details alone and neither are also supported for both images and videos.
 
-The whole recording is compressed into the chosen length as a fast-forward; the last frame is the last sample. Cleared curves are left out of the picture, and the current markers appear on the video (up to 8). The options are saved and reused next time. `Length` only accepts whole seconds from 1 to 60: an out-of-range entry greys out `Generate video` and says why, and is never written to the saved options.
+PNG reports use a static layout with full curves, total duration, sample count, time-weighted average voltage and power, peak current, maximum temperature, capacity and energy. Missing values remain explicit. There is no playback cursor or progress bar, and no video encoder is needed.
 
-`Generate video` freezes the current data, then opens the native save dialog. Encoding runs in the background with a progress bar, the encoder this run is using, and a `Cancel encoding` button. Closing the dialog does not stop encoding; clicking `Report video` again reattaches to the running job and continues to show its progress. Only one video can be generated at a time. Finishing, cancelling and failing each raise a notification.
+- **16:9** keeps a fixed landscape canvas and includes the first eight markers in time order. The dialog warns when more exist.
+- **Long image** retains every marker and extends the details area as needed. If the image exceeds safe dimensions, export fails explicitly; choose a lower resolution or hide details to retry. Markers are never silently dropped in this layout.
 
-The file is written to the chosen path only after encoding succeeds. A failed or cancelled export leaves any existing file untouched and leaves no temporary file behind. A notification reports the saved file name.
+Video retains MP4/MOV, H.264/H.265, 24/30/60 fps, 1–60 seconds, quality and encoding mode. It fast-forwards the recording, ends at the final sample, and includes up to eight markers. Invalid duration disables video generation; hidden video settings do not block PNG export.
 
-On Windows the export uses the graphics card when it can: Direct2D draws straight onto a D3D11 texture, the video processor converts it to NV12 on the GPU and a Media Foundation hardware encoder writes the file. When the zero-copy path is unavailable the frames are read back to system memory and still handed to the hardware encoder; only a host that cannot reach a hardware encoder at all falls back to software encoding, and the dialog then states why. Adapters are tried in enumeration order, so a machine with a virtual display driver no longer keeps falling back because the runtime picked the wrong default adapter. The dialog always shows the encoder that was actually used. macOS encodes with the system VideoToolbox: the hardware encoder is used when the Mac provides one, and the dialog reports the software fallback honestly when it does not. Linux renders with the portable rasteriser and encodes with the bundled H.264 encoder. Neither needs ffmpeg or another codec installed. `H.265 (HEVC)` is therefore available on Windows (with the HEVC video extension) and on macOS, but not on Linux, where the dialog marks those combinations unavailable and explains why.
+**Generate image** or **Generate video** freezes the data, then opens the native save dialog. Both types share one background task slot. Closing the dialog keeps the task running; reopening restores its progress and actual options. **Cancel export** cancels the task. Completion, cancellation and failure produce notifications. Only a successful export replaces the destination; cancellation and failure preserve existing files and remove staging files.
+
+### Video quality and encoding mode
+
+The export dialog adds `Encoding mode` and `Quality`, defaulting to `Automatic` and `High`. Both are saved with the other video options. Changing either probes the selected combination again; generation stays disabled until the probe finishes. The dialog shows the target bitrate; actual file size varies with content.
+
+| Quality | H.264 (1080p / 30 fps) | H.265 (1080p / 30 fps) |
+| --- | --- | --- |
+| Standard | 10 Mbps | 6.5 Mbps |
+| High (default) | 20 Mbps | 13 Mbps |
+| Ultra | 30 Mbps | 19.5 Mbps |
+
+Bitrate scales linearly with pixel count and frame rate, with a 4 Mbps floor for H.264, a 3 Mbps floor for H.265, and a 240 Mbps ceiling. Higher quality usually needs more space and encoding time.
+
+`Automatic` tries hardware first and reports the reason if it falls back to software. `Hardware encoding` requires a verified hardware encoder: Windows may retry with CPU-rendered frames submitted to hardware if the GPU texture path fails; export fails if neither works. `Software encoding` goes directly to a software encoder without a hardware fallback warning. macOS creates and verifies a VideoToolbox session for the selected mode, with bundled H.264 as a software fallback; software HEVC is available only when the system probe succeeds. Linux supports H.264 in automatic or software mode only. Unavailable combinations keep your choices and explain the failure. No ffmpeg installation is needed.
+
+The five video reading cards use separate name, summary and main-reading areas. Their upper-right summaries identify voltage `Range`, current `Maximum`, power `Average`, temperature `Maximum`, and capacity's `Energy`. Missing readings keep these labels. Summaries describe the entire frozen recording; main readings follow the video timeline.
+
 
 ## PD analysis workspace
 

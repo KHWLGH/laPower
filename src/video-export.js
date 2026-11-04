@@ -1,9 +1,9 @@
 // @ts-check
 /**
- * @file 报告视频导出：对话框、冻结快照、进度轮询与错误呈现。
+ * @file 图片与视频报告导出：对话框、冻结快照、进度轮询与错误呈现。
  *
  * 这里只做界面与编排，投影规则在 video-projection.js（纯函数、可单测），后端的职责是
- * "按帧下标画图并编码"。数据在点击「生成视频」的那一刻冻结，所以编码期间继续录制不会
+ * "绘制静态报告或按帧编码"。数据在点击生成按钮的那一刻冻结，所以生成期间继续录制不会
  * 改变已经提交的这份报告。
  */
 
@@ -46,7 +46,7 @@ const POLL_INTERVAL_MS = 500;
  * @property {string|null} path
  * @property {string|null} name
  * @property {string|null} encoder 当前实际使用的编码器，编码开始前为 null
- * @property {string|null} fallback 零拷贝 GPU 路径被放弃的原因，仅在仍成功产出文件时出现
+ * @property {string|null} fallback 自动模式回退软件编码的原因，仅在仍成功产出文件时出现
  * @property {{code:string, detail:string}|null} error
  */
 
@@ -64,6 +64,25 @@ const capabilities = new Map();
 const capabilityProbes = new Map();
 /** 保存对话框与投影期间避免重复提交。 */
 let busy = false;
+let adopting = false;
+let jobRevision = 0;
+let currentQuery = 0;
+/** @type {unknown} */
+let submissionError = null;
+/** @type {unknown} */
+let pollError = null;
+/** @type {Map<string, unknown>} */
+const capabilityErrors = new Map();
+/** @type {Set<string>} */
+const notifiedJobs = new Set();
+
+/** Local video diagnostics keep the backend's reason even for codes without a detail placeholder.
+ * @param {unknown} error */
+function videoErrorText(error) {
+  const text = errorText(error);
+  const detail = /** @type {{detail?:string}|null} */ (error)?.detail;
+  return detail && !text.includes(detail) ? `${text}\n${detail}` : text;
+}
 
 /** @returns {any} */
 const field = (id) => document.getElementById(id);
@@ -71,16 +90,17 @@ const field = (id) => document.getElementById(id);
 const selectField = (id) => /** @type {HTMLSelectElement|null} */ (document.getElementById(id));
 
 function optionState() {
-  return normalizeVideoExportOptions(state.settings.videoExport);
+  return normalizeVideoExportOptions(activeJob() ? job?.options : state.settings.videoExport);
 }
 
 /** 组合的缓存键；与 `video_export_capability` 的缓存键一一对应。 */
 function capabilityKey(options) {
-  return `${options.width}x${options.height}@${options.fps}:${options.codec}`;
+  return `${options.width}x${options.height}@${options.fps}:${options.codec}:${options.acceleration}:${options.quality}`;
 }
 
-/** 已选的编码组合是否被宿主支持；还没探测过时返回 null，此刻不阻拦生成。 */
+/** 已选组合的能力；尚未完成真实探测时不允许提交。 */
 function combinationFor(options) {
+  if (options.reportType === 'image') return { available: true };
   return capabilities.get(capabilityKey(options)) ?? null;
 }
 
@@ -108,6 +128,12 @@ function captureReport(options) {
     markers: markersOf(columns),
     intervalMs: state.dataIntervalMs ?? state.settings.sampleRate,
     frameCount: videoFrameCount(options),
+    markerLimit:
+      !options.showMarkers && !options.showMarkerDetails
+        ? 0
+        : options.reportType === 'image' && options.imageLayout === 'long'
+          ? Number.POSITIVE_INFINITY
+          : 8,
     hasTemperature: state.hasTempData,
   });
   const devices = provenanceOf(columns).devices;
@@ -137,6 +163,10 @@ function captureReport(options) {
       unitA: 'A',
       unitC: '°C',
       unitWh: 'Wh',
+      average: t('videoAverage'),
+      maximum: t('videoMaximum'),
+      range: t('videoRange'),
+      energy: t('videoEnergy'),
     },
     palette: videoPalette(options.theme),
   });
@@ -144,12 +174,27 @@ function captureReport(options) {
 
 function refreshForm() {
   const options = optionState();
+  const type = selectField('report-type');
+  if (type) type.value = options.reportType;
+  const layout = selectField('report-image-layout');
+  if (layout) layout.value = options.imageLayout;
+  for (const [id, checked] of [
+    ['report-markers', options.showMarkers],
+    ['report-marker-details', options.showMarkerDetails],
+  ]) {
+    const input = /** @type {HTMLInputElement|null} */ (field(String(id)));
+    if (input) input.checked = Boolean(checked);
+  }
   const resolution = selectField('video-resolution');
   if (resolution) resolution.value = `${options.width}x${options.height}`;
   const fps = selectField('video-fps');
   if (fps) fps.value = String(options.fps);
   const codec = selectField('video-codec');
   if (codec) codec.value = options.codec;
+  for (const name of ['acceleration', 'quality']) {
+    const input = selectField(`video-${name}`);
+    if (input) input.value = options[name];
+  }
   const format = selectField('video-format');
   if (format) format.value = options.format;
   const duration = /** @type {HTMLInputElement|null} */ (field('video-duration'));
@@ -180,11 +225,35 @@ function refreshStatus() {
   // 校验读的是输入框里的值：用户刚敲进去的 61 不该等一次 change 才能挡住生成。
   const duration = parseDurationInput(durationInput ? durationInput.value : optionState().durationS);
   const options = optionState();
+  const image = options.reportType === 'image';
+  for (const el of document.querySelectorAll('[data-report-video]')) /** @type {HTMLElement} */ (el).hidden = image;
+  for (const el of document.querySelectorAll('[data-report-image]')) /** @type {HTMLElement} */ (el).hidden = !image;
+  const note = field('report-note');
+  if (note) note.textContent = t(image ? 'reportImageNote' : 'videoNote');
+  const markerHint = field('report-marker-hint');
+  const settledMarkers = markersOf(state.chartSeries).filter(
+    (marker) => marker.index < state.chartSeries.x.length,
+  ).length;
+  if (markerHint) {
+    markerHint.hidden =
+      !!activeJob() ||
+      busy ||
+      !(options.showMarkers || options.showMarkerDetails) ||
+      settledMarkers <= 8 ||
+      (image && options.imageLayout === 'long');
+    markerHint.textContent = t('reportMarkerLimit', { count: settledMarkers });
+  }
   const active = activeJob();
   for (const id of [
+    'report-type',
+    'report-image-layout',
+    'report-markers',
+    'report-marker-details',
     'video-resolution',
     'video-fps',
     'video-codec',
+    'video-acceleration',
+    'video-quality',
     'video-format',
     'video-duration',
     'video-theme',
@@ -200,11 +269,14 @@ function refreshStatus() {
   const cancel = /** @type {HTMLButtonElement|null} */ (document.getElementById('video-cancel'));
   const combination = combinationFor(options);
   const unavailable = combination && !combination.available ? combination : null;
-  if (generate) generate.disabled = active || busy || !!unavailable || !duration.valid;
-  if (durationInput) durationInput.setAttribute('aria-invalid', String(!duration.valid));
+  if (generate) {
+    generate.disabled = active || busy || adopting || !combination || !!unavailable || (!image && !duration.valid);
+    generate.textContent = t(image ? 'reportStartImage' : 'videoStart');
+  }
+  if (durationInput) durationInput.setAttribute('aria-invalid', String(!image && !duration.valid));
   if (durationError) {
-    durationError.hidden = duration.valid;
-    durationError.textContent = duration.valid ? '' : t('videoDurationInvalid');
+    durationError.hidden = image || duration.valid;
+    durationError.textContent = image || duration.valid ? '' : t('videoDurationInvalid');
   }
   if (cancel) cancel.hidden = !active;
   if (progress) {
@@ -222,7 +294,7 @@ function refreshStatus() {
             ? t('videoGenerationFailed')
             : t('videoGenerating', { percent: Math.round((job.progress || 0) * 100) });
     // 编码中与完成态都要说清楚用的是什么：完成后不写就只剩"已生成"，看起来像回退了软件编码。
-    if (job && (active || job.state === 'completed')) {
+    if (job && job.options?.reportType !== 'image' && (active || job.state === 'completed')) {
       statusEl.textContent += ` · ${t('videoAcceleration', { encoder: encoderLabel(job.encoder) })}`;
     }
   }
@@ -231,18 +303,25 @@ function refreshStatus() {
     fallbackEl.textContent = job?.fallback ? t('videoHardwareFallback', { detail: job.fallback }) : '';
   }
   if (errorEl) {
-    errorEl.hidden = !job?.error;
-    errorEl.textContent = job?.error ? errorText({ code: job.error.code, detail: job.error.detail }) : '';
+    const error = submissionError ?? pollError ?? job?.error;
+    errorEl.hidden = !error;
+    errorEl.textContent = error ? videoErrorText(error) : '';
   }
   if (hintEl) {
     // 只探测当前组合：还没轮到它时就显示"检测中"，而不是拿别的组合的结论凑数。
-    if (!combination) hintEl.textContent = t('videoCheckingCapabilities');
-    else if (unavailable) {
+    if (image) hintEl.textContent = t('reportPngHint');
+    else if (active) hintEl.textContent = encoderLabel(job?.encoder);
+    else if (!combination) {
+      const failure = capabilityErrors.get(capabilityKey(options));
+      hintEl.textContent = failure ? videoErrorText(failure) : t('videoCheckingCapabilities');
+    } else if (unavailable) {
       hintEl.textContent = t('videoCombinationUnavailable', {
         reason: unavailable.reason || t('videoGenerationFailed'),
       });
     } else {
-      hintEl.textContent = encoderLabel(combination?.encoder);
+      hintEl.textContent = `${encoderLabel(combination?.encoder)} · ${t('videoTargetBitrate', {
+        mbps: Number((combination.bitrate / 1_000_000).toFixed(1)),
+      })}`;
     }
   }
 }
@@ -260,34 +339,47 @@ function schedulePoll() {
   pollTimer = setTimeout(() => void pollOnce(), POLL_INTERVAL_MS);
 }
 
-async function pollOnce() {
-  if (!job) return;
-  try {
-    const status = /** @type {VideoStatus} */ (await videoExportStatus(job.id));
-    const previous = job.state;
-    job = status;
-    refreshStatus();
-    if (status.state === 'completed' && previous !== 'completed') {
-      toast.success(() => t('videoExported', { name: status.name ?? '' }));
-    } else if (status.state === 'failed' && previous !== 'failed') {
+/** Commit one host status and announce each terminal job once. @param {VideoStatus|null} status */
+function acceptJob(status) {
+  jobRevision++;
+  job = status;
+  pollError = null;
+  if (activeJob()) {
+    refreshForm();
+    if (dialog?.open) void loadCapability();
+  }
+  refreshStatus();
+  if (status && !activeJob() && !notifiedJobs.has(status.id)) {
+    notifiedJobs.add(status.id);
+    if (status.state === 'completed') toast.success(() => t('videoExported', { name: status.name ?? '' }));
+    else if (status.state === 'failed') {
       toast.error(() =>
         t('videoExportFailed', {
-          detail: status.error
-            ? errorText({ code: status.error.code, detail: status.error.detail })
-            : t('videoGenerationFailed'),
+          detail: status.error ? videoErrorText(status.error) : t('videoGenerationFailed'),
         }),
       );
-    } else if (status.state === 'cancelled' && previous !== 'cancelled') {
-      toast.info(() => t('videoCancelled'));
-    }
-    if (status.state === 'queued' || status.state === 'encoding') schedulePoll();
-    else stopPolling();
+    } else if (status.state === 'cancelled') toast.info(() => t('videoCancelled'));
+  }
+  schedulePoll();
+}
+
+async function pollOnce() {
+  if (!activeJob() || !job) return;
+  const id = job.id;
+  const revision = jobRevision;
+  try {
+    const status = /** @type {VideoStatus} */ (await videoExportStatus(id));
+    if (revision !== jobRevision) return;
+    acceptJob(status);
   } catch (error) {
-    // 任务被后来的导出替换：停止轮询，不把旧 id 当成故障。
-    stopPolling();
-    job = null;
-    refreshStatus();
-    void error;
+    if (revision !== jobRevision) return;
+    if (/** @type {{code?:string}|null} */ (error)?.code === 'videoJobUnknown') {
+      await adoptCurrent();
+    } else {
+      pollError = error;
+      refreshStatus();
+      schedulePoll();
+    }
   }
 }
 
@@ -299,23 +391,29 @@ async function pollOnce() {
  */
 async function loadCapability() {
   const options = optionState();
+  if (options.reportType === 'image') {
+    refreshStatus();
+    return;
+  }
   const key = capabilityKey(options);
   if (capabilities.has(key)) {
     refreshStatus();
     return;
   }
+  capabilityErrors.delete(key);
   let probe = capabilityProbes.get(key);
   if (!probe) {
     probe = videoExportCapability(options).then(
       (capability) => {
         capabilities.set(key, capability);
         capabilityProbes.delete(key);
-        refreshStatus();
+        if (capabilityKey(optionState()) === key) refreshStatus();
         return capability;
       },
       (error) => {
-        // 探测失败下次重试；表单在这期间照常可用。
+        // Retry on reopening or changing options; never accept an unprobed combination.
         capabilityProbes.delete(key);
+        capabilityErrors.set(key, error);
         throw error;
       },
     );
@@ -323,19 +421,31 @@ async function loadCapability() {
   }
   try {
     await probe;
-  } catch (error) {
-    toast.error(() => errorText(error));
+  } catch {
+    if (capabilityKey(optionState()) === key) refreshStatus();
   }
 }
 
 async function generate() {
-  if (busy || activeJob()) return;
+  if (busy || adopting || activeJob()) return;
   // readForm() 只在时长合法时写设置，所以越界输入不能从设置里读回来。
-  if (!parseDurationInput(/** @type {HTMLInputElement|null} */ (field('video-duration'))?.value).valid) {
+  if (
+    optionState().reportType === 'video' &&
+    !parseDurationInput(/** @type {HTMLInputElement|null} */ (field('video-duration'))?.value).valid
+  ) {
     refreshStatus();
     return;
   }
   const options = readForm();
+  if (!combinationFor(options)?.available) {
+    refreshStatus();
+    return;
+  }
+  jobRevision++;
+  currentQuery++;
+  stopPolling();
+  job = null;
+  submissionError = pollError = null;
   busy = true;
   refreshStatus();
   try {
@@ -343,21 +453,16 @@ async function generate() {
       toast.info(() => t('videoProcessing'));
       const payload = captureReport(options);
       const picked = await pickVideoExportFile(
-        `lapower_video_${new Date().toISOString().replace(/[:.]/g, '-')}.${options.format}`,
+        `lapower_report_${new Date().toISOString().replace(/[:.]/g, '-')}.${options.reportType === 'image' ? 'png' : options.format}`,
       );
       if (!picked) return null;
       return startVideoExport({ ticket: picked.ticket, payload });
     });
     if (!report) return;
-    job = /** @type {VideoStatus} */ (report);
-    refreshStatus();
-    schedulePoll();
+    acceptJob(/** @type {VideoStatus} */ (report));
   } catch (error) {
-    toast.error(() =>
-      t('videoExportFailed', {
-        detail: errorText(error),
-      }),
-    );
+    submissionError = error;
+    toast.error(() => t('videoExportFailed', { detail: videoErrorText(error) }));
   } finally {
     busy = false;
     refreshStatus();
@@ -365,22 +470,25 @@ async function generate() {
 }
 
 async function cancel() {
-  if (!job) return;
+  if (!activeJob() || !job) return;
+  const id = job.id;
+  const revision = ++jobRevision;
+  stopPolling();
   try {
-    const previous = job.state;
-    job = /** @type {VideoStatus} */ (await cancelVideoExport(job.id));
-    refreshStatus();
-    // 取消是用户主动点的，不是轮询发现的转移；不给提示就只剩一句静态文字。
-    if (previous !== 'cancelled' && job.state === 'cancelled') toast.info(() => t('videoCancelled'));
+    const status = /** @type {VideoStatus} */ (await cancelVideoExport(id));
+    if (revision === jobRevision) acceptJob(status);
   } catch (error) {
-    toast.error(() => errorText(error));
+    if (revision !== jobRevision) return;
+    pollError = error;
+    refreshStatus();
+    toast.error(() => videoErrorText(error));
+    schedulePoll();
   }
 }
 
 function openDialog() {
   if (!dialog) return;
-  // 设置里保存的时长一定是合法的；界面上越界的手输值由 refreshStatus() 提示并挡住生成，
-  // 不在打开对话框时悄悄改回默认值。
+  // Restore the active job options, or the last valid saved form when idle.
   refreshForm();
   refreshStatus();
   if (!dialog.open) dialog.showModal();
@@ -389,14 +497,24 @@ function openDialog() {
 }
 
 async function adoptCurrent() {
+  if (busy) return;
+  const query = ++currentQuery;
+  const revision = jobRevision;
+  adopting = true;
+  refreshStatus();
   try {
     const current = /** @type {VideoStatus|null} */ (await currentVideoExport());
-    if (!current) return;
-    job = current;
-    refreshStatus();
-    if (activeJob()) schedulePoll();
-  } catch {
-    /* 接回失败不影响新导出 */
+    if (query !== currentQuery || revision !== jobRevision) return;
+    acceptJob(current);
+  } catch (error) {
+    if (query !== currentQuery || revision !== jobRevision) return;
+    pollError = error;
+    schedulePoll();
+  } finally {
+    if (query === currentQuery) {
+      adopting = false;
+      refreshStatus();
+    }
   }
 }
 
@@ -414,10 +532,16 @@ function readForm() {
   const duration = parseDurationInput(/** @type {HTMLInputElement|null} */ (field('video-duration'))?.value);
   const options = normalizeVideoExportOptions({
     ...optionState(),
+    reportType: selectField('report-type')?.value,
+    imageLayout: selectField('report-image-layout')?.value,
+    showMarkers: !!field('report-markers')?.checked,
+    showMarkerDetails: !!field('report-marker-details')?.checked,
     width,
     height,
     fps: Number(selectField('video-fps')?.value),
     codec: selectField('video-codec')?.value,
+    acceleration: selectField('video-acceleration')?.value,
+    quality: selectField('video-quality')?.value,
     format: selectField('video-format')?.value,
     durationS: duration.valid ? duration.value : optionState().durationS,
     theme: selectField('video-theme')?.value,
@@ -479,8 +603,19 @@ export function initVideoExportUI() {
   document.getElementById('video-generate')?.addEventListener('click', () => void generate());
   document.getElementById('video-cancel')?.addEventListener('click', () => void cancel());
   document.getElementById('video-close')?.addEventListener('click', () => dialog?.close());
-  dialog.addEventListener('close', () => stopPolling());
-  for (const id of ['video-resolution', 'video-fps', 'video-codec', 'video-format', 'video-theme']) {
+  for (const id of [
+    'report-type',
+    'report-image-layout',
+    'report-markers',
+    'report-marker-details',
+    'video-resolution',
+    'video-fps',
+    'video-codec',
+    'video-format',
+    'video-theme',
+    'video-acceleration',
+    'video-quality',
+  ]) {
     field(id)?.addEventListener('change', () => {
       readForm();
       refreshStatus();
@@ -488,7 +623,7 @@ export function initVideoExportUI() {
       if (dialog?.open) void loadCapability();
     });
   }
-  field('video-duration')?.addEventListener('change', () => {
+  field('video-duration')?.addEventListener('input', () => {
     readForm();
     refreshStatus();
   });

@@ -354,7 +354,7 @@ export function addDataPoint(data, segment) {
     state.hasTempData = true;
     updateStats('temp', tempValue);
   }
-  if (cols.x.length === 1 || firstTemp) document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
+  if (cols.x.length <= 2 || firstTemp) document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
 
   // 能量累计用相对秒（与范围统计同口径）；暂停空档不在 x 里。
   // 与 integrateEnergy 一致：跳过非有限值，避免单个缺失样本把整条累计污染成 NaN。
@@ -1371,6 +1371,7 @@ export function clearChart() {
   const el = document.getElementById('data-count');
   if (el) el.textContent = '0';
   updateRemainingDisplay();
+  document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
 }
 
 // ─── Recording control ───────────────────────────────────────────────────────

@@ -37,14 +37,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+#[cfg(not(windows))]
+use portable::Encoder as _;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::app_error::AppError;
 use crate::AppState;
 use model::{
-    VideoCapability, VideoError, VideoOptions, VideoPayload, VideoStartRequest, VideoState,
-    VideoStatus,
+    Acceleration, Quality, VideoCapability, VideoError, VideoOptions, VideoPayload,
+    VideoStartRequest, VideoState, VideoStatus,
 };
 
 /// Diagnostics carry the raw reason; the frontend translates the code and appends it.
@@ -323,10 +325,9 @@ fn commit(staged: &Path, target: &Path) -> Result<(), String> {
 
 fn ensure_space(target: &Path, options: &VideoOptions) -> Result<(), AppError> {
     let estimate = u64::from(options.duration_s)
-        .saturating_mul(u64::from(options.width))
-        .saturating_mul(u64::from(options.height))
-        .saturating_mul(u64::from(options.fps))
-        / 8;
+        .saturating_mul(u64::from(options.bitrate()))
+        .saturating_mul(5)
+        / 32;
     let directory = target
         .parent()
         .ok_or_else(|| error(TARGET_INVALID, "the chosen path has no directory"))?;
@@ -345,6 +346,24 @@ fn ensure_space(target: &Path, options: &VideoOptions) -> Result<(), AppError> {
     Ok(())
 }
 
+fn ensure_image_space(target: &Path, payload: &VideoPayload) -> Result<(), AppError> {
+    let (width, height) = payload.output_size();
+    let estimate = u64::from(width) * u64::from(height) * 5;
+    let available = fs2::available_space(
+        target
+            .parent()
+            .ok_or_else(|| error(TARGET_INVALID, "missing directory"))?,
+    )
+    .map_err(|failure| error(SPACE_INSUFFICIENT, failure.to_string()))?;
+    if available < estimate + SPACE_HEADROOM {
+        return Err(error(
+            SPACE_INSUFFICIENT,
+            format!("the destination needs {estimate} bytes of headroom"),
+        ));
+    }
+    Ok(())
+}
+
 /// Whether one combination can be encoded on this host.
 ///
 /// Probed on demand and cached per combination for the rest of the process: a probe is a real
@@ -355,17 +374,36 @@ pub(crate) fn video_export_capability(options: VideoOptions) -> Result<VideoCapa
     options
         .validate()
         .map_err(|detail| error(PAYLOAD_INVALID, detail))?;
+    if options.report_type == model::ReportType::Image {
+        return Ok(VideoCapability {
+            width: options.width,
+            height: options.height,
+            fps: options.fps,
+            codec: options.codec,
+            available: true,
+            bitrate: 0,
+            reason: None,
+            encoder: None,
+        });
+    }
     Ok(capability_cached(options))
 }
 
-/// Resolution, frame rate and codec identify one probed combination.
-type CapabilityKey = (u32, u32, u32, model::Codec);
+/// Pixel rate, codec, requested mode and quality identify one probed combination.
+type CapabilityKey = (u32, u32, u32, model::Codec, Acceleration, Quality);
 type CapabilityCache = std::sync::Mutex<std::collections::HashMap<CapabilityKey, VideoCapability>>;
 
 fn capability_cached(options: VideoOptions) -> VideoCapability {
     static CACHE: std::sync::OnceLock<CapabilityCache> = std::sync::OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    let key = (options.width, options.height, options.fps, options.codec);
+    let key = (
+        options.width,
+        options.height,
+        options.fps,
+        options.codec,
+        options.acceleration,
+        options.quality,
+    );
     if let Ok(guard) = cache.lock() {
         if let Some(hit) = guard.get(&key) {
             return hit.clone();
@@ -397,16 +435,19 @@ fn probe(options: VideoOptions) -> VideoCapability {
 ///
 /// OpenH264 has no HEVC, so those combinations are reported unavailable instead of failing later;
 /// the frontend disables them and explains why.
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn software_capability(options: &VideoOptions) -> VideoCapability {
-    let available = options.codec == model::Codec::H264;
+    let available =
+        options.codec == model::Codec::H264 && options.acceleration != Acceleration::Hardware;
     VideoCapability {
         width: options.width,
         height: options.height,
         fps: options.fps,
         codec: options.codec,
         available,
-        reason: (!available).then(|| "the built-in encoder only provides H.264".to_owned()),
+        bitrate: options.bitrate(),
+        reason: (!available)
+            .then(|| "the built-in encoder only provides software H.264".to_owned()),
         encoder: available.then(|| "software".to_owned()),
     }
 }
@@ -445,7 +486,7 @@ pub(crate) async fn video_export_pick(
     let extension = Path::new(&default_name)
         .extension()
         .map(|value| value.to_string_lossy().into_owned())
-        .filter(|value| value == "mp4" || value == "mov")
+        .filter(|value| value == "mp4" || value == "mov" || value == "png")
         .unwrap_or_else(|| "mp4".into());
     let filter = extension.clone();
     let picked = crate::file_io::dialog_path(app, move |builder| {
@@ -480,12 +521,18 @@ pub(crate) async fn video_export_start(
     let options = request.payload.options;
     // Capability is cached per combination, so an unsupported one fails here instead of
     // stalling the single encoder slot inside Media Foundation.
-    if let Some(reason) = unavailable_reason(&options) {
-        return Err(error(ENCODER_UNAVAILABLE, reason));
+    if options.report_type == model::ReportType::Video {
+        if let Some(reason) = unavailable_reason(&options) {
+            return Err(error(ENCODER_UNAVAILABLE, reason));
+        }
     }
     // Both checks run before the staging file exists: a rejected request must not leave a
     // hidden file next to the user's chosen directory.
-    ensure_space(&target, &options)?;
+    if options.report_type == model::ReportType::Image {
+        ensure_image_space(&target, &request.payload)?;
+    } else {
+        ensure_space(&target, &options)?;
+    }
     let staged = stage_path(&target)?;
     let (status, cancel) = state.video_exports.reserve(options)?;
     state.video_exports.update(&status.id, |job| {
@@ -507,6 +554,10 @@ pub(crate) async fn video_export_start(
             .unwrap_or_else(|_| Err(("encoder thread panicked".to_string(), None)));
             let cancelled = encode_cancel.load(Ordering::Acquire);
             match outcome {
+                Ok(_) if cancelled => {
+                    let _ = std::fs::remove_file(&staged_for_job);
+                    owner.finish(&id, VideoState::Cancelled, None, None);
+                }
                 Ok(encoded) => match commit(&staged_for_job, &target_for_job) {
                     Ok(()) => {
                         owner.update(&id, |job| {
@@ -571,7 +622,7 @@ pub(crate) async fn video_export_start(
 }
 
 /// The encoder a finished (or running) export is using, plus the reason the zero-copy path was
-/// abandoned when a lesser path still produced the file.
+/// abandoned when software still produced the file in automatic mode.
 struct Encoded {
     encoder: &'static str,
     fallback: Option<String>,
@@ -587,6 +638,33 @@ fn encode_report(
     exports: &VideoExports,
     id: &str,
 ) -> std::result::Result<Encoded, (String, Option<String>)> {
+    if payload.options.report_type == model::ReportType::Image {
+        #[cfg(windows)]
+        let result = windows::image_report(payload, staged, cancel);
+        #[cfg(not(windows))]
+        let result = (|| {
+            if cancel.load(Ordering::Acquire) {
+                return Err("report export was cancelled".into());
+            }
+            let mut options = payload.options;
+            options.height = payload.output_size().1;
+            let canvas = skia::Canvas::new(&options, &payload.palette)?;
+            canvas.draw_frame(payload, 0);
+            if cancel.load(Ordering::Acquire) {
+                return Err("report export was cancelled".into());
+            }
+            canvas.save_png(staged)
+        })();
+        return result
+            .map(|()| {
+                exports.update(id, |job| job.status.progress = 1.0);
+                Encoded {
+                    encoder: "png",
+                    fallback: None,
+                }
+            })
+            .map_err(|detail| (detail, None));
+    }
     // Only the portable path needs them by &mut; Windows takes them by value.
     #[cfg_attr(windows, allow(unused_mut))]
     let mut on_encoder = |name: &'static str| {
@@ -616,7 +694,23 @@ fn encode_report(
     }
 }
 
-/// macOS: VideoToolbox on the GPU first, the bundled encoder if the session cannot start.
+/// Software H.264 is bundled; VideoToolbox also exposes host-dependent software HEVC.
+#[cfg(target_os = "macos")]
+fn mac_encoder(options: &VideoOptions) -> Result<Box<dyn portable::Encoder>, String> {
+    match apple::Vt::new(options) {
+        Ok(encoder) => Ok(Box::new(encoder)),
+        Err(error)
+            if options.acceleration == Acceleration::Software
+                && options.codec == model::Codec::H264 =>
+        {
+            software::H264::new(options)
+                .map(|encoder| Box::new(encoder) as Box<dyn portable::Encoder>)
+                .map_err(|software| format!("{error}; then {software}"))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn portable_encode(
     payload: &VideoPayload,
@@ -624,52 +718,42 @@ fn portable_encode(
     cancel: &AtomicBool,
     on_encoder: &mut dyn FnMut(&'static str),
     progress: &mut dyn FnMut(f64),
-) -> std::result::Result<Encoded, String> {
-    let mut hardware_encoder = match apple::Vt::new(&payload.options) {
-        Ok(encoder) => encoder,
-        Err(detail) => return software_only(payload, staged, cancel, on_encoder, progress, detail),
+) -> Result<Encoded, String> {
+    let modes: &[Acceleration] = match payload.options.acceleration {
+        Acceleration::Auto => &[Acceleration::Hardware, Acceleration::Software],
+        Acceleration::Hardware => &[Acceleration::Hardware],
+        Acceleration::Software => &[Acceleration::Software],
     };
-    on_encoder(hardware_encoder.name());
-    match portable::encode(payload, staged, cancel, progress, &mut hardware_encoder) {
-        Ok(encoder) => Ok(Encoded {
-            encoder: encoder_name(&encoder),
-            fallback: None,
-        }),
-        Err(hardware_error) => {
-            if cancel.load(Ordering::Acquire) {
-                return Err(hardware_error);
+    let mut errors = Vec::new();
+    for &mode in modes {
+        if cancel.load(Ordering::Acquire) {
+            return Err("video encoding was cancelled".into());
+        }
+        let mut selected = payload.options;
+        selected.acceleration = mode;
+        if !errors.is_empty() {
+            std::fs::File::create(staged).map_err(|error| error.to_string())?;
+            progress(0.0);
+        }
+        let mut attempt = || -> Result<Encoded, String> {
+            let mut encoder = mac_encoder(&selected)?;
+            on_encoder(encoder.name());
+            portable::encode(payload, staged, cancel, &mut *progress, &mut *encoder)?;
+            Ok(Encoded {
+                encoder: encoder.name(),
+                fallback: None,
+            })
+        };
+        match attempt() {
+            Ok(mut used) => {
+                used.fallback = (mode == Acceleration::Software && !errors.is_empty())
+                    .then(|| errors.join("; "));
+                return Ok(used);
             }
-            software_only(
-                payload,
-                staged,
-                cancel,
-                on_encoder,
-                progress,
-                hardware_error,
-            )
+            Err(error) => errors.push(error),
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-fn software_only(
-    payload: &VideoPayload,
-    staged: &Path,
-    cancel: &AtomicBool,
-    on_encoder: &mut dyn FnMut(&'static str),
-    progress: &mut dyn FnMut(f64),
-    hardware_error: String,
-) -> std::result::Result<Encoded, String> {
-    // The software attempt always starts from an empty container.
-    let _ = std::fs::File::create(staged);
-    let mut encoder = software::H264::new(&payload.options)?;
-    on_encoder(encoder.name());
-    portable::encode(payload, staged, cancel, progress, &mut encoder)
-        .map(|_| Encoded {
-            encoder: "software",
-            fallback: Some(hardware_error.clone()),
-        })
-        .map_err(|software| format!("{hardware_error}; then {software}"))
+    Err(errors.join("; "))
 }
 
 /// Every other non-Windows host renders with the portable rasteriser and encodes with OpenH264.
@@ -687,15 +771,6 @@ fn portable_encode(
         encoder: "software",
         fallback: None,
     })
-}
-
-#[cfg(target_os = "macos")]
-fn encoder_name(name: &str) -> &'static str {
-    if name == "hardware" {
-        "hardware"
-    } else {
-        "software"
-    }
 }
 
 #[tauri::command]
@@ -728,10 +803,16 @@ mod tests {
 
     fn options(duration_s: u32) -> VideoOptions {
         VideoOptions {
+            report_type: crate::video_export::model::ReportType::Video,
+            image_layout: crate::video_export::model::ImageLayout::Widescreen,
+            show_markers: true,
+            show_marker_details: true,
             width: 1280,
             height: 720,
             fps: 24,
             codec: Codec::H264,
+            acceleration: crate::video_export::model::Acceleration::Auto,
+            quality: crate::video_export::model::Quality::High,
             format: Format::Mp4,
             duration_s,
             theme: Theme::Light,

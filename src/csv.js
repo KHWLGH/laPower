@@ -298,6 +298,7 @@ async function importOpenedFile(
       cc2: cols.cc2.valueAt(last),
     });
     refreshRecordButton();
+    document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
     toast.success(() => t('csvImported', { count: n }));
     return true;
   } catch (e) {

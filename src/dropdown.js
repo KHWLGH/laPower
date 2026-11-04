@@ -71,11 +71,22 @@ class Dropdown {
     arrow.setAttribute('aria-hidden', 'true');
     this.button.append(this.label, arrow);
 
-    // 菜单挂到 body 并用 position:fixed，避开 ribbon 的 overflow 裁剪和层叠上下文。
+    // A modal makes body siblings inert; its menus must belong to the same dialog.
     this.menu = document.createElement('div');
     this.menu.className = 'cs-menu';
     this.menu.id = `${this.id}-menu`;
     this.menu.setAttribute('role', 'listbox');
+    this.ownerDialog = select.closest('dialog');
+    this.ownerDialog?.addEventListener('close', () => this.close());
+    this.ownerDialog?.addEventListener('cancel', (event) => {
+      if (!this.isOpen) return;
+      event.preventDefault();
+      this.close();
+      this.button.focus();
+    });
+    this.ownerDialog?.addEventListener('animationend', () => {
+      if (this.isOpen) this.position();
+    });
 
     select.parentNode?.insertBefore(this.wrapper, select);
     this.wrapper.append(select, this.button);
@@ -85,6 +96,9 @@ class Dropdown {
 
     this.button.addEventListener('click', () => this.toggle());
     this.button.addEventListener('keydown', (e) => this.onKeydown(e));
+    this.menu.addEventListener('pointerdown', (event) => {
+      if (event.target instanceof Element && event.target.closest('.cs-option')) event.preventDefault();
+    });
     this.menu.addEventListener('click', (e) => this.onMenuClick(e));
     this.menu.addEventListener('pointermove', (e) => this.onMenuHover(e));
 
@@ -174,7 +188,7 @@ class Dropdown {
     this.isOpen = true;
     this.activeIndex = readIndex(this.select);
     this.renderMenu();
-    document.body.appendChild(this.menu);
+    (this.ownerDialog ?? document.body).appendChild(this.menu);
     this.position();
     this.button.setAttribute('aria-expanded', 'true');
     this.button.setAttribute('aria-controls', this.menu.id);
@@ -186,6 +200,8 @@ class Dropdown {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.menu.remove();
+    clearTimeout(this.typeTimer);
+    this.typeBuffer = '';
     this.button.setAttribute('aria-expanded', 'false');
     this.button.removeAttribute('aria-controls');
     this.button.removeAttribute('aria-activedescendant');
@@ -196,23 +212,27 @@ class Dropdown {
   position() {
     const r = this.button.getBoundingClientRect();
     const gap = 8;
-    this.menu.style.minWidth = `${r.width}px`;
+    this.menu.style.left = '0px';
+    this.menu.style.top = '0px';
+    this.menu.style.minWidth = '';
     this.menu.style.maxHeight = '';
-
-    const below = window.innerHeight - r.bottom - gap;
-    const above = r.top - gap;
-    const needed = this.menu.offsetHeight;
-    if (needed > below && above > below) {
-      this.menu.style.maxHeight = `${above}px`;
-      this.menu.style.top = `${Math.max(gap, r.top - Math.min(needed, above))}px`;
-    } else {
-      this.menu.style.maxHeight = `${below}px`;
-      this.menu.style.top = `${r.bottom}px`;
-    }
-
-    const width = this.menu.offsetWidth;
-    const left = Math.min(r.left, window.innerWidth - width - gap);
-    this.menu.style.left = `${Math.max(gap, left)}px`;
+    // Convert viewport pixels to the menu's coordinate system, including CSS zoom
+    // and the dialog's opening transform (fixed children then use that ancestor).
+    const origin = this.menu.getBoundingClientRect();
+    const scaleX = origin.width / this.menu.offsetWidth || 1;
+    const scaleY = origin.height / this.menu.offsetHeight || 1;
+    this.menu.style.minWidth = `${r.width / scaleX}px`;
+    const below = Math.max(0, window.innerHeight - r.bottom - gap);
+    const above = Math.max(0, r.top - gap);
+    const needed = this.menu.getBoundingClientRect().height;
+    const upwards = needed > below && above > below;
+    const available = upwards ? above : below;
+    this.menu.style.maxHeight = `${available / scaleY}px`;
+    const bounds = this.menu.getBoundingClientRect();
+    const top = upwards ? Math.max(gap, r.top - bounds.height) : r.bottom;
+    const left = Math.max(gap, Math.min(r.left, window.innerWidth - bounds.width - gap));
+    this.menu.style.top = `${(top - origin.top) / scaleY}px`;
+    this.menu.style.left = `${(left - origin.left) / scaleX}px`;
   }
 
   /** @param {number} i */
@@ -222,9 +242,11 @@ class Dropdown {
     for (const el of Array.from(this.menu.children)) {
       el.classList.toggle('is-active', Number(/** @type {HTMLElement} */ (el).dataset.index) === i);
     }
-    const item = /** @type {HTMLElement|undefined} */ (this.menu.children[i]);
+    const item = /** @type {HTMLElement|null} */ (this.menu.querySelector(`[data-index="${i}"]`));
     if (item) {
-      item.scrollIntoView({ block: 'nearest' });
+      if (item.offsetTop < this.menu.scrollTop) this.menu.scrollTop = item.offsetTop;
+      else if (item.offsetTop + item.offsetHeight > this.menu.scrollTop + this.menu.clientHeight)
+        this.menu.scrollTop = item.offsetTop + item.offsetHeight - this.menu.clientHeight;
       this.button.setAttribute('aria-activedescendant', item.id);
     }
   }
@@ -296,6 +318,7 @@ class Dropdown {
     switch (k) {
       case 'Escape':
         e.preventDefault();
+        e.stopPropagation();
         this.close();
         this.button.focus();
         break;
@@ -367,7 +390,15 @@ function installGlobalListeners() {
   );
   // 尺寸或滚动一变，fixed 定位就会漂移，直接关掉最省事。
   window.addEventListener('resize', () => openDropdown?.close());
-  window.addEventListener('scroll', () => openDropdown?.close(), true);
+  window.addEventListener(
+    'scroll',
+    (event) => {
+      const target = event.target;
+      if (target instanceof Node && openDropdown?.menu.contains(target)) return;
+      openDropdown?.close();
+    },
+    true,
+  );
 }
 
 /**
