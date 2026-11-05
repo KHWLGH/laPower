@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub mod detection;
 pub mod meter;
 pub mod protocol;
 pub mod text;
@@ -25,7 +26,9 @@ pub mod transport;
 pub mod trigger;
 pub mod types;
 
-pub use types::{DetectedProtocol, PdmConfig, TriggerCommand, TriggerOutcome, TriggerPdo};
+pub use types::{
+    DetectedProtocol, DetectionReport, PdmConfig, TriggerCommand, TriggerOutcome, TriggerPdo,
+};
 
 /// Granularity of every interruptible wait: a stop request is noticed within one slice.
 const STOP_SLICE: Duration = Duration::from_millis(40);

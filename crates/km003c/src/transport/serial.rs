@@ -15,7 +15,7 @@ const IDLE_DEFAULT: Duration = Duration::from_millis(1200);
 const IDLE_ENTRY: Duration = Duration::from_secs(3);
 const IDLE_PD: Duration = Duration::from_secs(3);
 const IDLE_LIST: Duration = Duration::from_secs(25);
-const IDLE_LIST_PLUS: Duration = Duration::from_secs(30);
+const IDLE_LIST_PLUS: Duration = Duration::from_secs(90);
 const MAX_REPLY_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,12 +386,43 @@ pub fn entry_ready(text: &str) -> bool {
     t.contains("ready") || t.contains("就绪")
 }
 
+pub fn reply_confirmed(text: &str) -> bool {
+    !command_failed(text) && (entry_ready(text) || control_reply_confirmed(text))
+}
+
 fn entry_terminal(text: &str) -> bool {
     entry_ready(text) || command_failed(text)
 }
 
 fn response_complete(cmd: &str, text: &str) -> bool {
-    matches!(classify_command(cmd), CmdClass::Entry) && entry_terminal(text)
+    if is_scan_command(cmd) {
+        // A protocol's ready/FAIL belongs to one entry; only `done` ends a scan.
+        // A firmware-level rejection of list+ is terminal too, so old firmware can
+        // fall back immediately instead of waiting through the long list idle gap.
+        text.lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("done"))
+            || (cmd.trim().eq_ignore_ascii_case("entry list+") && list_command_rejected(text))
+    } else {
+        matches!(classify_command(cmd), CmdClass::Entry) && entry_terminal(text)
+    }
+}
+
+fn list_command_rejected(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim().to_ascii_lowercase();
+        [
+            "invalid command",
+            "unknown command",
+            "unsupported command",
+            "command not supported",
+            "command is not supported",
+            "命令无效",
+            "未知命令",
+            "不支持的命令",
+        ]
+        .iter()
+        .any(|phrase| line.contains(phrase))
+    })
 }
 
 fn replacement_count(s: &str) -> usize {
@@ -499,7 +530,7 @@ mod tests {
     #[test]
     fn suggested_idle_spans_protocol_scan_gaps() {
         assert_eq!(suggested_idle("entry list"), Duration::from_secs(25));
-        assert_eq!(suggested_idle("entry list+"), Duration::from_secs(30));
+        assert_eq!(suggested_idle("entry list+"), Duration::from_secs(90));
         assert_eq!(suggested_idle("entry pd"), Duration::from_secs(3));
         assert_eq!(suggested_idle("pd pdo"), Duration::from_secs(3));
         assert_eq!(suggested_idle("qc 9V"), Duration::from_millis(1200));
@@ -508,6 +539,11 @@ mod tests {
     #[test]
     fn list_does_not_complete_on_first_ready() {
         assert!(!response_complete("entry list", "PD ready"));
+        assert!(!response_complete("entry list+", "PD ready\nQC: FAIL"));
+        assert!(!response_complete("entry list", "invalid command"));
+        assert!(response_complete("entry list+", "invalid command"));
+        assert!(response_complete("entry list+", "unknown command: list+"));
+        assert!(response_complete("entry list+", "PD ready\nQC: FAIL\ndone"));
         assert!(response_complete("entry pd", "PD\nready"));
         assert!(response_complete("entry qc", "fail: not support"));
     }

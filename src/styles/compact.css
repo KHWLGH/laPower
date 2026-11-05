@@ -181,6 +181,14 @@
 
 /* 协议控制：窄窗时日志移到控件下方，控件区独占宽度。 */
 @media (max-width: 979.98px) {
+  #view-trigger .commandbar {
+    flex-wrap: wrap;
+  }
+
+  #view-trigger .commandbar > .trigger-live {
+    flex-shrink: 0;
+  }
+
   .trigger-body {
     flex-direction: column;
   }

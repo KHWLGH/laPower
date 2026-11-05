@@ -154,6 +154,7 @@ See the [User guide](docs/en/USAGE.md) for the complete interface, settings and 
 - Thanks to WITRN and POWER-Z for USB-PD capture hardware support.
 - Thanks to [JohnScotttt](https://github.com/JohnScotttt) for the WITRN HID implementation.
 - Thanks to [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) for public research on POWER-Z Bulk, authentication and AdcQueue.
+- Thanks to [c-power](https://github.com/bruno-ntmr/c-power), which inspired the organization and interaction of the protocol detection UI.
 - Thanks to all open-source contributors.
 
 ### Protocol libraries

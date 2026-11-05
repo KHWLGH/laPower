@@ -428,6 +428,36 @@ fn kind_for(chunk_kind: &str, vmin: u32, vmax: u32) -> String {
     }
 }
 
+/// Voltage-only scan fields, including `5V,9V`, `3.6-12V` and `5.00V-12.00V`.
+/// Kept separate from PDO/current parsing: scan values are not PD capabilities.
+pub(crate) fn scan_voltage_ranges(raw: &str) -> Vec<(u32, u32)> {
+    let lower: String = raw
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| match c {
+            '–' | '—' | '~' | '～' => '-',
+            c => c.to_ascii_lowercase(),
+        })
+        .collect();
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while let Some((mut min, mut max, _, mut end)) = next_voltage(&lower, pos) {
+        // A unit on both ends produces two tokens; join only an explicit range.
+        if let Some((next_min, next_max, start, next_end)) = next_voltage(&lower, end) {
+            if &lower[end..start] == "-" {
+                min = min.min(next_min);
+                max = max.max(next_max);
+                end = next_end;
+            }
+        }
+        if min > 0 && max <= 60_000 && !out.contains(&(min, max)) {
+            out.push((min, max));
+        }
+        pos = end;
+    }
+    out
+}
+
 fn extract_pairs(raw: &str) -> Vec<(u32, u32, Option<u32>)> {
     let lower = raw.to_ascii_lowercase();
     let mut pos = 0;
@@ -858,7 +888,7 @@ fn block_key(lines: &[String]) -> String {
 }
 
 /// Deduplicate detailed `entry list` blocks (e.g. repeated PD3.0 + Fixed/PPS tables).
-fn dedupe_detail_blocks(text: &str) -> String {
+pub(crate) fn dedupe_detail_blocks(text: &str) -> String {
     let cleaned = sanitize_trigger_text(text);
     let mut blocks: Vec<Vec<String>> = Vec::new();
     for line in cleaned.lines() {

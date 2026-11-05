@@ -8,6 +8,10 @@ import {
   commandNeedsPdm,
   DEFAULT_PDM,
   describePdo,
+  detectionCanSelect,
+  detectionStateLabel,
+  detectionSummary,
+  detectionVoltages,
   deviceSupportsControl,
   LOG_LIMIT,
   outcomeHead,
@@ -82,8 +86,8 @@ test('pd data keeps hex digits only and needs whole bytes', () => {
 });
 
 test('scans get the long waits, and PDM-free commands are exactly open/close/raw', () => {
-  assert.equal(triggerTimeoutMs({ type: 'list', plus: false }), 120_000);
-  assert.equal(triggerTimeoutMs({ type: 'list', plus: true }), 210_000);
+  assert.equal(triggerTimeoutMs({ type: 'list', plus: false }), 270_000);
+  assert.equal(triggerTimeoutMs({ type: 'list', plus: true }), 450_000);
   assert.equal(triggerTimeoutMs({ type: 'pd_req' }), 45_000);
   assert.deepEqual(
     ['pdm_open', 'pdm_close', 'raw', 'pdm_set', 'pd_pdo', 'reset'].map((type) => commandNeedsPdm({ type })),
@@ -94,8 +98,63 @@ test('scans get the long waits, and PDM-free commands are exactly open/close/raw
 test('outcome heads distinguish scans, successes and failures', () => {
   assert.equal(outcomeHead(outcome()), 'OK');
   assert.equal(outcomeHead(outcome({ ok: false, message: 'fail' })), 'ERR');
-  assert.equal(outcomeHead(outcome({ protocols: [{ id: 'pd', label: 'PD' }] })), 'Detection complete');
-  assert.equal(outcomeHead(outcome({ message: 'QC2.0 : OK\nFCP : FAIL' })), 'Detection complete');
+  assert.equal(outcomeHead(outcome({ protocols: [{ id: 'pd', label: 'PD' }] })), 'OK');
+  assert.equal(outcomeHead(outcome({ message: 'pdm_open: OK' })), 'OK');
+  assert.equal(outcomeHead(outcome({ ok: false, protocols: [{ id: 'pd', label: 'PD' }] })), 'ERR');
+});
+
+test('partial scan results never become successful merely because one protocol was detected', () => {
+  const result = {
+    id: 'pd',
+    label: 'PD',
+    state: /** @type {const} */ ('supported'),
+    source: 'scan',
+    detail: 'PD: OK',
+    reason: '',
+  };
+  const detection = {
+    results: [result],
+    phase: 'finished',
+    active: null,
+    completion: 'partial',
+    pdm_version: null,
+    fallback_used: true,
+    elapsed_ms: 100,
+    diagnostics: [],
+  };
+  assert.equal(
+    outcomeHead(outcome({ ok: false, detection, protocols: [{ id: 'pd', label: 'PD' }] })),
+    'Detection incomplete',
+  );
+  assert.equal(detectionSummary({ ...detection, completion: 'cancelled' }), 'Command cancelled');
+  assert.equal(detectionStateLabel({ ...result, state: 'not_checked' }), 'Not checked');
+  assert.equal(detectionCanSelect(result), true);
+  assert.equal(detectionCanSelect({ ...result, state: 'failed' }), false);
+  assert.equal(detectionCanSelect({ ...result, id: 'svooc' }), false);
+});
+
+test('detection voltage display uses only scoped capabilities and preserves ranges', () => {
+  const result = {
+    id: 'pd',
+    label: 'PD',
+    state: /** @type {const} */ ('supported'),
+    source: 'probe',
+    reason: '',
+    detail: 'QC2.0:5V,9V,12V\nFixed:20V 5A',
+    voltages: [
+      { kind: 'fixed', volt_min_mv: 5000, volt_max_mv: 5000 },
+      { kind: 'pps', volt_min_mv: 3300, volt_max_mv: 21000 },
+      { kind: 'pps', volt_min_mv: 3300, volt_max_mv: 21000 },
+      { kind: 'spr_avs', volt_min_mv: 9000, volt_max_mv: 15000 },
+    ],
+  };
+  assert.deepEqual(detectionVoltages(result), ['5 V', 'PPS 3.3–21 V', 'SPR AVS 9–15 V']);
+  assert.deepEqual(detectionVoltages({ ...result, state: 'failed' }), []);
+  assert.deepEqual(detectionVoltages({ ...result, voltages: undefined }), [], 'do not mine a mixed raw log');
+  assert.deepEqual(
+    detectionVoltages({ ...result, id: 'qc', voltages: [{ kind: 'verified', volt_min_mv: 5000, volt_max_mv: 5000 }] }),
+    ['5 V verified'],
+  );
 });
 
 test('the log shows streamed progress when the final reply is empty, newest first, bounded', () => {

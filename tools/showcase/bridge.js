@@ -230,6 +230,66 @@ async function runTrigger(args) {
     else if (cmd.voltage) targetVoltage = Number.parseFloat(cmd.voltage);
     if (cmd.type === 'qc3_adjust') targetVoltage = (targetVoltage ?? 5) + cmd.steps * 0.2;
     const listed = cmd.type === 'list';
+    const detection = listed
+      ? {
+          results: [
+            ...PROTOCOLS.map((p) => ({
+              ...p,
+              state: 'supported',
+              source: p.id === 'pd' ? 'probe' : 'scan',
+              detail:
+                p.id === 'pd'
+                  ? PDOS.map((pdo) => pdo.label).join('\n')
+                  : p.id === 'qc3'
+                    ? `${p.label}: 3.6-12V`
+                    : p.id === 'apple'
+                      ? 'Apple 2.4A'
+                      : `${p.label}: 5V,9V,12V`,
+              voltages:
+                p.id === 'pd'
+                  ? PDOS.map(({ kind, volt_min_mv, volt_max_mv }) => ({ kind, volt_min_mv, volt_max_mv }))
+                  : p.id === 'qc3'
+                    ? [{ kind: 'range', volt_min_mv: 3600, volt_max_mv: 12000 }]
+                    : p.id === 'apple'
+                      ? []
+                      : [5000, 9000, 12000].map((mv) => ({ kind: 'fixed', volt_min_mv: mv, volt_max_mv: mv })),
+              reason: '',
+            })),
+            ...['BC 1.2', 'UFCS', 'VFCP', 'SCP', 'SFCP', 'TFCP'].map((label) => ({
+              id: label === 'BC 1.2' ? 'bc' : label.toLowerCase(),
+              label,
+              state: 'unsupported',
+              source: 'scan',
+              detail: `${label}: null`,
+              reason: '',
+            })),
+            ...[
+              ['vooc', 'VOOC'],
+              ['svooc', 'SVOOC'],
+              ['pe1', 'MTK PE 1.0'],
+              ['pe2', 'MTK PE 2.0'],
+            ].map(([id, label]) => ({
+              id,
+              label,
+              state: cmd.plus ? 'unsupported' : 'not_checked',
+              source: cmd.plus ? 'scan' : 'none',
+              detail: cmd.plus ? `${label}: null` : '',
+              reason: cmd.plus ? '' : 'not_requested',
+            })),
+          ],
+          phase: 'finished',
+          active: null,
+          completion: 'complete',
+          pdm_version: '1.1',
+          fallback_used: false,
+          elapsed_ms: 200,
+          diagnostics: [],
+        }
+      : undefined;
+    if (listed) {
+      targetVoltage = null;
+      emit('km003c-trigger-progress', { generation, req_id: reqId, text: '', detection });
+    }
     const message = listed
       ? PROTOCOLS.map((entry) => `${entry.label}: OK`).join('\n')
       : cmd.type === 'pd_pdo'
@@ -241,8 +301,9 @@ async function runTrigger(args) {
     return {
       ok: true,
       message,
-      pdos: cmd.type === 'pd_pdo' || cmd.type === 'pd_req' ? PDOS : [],
+      pdos: listed || cmd.type === 'pd_pdo' || cmd.type === 'pd_req' ? PDOS : [],
       protocols: listed ? PROTOCOLS : [],
+      detection,
       pdm_open: pdmOpen,
     };
   } finally {

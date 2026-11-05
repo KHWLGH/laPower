@@ -154,6 +154,7 @@ Linux パッケージはデバイス権限を自動設定しません。接続�
 - USB-PD キャプチャハードウェアを提供する WITRN、POWER-Z に感謝します。
 - WITRN HID 実装を提供した [JohnScotttt](https://github.com/JohnScotttt) に感謝します。
 - POWER-Z Bulk、認証、AdcQueue を公開研究した [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) に感謝します。
+- プロトコル検出 UI の情報構成と操作設計の参考にした [c-power](https://github.com/bruno-ntmr/c-power) に感謝します。
 - すべてのオープンソース貢献者に感謝します。
 
 ### プロトコルライブラリ

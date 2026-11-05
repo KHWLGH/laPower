@@ -154,6 +154,7 @@ Linux 安裝包不會自動修改裝置權限。連線儀表前必須設定 [ude
 - 感謝 WITRN、POWER-Z 提供的 USB-PD 擷取硬體支援。
 - 感謝[JohnScotttt](https://github.com/JohnScotttt)的WITRN HID實現。
 - 感謝 [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) 對 POWER-Z Bulk、認證與 AdcQueue 協定的公開研究。
+- 感謝 [c-power](https://github.com/bruno-ntmr/c-power) 專案，協定偵測介面的資訊組織與互動設計參考了該專案。
 - 感謝所有開源專案貢獻者。
 
 ### 協定庫

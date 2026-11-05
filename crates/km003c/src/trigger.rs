@@ -10,13 +10,17 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 
+use crate::detection::{self, DetectionIo};
 use crate::protocol::pd::Pdo as WirePdo;
 use crate::text::{
-    avs_current_ma, format_avs_label, make_pdo, normalize_scan_text, parse_detected_protocols,
-    parse_pdos, sanitize_trigger_text, spr_avs_pdos,
+    avs_current_ma, format_avs_label, make_pdo, parse_detected_protocols, parse_pdos,
+    sanitize_trigger_text, spr_avs_pdos,
 };
 use crate::transport::serial::{self, CdcPort};
-use crate::types::{DetectedProtocol, PdmConfig, TriggerCommand, TriggerOutcome, TriggerPdo};
+use crate::types::{
+    DetectedProtocol, DetectionReport, DetectionState, PdmConfig, TriggerCommand, TriggerOutcome,
+    TriggerPdo,
+};
 use crate::StopSignal;
 
 fn fixed_kind(pos: u8, voltage_mv: u32) -> &'static str {
@@ -281,6 +285,7 @@ fn decode_pd_pdo_reply(entry: &str, pdo: &str, raw: &[u8]) -> (Vec<TriggerPdo>, 
 #[derive(Default)]
 struct CdcState {
     port: Option<CdcPort>,
+    pdm_version: Option<String>,
     // Owned by one device session, not by the short-lived CDC transport.
     pdm: ConfirmedPdm,
     /// Session stop or command cancel; aborts replies and the waits between steps.
@@ -334,8 +339,13 @@ fn ensure_cdc<'a>(
         let mut port = serial::open_matching(None, serial)?;
         port.set_stop(cdc.stop.clone());
         if pdm_open {
-            cdc.pdm
-                .reopen(|command| port.send_command(command, serial::suggested_wait(command)))?;
+            cdc.pdm.reopen(|command| {
+                let reply = port.send_command(command, serial::suggested_wait(command))?;
+                if command == "pdm open" {
+                    cdc.pdm_version = detection::pdm_version(&reply);
+                }
+                Ok(reply)
+            })?;
         }
         cdc.port = Some(port);
     }
@@ -471,8 +481,8 @@ fn send_stream_raw(
     Ok((nonempty(text), raw))
 }
 
-/// Send `reset` and give the module time to settle. The reply itself is not checked,
-/// but a stop request still ends the wait with an error.
+/// Send `reset` and give the module time to settle. Some firmware resets silently;
+/// explicit rejection and transport errors must still stop the following command.
 fn reset_module(
     cdc: &mut CdcState,
     serial: Option<&str>,
@@ -480,8 +490,11 @@ fn reset_module(
     pdm_open: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<()> {
-    let _ = send_stream(cdc, serial, "reset", pdm_open, on_line);
     *mode = None;
+    let reply = send_stream(cdc, serial, "reset", pdm_open, on_line)?;
+    if serial::command_failed(&reply) {
+        ensure_trigger_reply(&reply)?;
+    }
     cdc.stop.sleep(Duration::from_millis(800))
 }
 
@@ -528,10 +541,12 @@ fn ensure_protocol(
             *mode = None;
             bail!("进入 {wanted} 失败:\n{retry}");
         }
+        ensure_action_reply(&retry)?;
         *mode = Some(wanted.to_string());
         cdc.stop.sleep(Duration::from_millis(300))?;
         return Ok(retry);
     }
+    ensure_action_reply(&resp)?;
     *mode = Some(wanted.to_string());
     cdc.stop.sleep(Duration::from_millis(300))?;
     Ok(resp)
@@ -567,6 +582,15 @@ fn then_follow(
 ) -> Result<String> {
     let entry = ensure_protocol(cdc, serial, mode, proto, pdm_open, on_line)?;
     let second = send_stream(cdc, serial, follow, pdm_open, on_line)?;
+    // Validate the actual action, not a preceding successful entry handshake.
+    ensure_trigger_reply(&second)?;
+    if !(follow.starts_with("pd cmd=")
+        || follow.starts_with("pd data=")
+        || follow == "ufcs pdo"
+        || follow.starts_with("ufcs cmd="))
+    {
+        ensure_action_reply(&second)?;
+    }
     Ok(join_text(&[entry, second]))
 }
 
@@ -733,6 +757,7 @@ fn run_trigger(
             *mode = None;
             let text = send_stream(cdc, serial, "pdm open", false, on_line)?;
             ensure_trigger_reply(&text)?;
+            cdc.pdm_version = detection::pdm_version(&text);
             *pdm_open = true;
             text
         }
@@ -741,15 +766,12 @@ fn run_trigger(
             // Reopen only the transport; never implicitly reopen PDM before closing it.
             let result = send_stream(cdc, serial, "pdm close", false, on_line);
             cdc.port = None;
+            cdc.pdm_version = None;
             *mode = None;
             *pdm_open = false;
             result?
         }
-        TriggerCommand::List { plus } => {
-            let proto = if *plus { "list+" } else { "list" };
-            let raw = ensure_protocol(cdc, serial, mode, proto, ready, on_line)?;
-            normalize_scan_text(&raw)
-        }
+        TriggerCommand::List { .. } => bail!("Detection must run through the session observer"),
         TriggerCommand::PdmSet { pd_type, em, sink } => {
             // The negotiated mode predates these settings, even if applying them fails.
             *mode = None;
@@ -760,6 +782,7 @@ fn run_trigger(
             if reopening && ready {
                 let reply = send_stream(cdc, serial, "pdm open", false, on_line)?;
                 ensure_trigger_reply(&reply)?;
+                cdc.pdm_version = detection::pdm_version(&reply);
             }
             let CdcState { port, pdm, .. } = cdc;
             pdm.apply(
@@ -801,7 +824,7 @@ fn run_trigger(
             let entry = ensure_protocol(cdc, serial, mode, "pd", ready, on_line)?;
             let response = send_stream(cdc, serial, &s, ready, on_line)?;
             // An earlier "PD ready" must not hide an empty/rejected PDO response.
-            ensure_trigger_reply(&response).with_context(|| format!("KM003 请求失败：{s}"))?;
+            ensure_action_reply(&response).with_context(|| format!("KM003 请求失败：{s}"))?;
             join_text(&[entry, response])
         }
         TriggerCommand::PdCmd { cmd } => then_follow(
@@ -936,7 +959,13 @@ fn run_trigger(
             }
             let text = send_stream(cdc, serial, command, ready, on_line)?;
             if let Some(open) = pdm_raw_kind(command) {
+                ensure_trigger_reply(&text)?;
                 *pdm_open = open;
+                cdc.pdm_version = if open {
+                    detection::pdm_version(&text)
+                } else {
+                    None
+                };
                 if !open {
                     cdc.port = None;
                     *mode = None;
@@ -995,6 +1024,47 @@ fn ensure_trigger_reply(message: &str) -> Result<()> {
         return Err(ProtocolReplyError::Rejected(format!("协议命令未确认成功：{message}")).into());
     }
     Ok(())
+}
+
+fn ensure_action_reply(message: &str) -> Result<()> {
+    ensure_trigger_reply(message)?;
+    if !serial::reply_confirmed(message) {
+        return Err(
+            ProtocolReplyError::Unconfirmed(format!("协议命令未收到确认：{message}")).into(),
+        );
+    }
+    Ok(())
+}
+
+struct DetectionCdc<'a>(&'a mut CdcState);
+
+impl DetectionIo for DetectionCdc<'_> {
+    fn send(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        line: &mut dyn FnMut(&str),
+    ) -> Result<detection::Reply> {
+        let (text, raw) = self
+            .0
+            .port
+            .as_mut()
+            .context("CDC 未打开")?
+            .send_command_stream_raw(command, timeout, line)?;
+        let pdos = if command == "pd pdo" {
+            pick_trigger_pdos(
+                parse_binary_pdos(&raw),
+                parse_pdos(&sanitize_trigger_text(&text)),
+            )
+        } else {
+            Vec::new()
+        };
+        Ok(detection::Reply { text, pdos })
+    }
+
+    fn settle(&mut self, duration: Duration) -> Result<()> {
+        self.0.stop.sleep(duration)
+    }
 }
 
 /// How often a PD-ish command re-checks the sniffer while waiting for capabilities.
@@ -1067,6 +1137,7 @@ impl TriggerSession {
             serial,
             cdc: CdcState {
                 port: None,
+                pdm_version: None,
                 pdm: ConfirmedPdm::default(),
                 stop,
             },
@@ -1086,6 +1157,7 @@ impl TriggerSession {
     pub fn drop_cdc(&mut self) -> bool {
         let was_open = self.pdm_open;
         self.cdc.port = None;
+        self.cdc.pdm_version = None;
         self.mode = None;
         self.pdm_open = false;
         was_open
@@ -1098,6 +1170,17 @@ impl TriggerSession {
         pdo_cache: &PdoCache,
         progress: &mut dyn FnMut(&str),
     ) -> TriggerOutcome {
+        self.run_with_detection(cmd, pdo_cache, progress, &mut |_| {})
+    }
+
+    /// Structured detection updates accompany the existing raw reply stream.
+    pub fn run_with_detection(
+        &mut self,
+        cmd: &TriggerCommand,
+        pdo_cache: &PdoCache,
+        progress: &mut dyn FnMut(&str),
+        detection_progress: &mut dyn FnMut(&DetectionReport),
+    ) -> TriggerOutcome {
         let started = Instant::now();
         let mut on_line = |line: &str| {
             let text = sanitize_trigger_text(line);
@@ -1105,7 +1188,12 @@ impl TriggerSession {
                 progress(&text);
             }
         };
-        if std::mem::take(&mut self.needs_reset) && self.pdm_open && cmd_requires_pdm(cmd) {
+        if self.needs_reset && self.pdm_open && cmd_requires_pdm(cmd) {
+            // Reopen only CDC before the recovery reset, not a second PDM session
+            // while the firmware may still be busy with the interrupted scan.
+            if let Err(error) = ensure_cdc(&mut self.cdc, self.serial.as_deref(), false) {
+                return self.failure(cmd, error);
+            }
             if let Err(error) = reset_module(
                 &mut self.cdc,
                 self.serial.as_deref(),
@@ -1114,6 +1202,12 @@ impl TriggerSession {
                 &mut on_line,
             ) {
                 return self.failure(cmd, error);
+            }
+            self.needs_reset = false;
+        }
+        if let TriggerCommand::List { plus } = cmd {
+            if self.pdm_open {
+                return self.scan(*plus, &mut on_line, detection_progress);
             }
         }
         match run_trigger(
@@ -1125,23 +1219,90 @@ impl TriggerSession {
             &mut on_line,
         ) {
             Ok(mut out) => {
-                if wants_pd_drain(cmd) && out.pdos.is_empty() {
+                if out.ok && wants_pd_drain(cmd) && out.pdos.is_empty() {
                     if let Some(pdos) =
                         pdo_cache.wait_since(started, PDO_CACHE_WAIT, &self.cdc.stop)
                     {
                         out.pdos = pdos;
                     }
                 }
+                if out.ok && matches!(cmd, TriggerCommand::PdPdo) && out.pdos.is_empty() {
+                    out.ok = false;
+                    out.code = Some("protocol_unconfirmed".into());
+                }
                 TriggerOutcome {
                     ok: out.ok,
                     message: out.message,
                     pdos: out.pdos,
                     protocols: out.protocols,
+                    detection: None,
                     code: out.code,
                     pdm_open: self.pdm_open,
                 }
             }
             Err(error) => self.failure(cmd, error),
+        }
+    }
+
+    fn scan(
+        &mut self,
+        plus: bool,
+        log: &mut dyn FnMut(&str),
+        progress: &mut dyn FnMut(&DetectionReport),
+    ) -> TriggerOutcome {
+        let cmd = TriggerCommand::List { plus };
+        if let Err(error) = ensure_cdc(&mut self.cdc, self.serial.as_deref(), true) {
+            return self.failure(&cmd, error);
+        }
+        self.mode = None;
+        let stop = self.cdc.stop.clone();
+        let version = self.cdc.pdm_version.clone();
+        let result = detection::run(
+            &mut DetectionCdc(&mut self.cdc),
+            plus,
+            version,
+            &stop,
+            progress,
+            log,
+        );
+        let completion = result.report.completion.as_deref().unwrap_or("failed");
+        // An interrupted scan may still be executing in firmware. The next command
+        // must reset it; do not auto-reopen PDM on top of a cancelled scan now.
+        self.needs_reset = matches!(completion, "cancelled" | "failed" | "timeout");
+        if completion == "failed" {
+            self.cdc.port = None;
+        }
+        let code = match completion {
+            "complete" => None,
+            "cancelled" => Some("cancelled".into()),
+            _ => Some("scan_incomplete".into()),
+        };
+        let message = result
+            .report
+            .results
+            .iter()
+            .filter(|r| !r.detail.is_empty())
+            .map(|r| format!("{}: {}", r.label, r.detail))
+            .chain(result.report.diagnostics.iter().cloned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        TriggerOutcome {
+            ok: completion == "complete",
+            message,
+            protocols: result
+                .report
+                .results
+                .iter()
+                .filter(|r| r.state == DetectionState::Supported)
+                .map(|r| DetectedProtocol {
+                    id: r.id.clone(),
+                    label: r.label.clone(),
+                })
+                .collect(),
+            pdos: result.pdos,
+            detection: Some(result.report),
+            code,
+            pdm_open: self.pdm_open,
         }
     }
 
@@ -1169,6 +1330,7 @@ impl TriggerSession {
             message: format!("{error:#}"),
             pdos: Vec::new(),
             protocols: Vec::new(),
+            detection: None,
             code: Some(code.into()),
             pdm_open: self.pdm_open,
         }
@@ -1379,6 +1541,22 @@ mod tests {
         }
         for reply in ["ok", "PD ready", "request accepted"] {
             assert!(ensure_trigger_reply(reply).is_ok(), "{reply}");
+        }
+    }
+
+    #[test]
+    fn trigger_ack_must_belong_to_the_action_not_just_entry() {
+        for reply in [
+            "",
+            "negotiating",
+            "request pending",
+            "ready\nrequest rejected",
+            "5V requested",
+        ] {
+            assert!(ensure_action_reply(reply).is_err(), "{reply}");
+        }
+        for reply in ["ok", "ready:5000mV,0mA", "request accepted"] {
+            assert!(ensure_action_reply(reply).is_ok(), "{reply}");
         }
     }
 

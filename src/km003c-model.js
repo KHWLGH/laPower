@@ -14,8 +14,13 @@ import { t } from './i18n.js';
  * @typedef {{ position: number, kind: string, volt_min_mv: number, volt_max_mv: number,
  *   cur_ma?: number, label: string, programmable: boolean }} TriggerPdo
  * @typedef {{ id: string, label: string }} DetectedProtocol
+ * @typedef {{ kind: string, volt_min_mv: number, volt_max_mv: number }} DetectionVoltage
+ * @typedef {DetectedProtocol & { state: 'supported'|'unsupported'|'not_checked'|'failed',
+ *   source: string, detail: string, reason: string, voltages?: DetectionVoltage[] }} ProtocolDetection
+ * @typedef {{ results: ProtocolDetection[], phase: string, active: string|null, completion: string|null,
+ *   pdm_version: string|null, fallback_used: boolean, elapsed_ms: number, diagnostics: string[] }} DetectionReport
  * @typedef {{ ok: boolean, message: string, pdos: TriggerPdo[], protocols: DetectedProtocol[],
- *   code?: string, pdm_open: boolean, description?: unknown }} TriggerOutcome
+ *   detection?: DetectionReport, code?: string, pdm_open: boolean, description?: unknown }} TriggerOutcome
  * @typedef {{ position: number, voltMv: number, curMa: number, volt: string }} TriggerForm
  */
 
@@ -157,12 +162,11 @@ export function cleanHex(text) {
 }
 
 /**
- * 前端等待一条命令的上限。后端串口超时是 list 90 s、list+ 180 s、其余 12 s 以内，
- * 这里多留余量，只作为界面兜底，不会先于后端放弃。
+ * 检测预算包括列表、回退和补探；额外留出串口打开/恢复与事件交付余量。
  * @param {TriggerCommand} cmd
  */
 export function triggerTimeoutMs(cmd) {
-  if (cmd.type === 'list') return cmd.plus ? 210_000 : 120_000;
+  if (cmd.type === 'list') return cmd.plus ? 450_000 : 270_000;
   return 45_000;
 }
 
@@ -177,14 +181,88 @@ export function commandNeedsPdm(cmd) {
 export const LOG_LIMIT = 64_000;
 
 /**
- * 一条结果的标题：列表检测显示「检测完成」，其余 OK / ERR。
+ * 只有结构化检测报告使用检测标题；普通命令的 : OK 不是列表扫描。
  * @param {TriggerOutcome} outcome
  */
 export function outcomeHead(outcome) {
-  const listed = outcome.protocols.length > 0;
-  const looksLikeList = /:\s*(OK|FAIL|n\/a)/i.test(outcome.message);
-  if (!(outcome.ok || listed)) return 'ERR';
-  return listed || looksLikeList ? t('scanComplete') : 'OK';
+  if (outcome.detection) return detectionSummary(outcome.detection);
+  return outcome.ok ? 'OK' : 'ERR';
+}
+
+/** @param {DetectionReport} report */
+export function detectionSummary(report) {
+  if (report.completion) {
+    const keys = {
+      complete: 'scanComplete',
+      partial: 'scanPartial',
+      cancelled: 'triggerCancelled',
+      timeout: 'triggerTimeout',
+      failed: 'scanFailed',
+    };
+    return t(keys[report.completion] ?? 'scanPartial');
+  }
+  const keys = {
+    scan: 'scanPhaseStandard',
+    extended_scan: 'scanPhaseExtended',
+    fallback: 'scanPhaseFallback',
+    probe: 'scanPhaseProbe',
+    pd_pdo: 'scanPhasePdo',
+    reset: 'scanPhaseReset',
+  };
+  const label = report.results.find((r) => r.id === report.active)?.label ?? '';
+  return `${t(keys[report.phase] ?? 'scanPhaseStandard')}${label ? ` · ${label}` : ''}`;
+}
+
+/** @param {ProtocolDetection} result */
+export function detectionStateLabel(result) {
+  const keys = {
+    supported: 'scanSupported',
+    unsupported: 'scanUnsupported',
+    not_checked: 'scanNotChecked',
+    failed: 'scanCheckFailed',
+  };
+  return t(keys[result.state] ?? 'scanCheckFailed');
+}
+
+/** @param {string} reason */
+export function detectionReason(reason) {
+  const keys = {
+    pending: 'scanPending',
+    not_requested: 'scanNotRequested',
+    legacy_pdm: 'scanLegacyPdm',
+    extended_incomplete: 'scanExtendedIncomplete',
+    unconfirmed: 'scanUnconfirmed',
+    cancelled: 'triggerCancelled',
+    timeout: 'triggerTimeout',
+    failed: 'scanFailed',
+  };
+  return reason ? t(keys[reason] ?? 'scanUnconfirmed') : '';
+}
+
+/** Selecting a detected protocol only fills the form; it never sends a command.
+ * @param {ProtocolDetection} result
+ */
+export function detectionCanSelect(result) {
+  return result.state === 'supported' && PROTOCOLS.some((p) => p.id === result.id);
+}
+
+/** Only display voltages supplied for this protocol; never infer from raw mixed logs.
+ * @param {ProtocolDetection} result
+ * @returns {string[]}
+ */
+export function detectionVoltages(result) {
+  if (result.state !== 'supported') return [];
+  const values = (result.voltages ?? [])
+    .filter((v) => v.volt_min_mv > 0 && v.volt_max_mv >= v.volt_min_mv && v.volt_max_mv <= 60_000)
+    .map((v) => {
+      const min = v.volt_min_mv / 1000;
+      const max = v.volt_max_mv / 1000;
+      const voltage = min === max ? `${min} V` : `${min}–${max} V`;
+      if (v.kind === 'verified') return t('scanVerifiedVoltage', { voltage });
+      const kind = PDO_KIND_LABELS[v.kind];
+      return kind && v.kind !== 'fixed' ? `${kind} ${voltage}` : voltage;
+    });
+  return [...new Set(values)];
 }
 
 /**

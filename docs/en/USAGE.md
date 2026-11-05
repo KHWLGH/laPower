@@ -218,7 +218,19 @@ This tab is always visible. Without a connection, or with WITRN, it displays gui
 3. Click a PDO row to fill the request. Check the position, voltage in mV and current in mA for the selected protocol, then click `Trigger`. Selecting a PDO row alone does not send the request.
 4. Inspect the response log. Click `Apply` after changing PDM parameters. `Reset` exits the current protocol and restores default 5 V; `Close` closes the PDM session.
 
-Other commands are disabled while a command runs; `Cancel` appears in the log area. Auto detection/full scanning can take about 90 seconds/3 minutes respectively. The advanced area has PD/UFCS and custom commands. Custom commands can run without PDM; other protocol operations require it. Reopen PDM after disconnection or rebuilding the meter acquisition connection. Live readings share the Monitor device connection.
+Other commands are disabled while a command runs; `Cancel` appears in the log area. Wait for the backend to finish cancellation before sending another command. The advanced area has PD/UFCS and custom commands. Custom commands can run without PDM; other protocol operations require it. Reopen PDM after disconnection or rebuilding the meter acquisition connection. Live readings share the Monitor device connection.
+
+### Protocol detection
+
+PD ignores status and embedded PDOs from `entry list` / `entry list+`. After all other scans and probes, detection resets, enters PD and runs `pd pdo`; support is determined by valid PDOs from that read, even if the list reported PD as unsupported. Cancellation stops this final check too.
+
+The result matrix shows each protocol's reported voltage steps or range. A separate PD row groups fixed voltages and PPS/AVS ranges. A successful individual 5 V check only marks 5 V as verified, without inferring higher voltages. Missing voltage data is labeled “Voltage not reported”. Evidence is scoped to each protocol; PD shows only its independent PDO read, never the entire scan log.
+
+`Auto detect` runs the standard list scan and individually probes standard protocols without conclusive results. `Full scan` always sends `entry list+` first, including on PDM 1.0, to check VOOC/SVOOC and MTK PE. Without a completion marker it falls back to the standard scan, then probes missing results. Explicit negative results are not retried. Older PDM firmware that provides no extended results leaves those checks marked “Not checked”. Budgets including fallback and probes are about 4 and 7 minutes, plus a small allowance for opening/recovering CDC.
+
+Results distinguish supported, not supported, not checked and unconfirmed, with expandable device replies and scan/probe provenance. VOOC/SVOOC and MTK PE 1.0/2.0 are separate; QC4/QC5 or brand certification is not inferred from PD/PPS wattage. A new scan clears the previous results and PDOs. Cancellation or interruption retains this run's observations with an incomplete status.
+
+Detection changes the negotiated protocol; QC/FCP/AFC/SFCP probes include 5 V verification. Disconnect the downstream load first. Normal completion sends reset; after cancellation the next protocol command first resets the module. Clicking a supported protocol with an implemented trigger only selects it in the form. Read/select PDOs and check the parameters before triggering. A rejected, empty or unconfirmed action reply does not count as success; entry acknowledgement alone cannot confirm a trigger, and acknowledgement is not a measurement of the requested voltage.
 
 ## Settings
 

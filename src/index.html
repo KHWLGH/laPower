@@ -437,16 +437,23 @@
             <div class="trigger-controls">
               <div class="trigger-banner" id="km-banner"><span data-i18n="powerControlHint">Connect a POWER-Z device; open PDM before sending protocol commands except custom commands.</span></div>
               <section class="trigger-section">
+                <h2 class="trigger-section-title"><span data-i18n="scanTitle">Protocol detection</span></h2>
+                <div class="trigger-actions">
+                  <button type="button" class="btn" id="btn-km-scan" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
+                  <button type="button" class="btn" id="btn-km-scan-full" data-i18n-title="fullScanHint"><span data-i18n="fullScan">Full scan</span></button>
+                </div>
+                <div class="trigger-hint" data-i18n="scanActiveHint">Detection changes the negotiated protocol. Missing standard results are checked individually, including 5 V verification. Disconnect the downstream load first.</div>
+                <div id="km-detection-summary" class="trigger-hint" role="status" aria-live="polite" data-i18n="scanEmpty">Run detection to view protocol support and evidence.</div>
+                <div id="km-detection-results" class="trigger-detection-results"></div>
+                <div id="km-detection-diagnostics" class="trigger-hint"></div>
+              </section>
+              <section class="trigger-section">
                 <h2 class="trigger-section-title"><span data-i18n="voltageTrigger">Voltage trigger</span></h2>
                 <div class="trigger-actions">
                   <button type="button" class="btn" id="btn-km-read-pdo"><span data-i18n="readPdo">Read PDOs</span></button>
-                  <button type="button" class="btn" id="btn-km-scan" title="Scan fast-charge protocols (up to about 90 seconds)" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
-                  <button type="button" class="btn" id="btn-km-scan-full" title="Full scan including private protocols (up to about 3 minutes)" data-i18n-title="fullScanHint">
-                    <span data-i18n="fullScan">Full scan</span>
-                  </button>
                   <button type="button" class="btn" id="btn-km-reset" title="Exit the current protocol and restore the default 5V" data-i18n-title="protocolResetHint"><span data-i18n="protocolReset">Reset</span></button>
                 </div>
-                <div class="trigger-form">
+                <div class="trigger-form" id="km-trigger-form">
                   <label class="trigger-field">
                     <span class="trigger-field-label"><span data-i18n="protocol">Protocol</span></span>
                     <select id="km-proto" class="ribbon-select">
@@ -502,7 +509,6 @@
                 <div class="trigger-pdo-list" id="km-pdo-list" role="list">
                   <div class="trigger-empty"><span data-i18n="pdoEmpty">Read PDOs or connect a charger</span></div>
                 </div>
-                <div class="trigger-protocols" id="km-protocols" hidden></div>
               </section>
               <details class="trigger-section trigger-advanced">
                 <summary><span data-i18n="advanced">Advanced protocol commands</span></summary>

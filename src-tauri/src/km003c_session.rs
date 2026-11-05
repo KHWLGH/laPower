@@ -62,6 +62,8 @@ struct TriggerProgress<'a> {
     generation: u64,
     req_id: &'a str,
     text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detection: Option<&'a km003c::DetectionReport>,
 }
 
 #[derive(Clone, Serialize)]
@@ -212,16 +214,32 @@ fn trigger_loop(
     while running.load(Ordering::Acquire) {
         match rx.recv_timeout(TRIGGER_IDLE) {
             Ok(TriggerMsg::Run { cmd, req_id, reply }) => {
-                let outcome = session.run(&cmd, &pdo_cache, &mut |text| {
-                    let _ = app.emit(
-                        "km003c-trigger-progress",
-                        TriggerProgress {
-                            generation,
-                            req_id: &req_id,
-                            text,
-                        },
-                    );
-                });
+                let outcome = session.run_with_detection(
+                    &cmd,
+                    &pdo_cache,
+                    &mut |text| {
+                        let _ = app.emit(
+                            "km003c-trigger-progress",
+                            TriggerProgress {
+                                generation,
+                                req_id: &req_id,
+                                text,
+                                detection: None,
+                            },
+                        );
+                    },
+                    &mut |detection| {
+                        let _ = app.emit(
+                            "km003c-trigger-progress",
+                            TriggerProgress {
+                                generation,
+                                req_id: &req_id,
+                                text: "",
+                                detection: Some(detection),
+                            },
+                        );
+                    },
+                );
                 let _ = reply.send(outcome);
             }
             Ok(TriggerMsg::DropCdc) => {
@@ -301,6 +319,7 @@ pub(crate) async fn km003c_trigger(
                 let code = match outcome.code.as_deref() {
                     Some("pdm_required") => "triggerNeedPdm",
                     Some("cancelled") => "triggerCancelled",
+                    Some("scan_incomplete") => "scanPartial",
                     _ => "operationFailed",
                 };
                 value["description"] =

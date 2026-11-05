@@ -95,6 +95,52 @@ pub struct DetectedProtocol {
     pub label: String,
 }
 
+/// A missing/failed check must never be presented as charger non-support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetectionState {
+    Supported,
+    Unsupported,
+    NotChecked,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetectionVoltage {
+    /// PDO kind, `fixed` / `range` from a scan, or `verified` for a successful 5 V probe.
+    pub kind: String,
+    pub volt_min_mv: u32,
+    pub volt_max_mv: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProtocolDetection {
+    pub id: String,
+    pub label: String,
+    pub state: DetectionState,
+    /// `scan`, `probe`, or `none`; independent of the support state.
+    pub source: String,
+    pub detail: String,
+    /// Only this protocol's reported capabilities or explicitly verified voltage.
+    #[serde(default)]
+    pub voltages: Vec<DetectionVoltage>,
+    /// Stable reason key for localization; detail retains the device's reply.
+    pub reason: String,
+}
+
+/// Also emitted during detection; every snapshot belongs to one command/generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DetectionReport {
+    pub results: Vec<ProtocolDetection>,
+    pub phase: String,
+    pub active: Option<String>,
+    pub completion: Option<String>,
+    pub pdm_version: Option<String>,
+    pub fallback_used: bool,
+    pub elapsed_ms: u64,
+    pub diagnostics: Vec<String>,
+}
+
 /// Sink-emulation settings applied with `pdm set type=..,em=..,sink=..`.
 ///
 /// `pd_type`: 0 auto, 1 PD 3.0, 2 PD 3.1, 3 private PPS. `em` (E-Marker): 0 off,
@@ -123,6 +169,8 @@ pub struct TriggerOutcome {
     pub message: String,
     pub pdos: Vec<TriggerPdo>,
     pub protocols: Vec<DetectedProtocol>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detection: Option<DetectionReport>,
     /// `pdm_required`, `protocol_rejected`, `transport_error` or `cancelled`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
@@ -179,6 +227,7 @@ mod tests {
                 programmable: false,
             }],
             protocols: Vec::new(),
+            detection: None,
             code: None,
             pdm_open: true,
         };

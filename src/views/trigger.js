@@ -16,6 +16,11 @@ import {
   cleanHex,
   commandNeedsPdm,
   describePdo,
+  detectionCanSelect,
+  detectionReason,
+  detectionStateLabel,
+  detectionSummary,
+  detectionVoltages,
   deviceSupportsControl,
   LOG_LIMIT,
   pdoToRequestFields,
@@ -49,6 +54,9 @@ function addLog(entry) {
 let requestCounter = 0;
 /** @type {TriggerPdo[]} */
 let pdos = [];
+/** @type {import('../km003c-model.js').DetectionReport|null} */
+let detection = null;
+let scanning = false;
 /** @type {ReturnType<typeof setTimeout>|null} */
 let watchdog = null;
 /** @type {ReturnType<typeof setInterval>|null} */
@@ -114,7 +122,15 @@ function renderEnabled() {
     const node = /** @type {HTMLButtonElement|HTMLInputElement|HTMLSelectElement|null} */ (el(id));
     if (node) {
       node.disabled = !enabled;
-      node.title = enabled ? '' : !available ? t('triggerUnsupported') : busy ? t('triggerBusy') : t('triggerNeedPdm');
+      node.title = enabled
+        ? node.dataset.i18nTitle
+          ? t(node.dataset.i18nTitle)
+          : ''
+        : !available
+          ? t('triggerUnsupported')
+          : busy
+            ? t('triggerBusy')
+            : t('triggerNeedPdm');
     }
   };
   for (const id of ['btn-km-pdm-open', 'btn-km-pdm-close', 'btn-km-raw']) enable(id, ready);
@@ -147,6 +163,7 @@ function renderEnabled() {
   }
   const list = el('km-pdo-list');
   list?.classList.toggle('is-disabled', !withPdm);
+  for (const row of list?.querySelectorAll('button') ?? []) row.disabled = !withPdm;
 }
 
 function renderFields() {
@@ -218,19 +235,99 @@ function renderPdos() {
   );
 }
 
-/** @param {import('../km003c-model.js').DetectedProtocol[]} protocols */
-function renderProtocols(protocols) {
-  const box = el('km-protocols');
-  if (!box) return;
-  box.hidden = protocols.length === 0;
-  box.replaceChildren(
-    ...protocols.map((p) => {
-      const chip = document.createElement('span');
-      chip.className = 'trigger-chip';
-      chip.textContent = p.label;
-      return chip;
-    }),
+function renderDetection() {
+  const summary = el('km-detection-summary');
+  const box = el('km-detection-results');
+  if (!summary || !box) return;
+  const diagnostics = el('km-detection-diagnostics');
+  if (diagnostics) diagnostics.textContent = '';
+  summary.textContent = detection ? detectionSummary(detection) : scanning ? t('scanPhaseStandard') : t('scanEmpty');
+  const expanded = new Set(
+    [...box.querySelectorAll('details[open]')].map((node) => /** @type {HTMLElement} */ (node).dataset.protocol),
   );
+  box.replaceChildren();
+  if (!detection) return;
+  const report = detection;
+  // Keep PD's independently read voltage table together at the end of the matrix.
+  const results = [...report.results.filter((r) => r.id !== 'pd'), ...report.results.filter((r) => r.id === 'pd')];
+  for (const result of results) {
+    const row = document.createElement('div');
+    row.className = `trigger-detection-result is-${result.state}${result.id === 'pd' ? ' is-pd' : ''}`;
+    row.dataset.protocol = result.id;
+    row.classList.toggle('is-checking', !report.completion && report.active === result.id);
+    const heading = document.createElement('div');
+    heading.className = 'trigger-detection-heading';
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'trigger-protocol-select';
+    name.textContent = result.label;
+    name.disabled = busy || !controllable() || !pdmOpen || !detectionCanSelect(result);
+    name.title = t(detectionCanSelect(result) ? 'scanSelectProtocol' : 'scanDetectionOnly');
+    name.addEventListener('click', () => {
+      if (busy || !controllable() || !pdmOpen) return;
+      const proto = select('km-proto');
+      if (proto) proto.value = result.id;
+      // Never carry a prior high-voltage request into a newly selected protocol.
+      const volt = input('km-req-volt');
+      if (volt) volt.value = '5000';
+      const position = input('km-req-pos');
+      if (position) position.value = '1';
+      const current = input('km-req-cur');
+      if (current) current.value = '3000';
+      const fixed = select('km-qc-volt');
+      if (fixed) fixed.value = '5V';
+      renderFields();
+      el('km-trigger-form')?.scrollIntoView({ block: 'nearest' });
+    });
+    const status = document.createElement('span');
+    status.className = 'trigger-detection-state';
+    status.textContent =
+      !report.completion && report.active === result.id ? t('scanChecking') : detectionStateLabel(result);
+    heading.append(name, status);
+    const voltage = document.createElement('div');
+    voltage.className = 'trigger-detection-voltages';
+    voltage.setAttribute('aria-label', t('scanVoltages'));
+    const values = detectionVoltages(result);
+    if (values.length) {
+      for (const value of values) {
+        const chip = document.createElement('span');
+        chip.className = 'trigger-voltage-chip';
+        chip.textContent = value;
+        voltage.append(chip);
+      }
+    } else {
+      voltage.classList.add('is-empty');
+      voltage.textContent = t(result.state === 'supported' ? 'scanVoltageUnknown' : 'scanVoltageUnavailable');
+    }
+    row.append(heading, voltage);
+    const evidenceText = [detectionReason(result.reason), result.detail].filter(Boolean).join('\n');
+    if (evidenceText) {
+      const detail = document.createElement('details');
+      detail.className = 'trigger-detection-detail';
+      detail.dataset.protocol = result.id;
+      detail.open = expanded.has(result.id);
+      const source = document.createElement('summary');
+      source.textContent = t(
+        result.source === 'probe'
+          ? result.id === 'pd'
+            ? 'scanSourcePdo'
+            : 'scanSourceProbe'
+          : result.source === 'scan'
+            ? 'scanSourceDevice'
+            : 'scanSourceNone',
+      );
+      const evidence = document.createElement('div');
+      evidence.textContent = evidenceText;
+      detail.append(source, evidence);
+      row.append(detail);
+    }
+    box.append(row);
+  }
+  if (diagnostics) {
+    diagnostics.textContent = [report.pdm_version ? `PDM ${report.pdm_version}` : '', ...report.diagnostics]
+      .filter(Boolean)
+      .join('\n');
+  }
 }
 
 function renderLive() {
@@ -250,13 +347,14 @@ function renderAll() {
   renderPdmStatus();
   renderEnabled();
   renderLog();
+  renderDetection();
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 /** @param {TriggerPdo} pdo */
 function fillFromPdo(pdo) {
-  if (!controllable() || busy) return;
+  if (!controllable() || busy || !pdmOpen) return;
   const fields = pdoToRequestFields(pdo, currentForm());
   const proto = select('km-proto');
   if (proto) proto.value = fields.proto;
@@ -288,6 +386,7 @@ function currentPdm() {
 
 function finish() {
   busy = false;
+  scanning = false;
   pendingReqId = null;
   progress = '';
   if (watchdog !== null) {
@@ -310,11 +409,11 @@ function applyOutcome(outcome) {
     ),
   );
   pdmOpen = outcome.pdm_open;
+  if (outcome.detection) detection = outcome.detection;
   if (outcome.pdos.length) {
     pdos = outcome.pdos;
     renderPdos();
   }
-  if (outcome.protocols.length) renderProtocols(outcome.protocols);
 }
 
 /**
@@ -330,6 +429,17 @@ async function run(cmd) {
   const reqId = `km-${Date.now()}-${++requestCounter}`;
   const generation = deviceStream.generation;
   busy = true;
+  scanning = cmd.type === 'list';
+  if (scanning) {
+    detection = null;
+    pdos = [];
+    renderPdos();
+  }
+  if (['pd_pdo', 'pdm_set', 'pdm_close', 'pdm_open', 'raw'].includes(cmd.type)) {
+    pdos = [];
+    renderPdos();
+    if (cmd.type !== 'pd_pdo') detection = null;
+  }
   pendingReqId = reqId;
   progress = '';
   renderAll();
@@ -338,7 +448,10 @@ async function run(cmd) {
     if (pendingReqId !== reqId) return;
     const time = stamp();
     addLog(() => `[${time}] ERR\n${t('triggerTimeout')}`);
-    finish();
+    // Request cancellation but keep the command slot occupied until the backend returns.
+    // Late progress must not unlock another hardware command or overwrite a newer scan.
+    void cancel();
+    renderLog();
   }, triggerTimeoutMs(cmd));
   try {
     const outcome = /** @type {TriggerOutcome} */ (
@@ -346,10 +459,12 @@ async function run(cmd) {
     );
     if (pendingReqId !== reqId) return;
     applyOutcome(outcome);
+    if (scanning && !outcome.detection && detection) detection.completion = outcome.ok ? 'partial' : 'failed';
   } catch (error) {
     if (pendingReqId !== reqId) return;
     const time = stamp();
     addLog(() => `[${time}] ERR\n${errorText(error)}`);
+    if (scanning && detection) detection.completion = 'failed';
   }
   finish();
 }
@@ -397,9 +512,14 @@ async function copyLog() {
  * @param {unknown} payload
  */
 export function handleTriggerProgress(payload) {
-  const p = /** @type {{ generation?: number, req_id?: string, text?: string }} */ (payload ?? {});
-  if (p.generation !== deviceStream.generation || p.req_id !== pendingReqId || !p.text) return;
-  progress = `${progress}\n${p.text}`.trim().slice(-16_000);
+  const p = /** @type {{ generation?: number, req_id?: string, text?: string,
+   * detection?: import('../km003c-model.js').DetectionReport }} */ (payload ?? {});
+  if (p.generation !== deviceStream.generation || p.req_id !== pendingReqId) return;
+  if (scanning && p.detection) {
+    detection = p.detection;
+    if (initialized) renderDetection();
+  }
+  if (p.text) progress = `${progress}\n${p.text}`.trim().slice(-16_000);
   if (initialized) renderLog();
 }
 
@@ -413,6 +533,11 @@ export function handlePdmState(payload) {
   );
   if (p.generation !== deviceStream.generation) return;
   pdmOpen = p.open === true;
+  if (!pdmOpen) {
+    detection = null;
+    pdos = [];
+    if (initialized) renderPdos();
+  }
   if (p.description || p.message) {
     const time = stamp();
     addLog(() => `[${time}] ${errorText(p.description ?? p.message)}`);
@@ -426,9 +551,9 @@ export function syncTriggerConnection() {
     pdmOpen = false;
     if (busy) finish();
     pdos = [];
+    detection = null;
     if (initialized) {
       renderPdos();
-      renderProtocols([]);
     }
   }
   if (initialized) renderAll();

@@ -615,18 +615,111 @@
   color: var(--text-tertiary);
 }
 
-.trigger-protocols {
-  display: flex;
-  flex-wrap: wrap;
+.trigger-detection-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: var(--space-2);
+  align-items: start;
 }
 
-.trigger-chip {
-  padding: 2px 10px;
-  border-radius: var(--radius-full);
-  background: var(--accent-fill-faint);
+.trigger-detection-result {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--stroke-divider);
+  border-radius: var(--radius-control);
+  background: var(--surface-content);
   font: var(--type-caption);
+  min-width: 0;
+}
+
+.trigger-detection-result.is-pd {
+  grid-column: 1 / -1;
+}
+
+.trigger-detection-result.is-checking {
+  border-color: var(--accent-text);
+}
+
+.trigger-detection-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px var(--space-2);
+}
+
+.trigger-protocol-select {
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text-primary);
+  text-align: left;
+  font: var(--type-body-strong);
+}
+
+.trigger-protocol-select:not(:disabled) {
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.trigger-protocol-select:not(:disabled):hover {
+  text-decoration: underline;
+}
+
+.trigger-detection-state {
+  color: var(--text-secondary);
+}
+
+.trigger-detection-result.is-supported .trigger-detection-state {
+  color: var(--status-success);
+}
+
+.trigger-detection-result.is-failed .trigger-detection-state {
+  color: var(--status-caution);
+}
+
+.trigger-detection-voltages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 24px;
+  align-items: center;
+}
+
+.trigger-voltage-chip {
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  background: var(--accent-fill-faint);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.trigger-detection-voltages.is-empty {
+  color: var(--text-tertiary);
+}
+
+.trigger-detection-detail {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.trigger-detection-detail summary {
+  cursor: pointer;
+}
+
+.trigger-detection-detail > div,
+#km-detection-diagnostics {
+  white-space: pre-wrap;
+}
+
+.trigger-detection-detail > div {
+  margin-top: var(--space-2);
+  max-height: 180px;
+  overflow: auto;
+  font-family: var(--font-mono);
 }
 
 .trigger-advanced > summary {
