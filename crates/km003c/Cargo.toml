@@ -21,6 +21,7 @@ nusb = "0.2"
 serialport = "4.9"
 encoding_rs = "0.8"
 aes = "0.8"
+usbpd-parser.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

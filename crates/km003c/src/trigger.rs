@@ -5,13 +5,14 @@
 //! `pd pdo`; replies are validated strictly so that an empty, partial or failed answer
 //! never reads as success.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 
 use crate::detection::{self, DetectionIo};
-use crate::protocol::pd::Pdo as WirePdo;
+use crate::protocol::pd::{PdMessage, Pdo as WirePdo};
 use crate::text::{
     avs_current_ma, format_avs_label, make_pdo, parse_detected_protocols, parse_pdos,
     sanitize_trigger_text, spr_avs_pdos,
@@ -1036,7 +1037,10 @@ fn ensure_action_reply(message: &str) -> Result<()> {
     Ok(())
 }
 
-struct DetectionCdc<'a>(&'a mut CdcState);
+struct DetectionCdc<'a> {
+    cdc: &'a mut CdcState,
+    pdo_cache: &'a PdoCache,
+}
 
 impl DetectionIo for DetectionCdc<'_> {
     fn send(
@@ -1046,7 +1050,7 @@ impl DetectionIo for DetectionCdc<'_> {
         line: &mut dyn FnMut(&str),
     ) -> Result<detection::Reply> {
         let (text, raw) = self
-            .0
+            .cdc
             .port
             .as_mut()
             .context("CDC 未打开")?
@@ -1059,11 +1063,23 @@ impl DetectionIo for DetectionCdc<'_> {
         } else {
             Vec::new()
         };
-        Ok(detection::Reply { text, pdos })
+        let pd_revision = (command == "pd cmd=24")
+            .then(|| detection::parse_pd_revision_reply(&text, &raw))
+            .flatten();
+        Ok(detection::Reply {
+            text,
+            pdos,
+            pd_revision,
+            raw_response_received: !raw.is_empty(),
+        })
     }
 
     fn settle(&mut self, duration: Duration) -> Result<()> {
-        self.0.stop.sleep(duration)
+        self.cdc.stop.sleep(duration)
+    }
+
+    fn pd_messages_since(&mut self, since: Instant) -> Vec<PdMessage> {
+        self.pdo_cache.pd_messages_since(since)
     }
 }
 
@@ -1077,10 +1093,24 @@ const PDO_CACHE_WAIT: Duration = Duration::from_millis(700);
 /// Commands such as `pd req` often answer with no PDO table; the source's capabilities
 /// then arrive on the sniffer a moment later, so the trigger waits for them briefly.
 #[derive(Clone, Default)]
-pub struct PdoCache(Arc<Mutex<Option<CachedPdos>>>);
+pub struct PdoCache(Arc<Mutex<PdoCacheState>>);
 
 /// When the list was recorded, and the list.
 type CachedPdos = (Instant, Vec<TriggerPdo>);
+
+#[derive(Default)]
+struct PdoCacheState {
+    pdos: Option<CachedPdos>,
+    revision_messages: VecDeque<CapturedPdMessage>,
+}
+
+struct CapturedPdMessage {
+    at: Instant,
+    message: PdMessage,
+}
+
+const MAX_CAPTURED_REVISION_MESSAGES: usize = 64;
+const CAPTURED_REVISION_MESSAGE_TTL: Duration = Duration::from_secs(10);
 
 impl PdoCache {
     /// Record a capability list. Empty lists are ignored.
@@ -1088,9 +1118,50 @@ impl PdoCache {
         if pdos.is_empty() {
             return;
         }
-        if let Ok(mut slot) = self.0.lock() {
-            *slot = Some((Instant::now(), pdos));
+        if let Ok(mut state) = self.0.lock() {
+            state.pdos = Some((Instant::now(), pdos));
         }
+    }
+
+    /// Keep a short bounded tail of control messages used to diagnose Get_Revision.
+    pub fn record_pd_message(&self, message: &PdMessage) {
+        let Some(header) = message.header else {
+            return;
+        };
+        if header.extended || !matches!(header.message_type, 4 | 12 | 16 | 24) {
+            return;
+        }
+        if let Ok(mut state) = self.0.lock() {
+            let now = Instant::now();
+            while state
+                .revision_messages
+                .front()
+                .is_some_and(|event| now.duration_since(event.at) > CAPTURED_REVISION_MESSAGE_TTL)
+            {
+                state.revision_messages.pop_front();
+            }
+            if state.revision_messages.len() == MAX_CAPTURED_REVISION_MESSAGES {
+                state.revision_messages.pop_front();
+            }
+            state.revision_messages.push_back(CapturedPdMessage {
+                at: now,
+                message: message.clone(),
+            });
+        }
+    }
+
+    fn pd_messages_since(&self, since: Instant) -> Vec<PdMessage> {
+        self.0
+            .lock()
+            .map(|state| {
+                state
+                    .revision_messages
+                    .iter()
+                    .filter(|event| event.at >= since)
+                    .map(|event| event.message.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// A list recorded at or after `since`, waiting up to `budget` for one to arrive.
@@ -1103,7 +1174,7 @@ impl PdoCache {
         let deadline = Instant::now() + budget;
         loop {
             if let Ok(slot) = self.0.lock() {
-                if let Some((at, pdos)) = slot.as_ref() {
+                if let Some((at, pdos)) = slot.pdos.as_ref() {
                     if *at >= since {
                         return Some(pdos.clone());
                     }
@@ -1207,7 +1278,7 @@ impl TriggerSession {
         }
         if let TriggerCommand::List { plus } = cmd {
             if self.pdm_open {
-                return self.scan(*plus, &mut on_line, detection_progress);
+                return self.scan(*plus, pdo_cache, &mut on_line, detection_progress);
             }
         }
         match run_trigger(
@@ -1247,6 +1318,7 @@ impl TriggerSession {
     fn scan(
         &mut self,
         plus: bool,
+        pdo_cache: &PdoCache,
         log: &mut dyn FnMut(&str),
         progress: &mut dyn FnMut(&DetectionReport),
     ) -> TriggerOutcome {
@@ -1258,7 +1330,10 @@ impl TriggerSession {
         let stop = self.cdc.stop.clone();
         let version = self.cdc.pdm_version.clone();
         let result = detection::run(
-            &mut DetectionCdc(&mut self.cdc),
+            &mut DetectionCdc {
+                cdc: &mut self.cdc,
+                pdo_cache,
+            },
             plus,
             version,
             &stop,
@@ -1273,9 +1348,10 @@ impl TriggerSession {
             self.cdc.port = None;
         }
         let code = match completion {
-            "complete" => None,
+            "complete" | "partial" => None,
             "cancelled" => Some("cancelled".into()),
-            _ => Some("scan_incomplete".into()),
+            "timeout" => Some("scan_timeout".into()),
+            _ => Some("scan_failed".into()),
         };
         let message = result
             .report
@@ -1287,7 +1363,7 @@ impl TriggerSession {
             .collect::<Vec<_>>()
             .join("\n");
         TriggerOutcome {
-            ok: completion == "complete",
+            ok: matches!(completion, "complete" | "partial"),
             message,
             protocols: result
                 .report
@@ -1906,5 +1982,35 @@ mod tests {
         assert!(cache
             .wait_since(before, Duration::ZERO, &StopSignal::default())
             .is_some());
+    }
+
+    #[test]
+    fn pdo_cache_keeps_bounded_revision_control_evidence_since_a_query() {
+        let cache = PdoCache::default();
+        let since = Instant::now();
+        let request_wire = vec![0x98, 0x0C];
+        let request = PdMessage {
+            sop: crate::protocol::pd::Sop::Sop,
+            header: Some(crate::protocol::pd::PdHeader::parse(0x0C98)),
+            objects: Vec::new(),
+            pdos: Vec::new(),
+            wire: request_wire,
+        };
+        let unrelated = PdMessage {
+            header: Some(crate::protocol::pd::PdHeader::parse(0x0001)),
+            ..request.clone()
+        };
+        let response = PdMessage {
+            sop: crate::protocol::pd::Sop::Sop,
+            header: Some(crate::protocol::pd::PdHeader::parse(0x0590)),
+            objects: Vec::new(),
+            pdos: Vec::new(),
+            wire: vec![0x90, 0x05],
+        };
+        cache.record_pd_message(&unrelated);
+        cache.record_pd_message(&request);
+        cache.record_pd_message(&response);
+
+        assert_eq!(cache.pd_messages_since(since), vec![request, response]);
     }
 }

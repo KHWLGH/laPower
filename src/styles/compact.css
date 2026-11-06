@@ -179,30 +179,10 @@
   }
 }
 
-/* 协议控制：窄窗时日志移到控件下方，控件区独占宽度。 */
+/* 协议控制：窄窗时收紧共享读数，日志仍固定在右侧。 */
 @media (max-width: 979.98px) {
-  #view-trigger .commandbar {
-    flex-wrap: wrap;
-  }
-
   #view-trigger .commandbar > .trigger-live {
     flex-shrink: 0;
-  }
-
-  .trigger-body {
-    flex-direction: column;
-  }
-
-  .trigger-controls {
-    min-width: 0;
-    flex: 1 1 60%;
-  }
-
-  .trigger-log-pane {
-    min-width: 0;
-    flex: 1 1 40%;
-    border-left: 0;
-    border-top: 1px solid var(--stroke-divider);
   }
 
   .trigger-live {

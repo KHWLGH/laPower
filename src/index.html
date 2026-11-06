@@ -432,132 +432,191 @@
               <span class="trigger-live-metric current"><span class="trigger-live-value" id="km-live-current">--</span><span class="trigger-live-unit">A</span></span>
               <span class="trigger-live-metric power"><span class="trigger-live-value" id="km-live-power">--</span><span class="trigger-live-unit">W</span></span>
             </span>
+            <button type="button" class="cmd-btn" id="btn-km-cancel" hidden>
+              <i class="fi fi-dismiss" aria-hidden="true"></i><span data-i18n="cancel">Cancel</span>
+            </button>
           </div>
-          <div class="trigger-body">
+          <div class="trigger-body" id="km-trigger-body">
             <div class="trigger-controls">
               <div class="trigger-banner" id="km-banner"><span data-i18n="powerControlHint">Connect a POWER-Z device; open PDM before sending protocol commands except custom commands.</span></div>
-              <section class="trigger-section">
-                <h2 class="trigger-section-title"><span data-i18n="scanTitle">Protocol detection</span></h2>
-                <div class="trigger-actions">
-                  <button type="button" class="btn" id="btn-km-scan" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
-                  <button type="button" class="btn" id="btn-km-scan-full" data-i18n-title="fullScanHint"><span data-i18n="fullScan">Full scan</span></button>
+              <div class="trigger-workspace-tabs" role="tablist" aria-label="Protocol workspace" data-i18n-aria-label="protocolWorkspace">
+                <button type="button" id="btn-km-mode-detection" class="trigger-mode-tab" role="tab" aria-selected="false" aria-controls="km-detection-panel" data-mode="detection"><span data-i18n="triggerModeDetection">Detection</span></button>
+                <button type="button" id="btn-km-mode-trigger" class="trigger-mode-tab is-active" role="tab" aria-selected="true" aria-controls="km-trigger-panel" data-mode="trigger"><span data-i18n="triggerModeTrigger">Trigger</span></button>
+              </div>
+              <section id="km-detection-panel" class="trigger-panel" role="tabpanel" aria-labelledby="btn-km-mode-detection" hidden>
+                <div class="trigger-panel-head">
+                  <h2 class="trigger-section-title"><span data-i18n="scanTitle">Protocol detection</span></h2>
+                  <div class="trigger-actions">
+                    <button type="button" class="btn" id="btn-km-scan" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
+                    <button type="button" class="btn" id="btn-km-scan-full" data-i18n-title="fullScanHint"><span data-i18n="fullScan">Full scan</span></button>
+                  </div>
                 </div>
-                <div class="trigger-hint" data-i18n="scanActiveHint">Detection changes the negotiated protocol. Missing standard results are checked individually, including 5 V verification. Disconnect the downstream load first.</div>
-                <div id="km-detection-summary" class="trigger-hint" role="status" aria-live="polite" data-i18n="scanEmpty">Run detection to view protocol support and evidence.</div>
+                <div class="trigger-scan-status">
+                  <div id="km-detection-summary" class="trigger-hint" role="status" aria-live="polite" data-i18n="scanEmpty">Run detection to view protocol support and evidence.</div>
+                  <div class="trigger-hint" data-i18n="scanActiveHint">Detection changes the negotiated protocol. Missing standard results are checked individually, including 5 V verification. Disconnect the downstream load first.</div>
+                </div>
+                <div class="trigger-detection-filters">
+                  <input id="km-detection-filter" class="ribbon-input" type="search" placeholder="Filter protocols" data-i18n-placeholder="triggerDetectionSearch" />
+                  <select id="km-detection-state-filter" class="ribbon-select" aria-label="Status" data-i18n-aria-label="triggerDetectionState">
+                    <option value="" data-i18n="triggerDetectionAllStates">All states</option>
+                    <option value="supported" data-i18n="scanSupported">Supported</option>
+                    <option value="unsupported" data-i18n="scanUnsupported">Not supported</option>
+                    <option value="not_checked" data-i18n="scanNotChecked">Not checked</option>
+                    <option value="failed" data-i18n="scanCheckFailed">Unconfirmed</option>
+                  </select>
+                </div>
                 <div id="km-detection-results" class="trigger-detection-results"></div>
-                <div id="km-detection-diagnostics" class="trigger-hint"></div>
+                <div class="trigger-detection-empty" id="km-detection-empty" hidden data-i18n="triggerDetectionNoMatch">No protocols match this filter</div>
+                <details class="trigger-detection-diagnostics" id="km-detection-diagnostics-details" hidden>
+                  <summary><span data-i18n="scanDiagnostics">Scan diagnostics</span></summary>
+                  <pre id="km-detection-diagnostics"></pre>
+                </details>
               </section>
-              <section class="trigger-section">
-                <h2 class="trigger-section-title"><span data-i18n="voltageTrigger">Voltage trigger</span></h2>
-                <div class="trigger-actions">
-                  <button type="button" class="btn" id="btn-km-read-pdo"><span data-i18n="readPdo">Read PDOs</span></button>
-                  <button type="button" class="btn" id="btn-km-reset" title="Exit the current protocol and restore the default 5V" data-i18n-title="protocolResetHint"><span data-i18n="protocolReset">Reset</span></button>
-                </div>
-                <div class="trigger-form" id="km-trigger-form">
-                  <label class="trigger-field">
-                    <span class="trigger-field-label"><span data-i18n="protocol">Protocol</span></span>
-                    <select id="km-proto" class="ribbon-select">
-                      <option value="pd" selected>PD</option>
-                      <option value="qc">QC 2.0</option>
-                      <option value="qc3">QC 3.0</option>
-                      <option value="fcp">FCP</option>
-                      <option value="afc">AFC</option>
-                      <option value="sfcp">SFCP</option>
-                      <option value="scp">SCP</option>
-                      <option value="vfcp">VFCP</option>
-                      <option value="ufcs">UFCS</option>
-                      <option value="bc">BC 1.2</option>
-                      <option value="apple">Apple</option>
-                    </select>
-                  </label>
-                  <label class="trigger-field" id="km-field-position">
-                    <span class="trigger-field-label" id="km-position-label"><span data-i18n="pdoPosition">PDO position</span></span>
-                    <input type="number" id="km-req-pos" class="ribbon-input" min="1" max="15" step="1" value="1" />
-                  </label>
-                  <label class="trigger-field" id="km-field-qc-volt" hidden>
-                    <span class="trigger-field-label"><span data-i18n="voltage">Voltage</span></span>
-                    <select id="km-qc-volt" class="ribbon-select">
-                      <option value="5V">5V</option>
-                      <option value="9V" selected>9V</option>
-                      <option value="12V">12V</option>
-                      <option value="20V">20V</option>
-                    </select>
-                  </label>
-                  <label class="trigger-field" id="km-field-volt">
-                    <span class="trigger-field-label"><span data-i18n="voltage">Voltage</span></span>
-                    <span class="trigger-input-unit">
-                      <input type="number" id="km-req-volt" class="ribbon-input" min="0" max="60000" step="20" value="5000" />
-                      <span class="cmd-label">mV</span>
-                    </span>
-                  </label>
-                  <label class="trigger-field" id="km-field-cur">
-                    <span class="trigger-field-label"><span data-i18n="current">Current</span></span>
-                    <span class="trigger-input-unit">
-                      <input type="number" id="km-req-cur" class="ribbon-input" min="0" max="10000" step="50" value="3000" />
-                      <span class="cmd-label">mA</span>
-                    </span>
-                  </label>
-                  <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-qc3-up" hidden>QC3 +200 mV</button>
-                    <button type="button" class="btn" id="btn-km-qc3-down" hidden>QC3 −200 mV</button>
-                    <button type="button" class="btn btn-accent" id="btn-km-trigger"><span data-i18n="trigger">Trigger</span></button>
+              <section id="km-trigger-panel" class="trigger-panel" role="tabpanel" aria-labelledby="btn-km-mode-trigger">
+                <section class="trigger-section">
+                  <div class="trigger-panel-head">
+                    <h2 class="trigger-section-title"><span data-i18n="voltageTrigger">Voltage trigger</span></h2>
+                    <div class="trigger-actions">
+                      <button type="button" class="btn" id="btn-km-read-pdo"><span data-i18n="readPdo">Read PDOs</span></button>
+                      <button type="button" class="btn" id="btn-km-reset" title="Exit the current protocol and restore the default 5V" data-i18n-title="protocolResetHint"><span data-i18n="protocolReset">Reset</span></button>
+                    </div>
                   </div>
-                </div>
+                  <div class="trigger-form" id="km-trigger-form">
+                    <label class="trigger-field">
+                      <span class="trigger-field-label"><span data-i18n="protocol">Protocol</span></span>
+                      <select id="km-proto" class="ribbon-select">
+                        <option value="pd" selected>PD</option>
+                        <option value="qc">QC 2.0</option>
+                        <option value="qc3">QC 3.0</option>
+                        <option value="fcp">FCP</option>
+                        <option value="afc">AFC</option>
+                        <option value="sfcp">SFCP</option>
+                        <option value="scp">SCP</option>
+                        <option value="vfcp">VFCP</option>
+                        <option value="ufcs">UFCS</option>
+                        <option value="bc">BC 1.2</option>
+                        <option value="apple">Apple</option>
+                      </select>
+                    </label>
+                    <label class="trigger-field" id="km-field-position">
+                      <span class="trigger-field-label" id="km-position-label"><span data-i18n="pdoPosition">PDO position</span></span>
+                      <input type="number" id="km-req-pos" class="ribbon-input" min="1" max="15" step="1" value="1" />
+                    </label>
+                    <label class="trigger-field" id="km-field-qc-volt" hidden>
+                      <span class="trigger-field-label"><span data-i18n="voltage">Voltage</span></span>
+                      <select id="km-qc-volt" class="ribbon-select">
+                        <option value="5V">5V</option>
+                        <option value="9V" selected>9V</option>
+                        <option value="12V">12V</option>
+                        <option value="20V">20V</option>
+                      </select>
+                    </label>
+                    <label class="trigger-field" id="km-field-volt">
+                      <span class="trigger-field-label"><span data-i18n="voltage">Voltage</span></span>
+                      <span class="trigger-input-unit">
+                        <input type="number" id="km-req-volt" class="ribbon-input" min="0" max="60000" step="20" value="5000" />
+                        <span class="cmd-label">mV</span>
+                      </span>
+                    </label>
+                    <label class="trigger-field" id="km-field-cur">
+                      <span class="trigger-field-label"><span data-i18n="current">Current</span></span>
+                      <span class="trigger-input-unit">
+                        <input type="number" id="km-req-cur" class="ribbon-input" min="0" max="10000" step="50" value="3000" />
+                        <span class="cmd-label">mA</span>
+                      </span>
+                    </label>
+                    <div class="trigger-form-actions">
+                      <button type="button" class="btn" id="btn-km-qc3-up" hidden>QC3 +200 mV</button>
+                      <button type="button" class="btn" id="btn-km-qc3-down" hidden>QC3 −200 mV</button>
+                      <button type="button" class="btn btn-accent" id="btn-km-trigger"><span data-i18n="trigger">Trigger</span></button>
+                    </div>
+                  </div>
+                </section>
+                <section class="trigger-section">
+                  <h2 class="trigger-section-title"><span data-i18n="pdoList">PDO list</span><span class="trigger-hint"><span data-i18n="pdoClick">Click a row to fill the request</span></span></h2>
+                  <div class="trigger-pdo-list" id="km-pdo-list" role="list">
+                    <div class="trigger-empty"><span data-i18n="pdoEmpty">Read PDOs or connect a charger</span></div>
+                  </div>
+                </section>
+                <details class="trigger-section trigger-advanced">
+                  <summary><span data-i18n="advanced">Advanced protocol commands</span></summary>
+                  <div class="trigger-form">
+                    <label class="trigger-field">
+                      <span class="trigger-field-label">PD cmd</span>
+                      <input type="number" id="km-pd-cmd" class="ribbon-input" min="0" max="255" step="1" value="7" />
+                    </label>
+                    <div class="trigger-form-actions">
+                      <button type="button" class="btn" id="btn-km-pd-cmd"><span data-i18n="sendPdCmd">Send pd cmd</span></button>
+                      <button type="button" class="btn" id="btn-km-get-src-cap">Get_Source_Cap</button>
+                    </div>
+                    <label class="trigger-field trigger-field-wide">
+                      <span class="trigger-field-label">PD data</span>
+                      <input type="text" id="km-pd-data" class="ribbon-input" placeholder="018F1401A000FF" spellcheck="false" />
+                    </label>
+                    <div class="trigger-form-actions">
+                      <button type="button" class="btn" id="btn-km-pd-data"><span data-i18n="sendPdData">Send pd data</span></button>
+                      <button type="button" class="btn" id="btn-km-ufcs-pdo"><span data-i18n="readUfcs">Read UFCS PDOs</span></button>
+                    </div>
+                    <label class="trigger-field">
+                      <span class="trigger-field-label">UFCS cmd</span>
+                      <input type="number" id="km-ufcs-cmd" class="ribbon-input" min="0" step="1" value="6" />
+                    </label>
+                    <div class="trigger-form-actions">
+                      <button type="button" class="btn" id="btn-km-ufcs-cmd"><span data-i18n="sendUfcs">Send ufcs cmd</span></button>
+                    </div>
+                    <label class="trigger-field trigger-field-wide">
+                      <span class="trigger-field-label"><span data-i18n="customCommand">Custom command</span></span>
+                      <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="For example: pd pdo" data-i18n-placeholder="customPlaceholder" spellcheck="false" />
+                    </label>
+                    <div class="trigger-form-actions">
+                      <button type="button" class="btn" id="btn-km-raw"><span data-i18n="sendCommand">Send command</span></button>
+                    </div>
+                  </div>
+                </details>
               </section>
-              <section class="trigger-section">
-                <h2 class="trigger-section-title"><span data-i18n="pdoList">PDO list</span><span class="trigger-hint"><span data-i18n="pdoClick">Click a row to fill the request</span></span></h2>
-                <div class="trigger-pdo-list" id="km-pdo-list" role="list">
-                  <div class="trigger-empty"><span data-i18n="pdoEmpty">Read PDOs or connect a charger</span></div>
-                </div>
-              </section>
-              <details class="trigger-section trigger-advanced">
-                <summary><span data-i18n="advanced">Advanced protocol commands</span></summary>
-                <div class="trigger-form">
-                  <label class="trigger-field">
-                    <span class="trigger-field-label">PD cmd</span>
-                    <input type="number" id="km-pd-cmd" class="ribbon-input" min="0" max="255" step="1" value="7" />
-                  </label>
-                  <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-pd-cmd"><span data-i18n="sendPdCmd">Send pd cmd</span></button>
-                    <button type="button" class="btn" id="btn-km-get-src-cap">Get_Source_Cap</button>
-                  </div>
-                  <label class="trigger-field trigger-field-wide">
-                    <span class="trigger-field-label">PD data</span>
-                    <input type="text" id="km-pd-data" class="ribbon-input" placeholder="018F1401A000FF" spellcheck="false" />
-                  </label>
-                  <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-pd-data"><span data-i18n="sendPdData">Send pd data</span></button>
-                    <button type="button" class="btn" id="btn-km-ufcs-pdo"><span data-i18n="readUfcs">Read UFCS PDOs</span></button>
-                  </div>
-                  <label class="trigger-field">
-                    <span class="trigger-field-label">UFCS cmd</span>
-                    <input type="number" id="km-ufcs-cmd" class="ribbon-input" min="0" step="1" value="6" />
-                  </label>
-                  <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-ufcs-cmd"><span data-i18n="sendUfcs">Send ufcs cmd</span></button>
-                  </div>
-                  <label class="trigger-field trigger-field-wide">
-                    <span class="trigger-field-label"><span data-i18n="customCommand">Custom command</span></span>
-                    <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="For example: pd pdo" data-i18n-placeholder="customPlaceholder" spellcheck="false" />
-                  </label>
-                  <div class="trigger-form-actions">
-                    <button type="button" class="btn" id="btn-km-raw"><span data-i18n="sendCommand">Send command</span></button>
-                  </div>
-                </div>
-              </details>
             </div>
-            <div class="trigger-log-pane">
+            <aside class="trigger-log-pane" id="km-log-pane" aria-labelledby="km-log-title">
               <div class="trigger-log-head">
-                <span id="km-log-title"><span data-i18n="responseLog">Response log</span></span>
-                <span class="cmd-spacer"></span>
-                <button type="button" class="cmd-btn" id="btn-km-cancel" hidden>
-                  <i class="fi fi-dismiss" aria-hidden="true"></i><span data-i18n="cancel">Cancel</span>
-                </button>
-                <button type="button" class="cmd-btn" id="btn-km-log-copy"><span data-i18n="copy">Copy</span></button>
+                <div class="trigger-log-heading">
+                  <h2 id="km-log-title" data-i18n="triggerHistoryTitle">Command history</h2>
+                  <span id="km-log-state" class="trigger-log-state" role="status" aria-live="polite"></span>
+                  <span id="km-log-activity" class="trigger-log-activity" hidden></span>
+                </div>
+              </div>
+              <div class="trigger-log-actions">
+                <button type="button" class="cmd-btn" id="btn-km-log-copy"><span data-i18n="triggerHistoryCopyAll">Copy all</span></button>
+                <button type="button" class="cmd-btn" id="btn-km-log-export"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="triggerHistoryExport">Export text</span></button>
                 <button type="button" class="cmd-btn" id="btn-km-log-clear"><span data-i18n="clear">Clear</span></button>
               </div>
-              <textarea id="km-log" class="trigger-log" readonly spellcheck="false" aria-label="Protocol response log" data-i18n-aria-label="protocolLog"></textarea>
-            </div>
+              <div class="trigger-log-filters">
+                <select id="km-log-command-filter" class="ribbon-select" aria-label="Command" data-i18n-aria-label="triggerHistoryCommandFilter">
+                  <option value="" data-i18n="triggerHistoryCommandFilter">All commands</option>
+                  <option value="list">list</option>
+                  <option value="pd_pdo">pd_pdo</option>
+                  <option value="pd_req">pd_req</option>
+                  <option value="pdm_set">pdm_set</option>
+                  <option value="pdm_open">pdm_open</option>
+                  <option value="pdm_close">pdm_close</option>
+                  <option value="reset">reset</option>
+                  <option value="raw">raw</option>
+                  <option value="pd_data">pd_data</option>
+                  <option value="pd_cmd">pd_cmd</option>
+                  <option value="ufcs_cmd">ufcs_cmd</option>
+                  <option value="other" data-i18n="triggerHistoryOtherCommands">Other commands</option>
+                </select>
+                <select id="km-log-status-filter" class="ribbon-select" aria-label="Status" data-i18n-aria-label="triggerHistoryStatusFilter">
+                  <option value="" data-i18n="triggerHistoryStatusFilter">All statuses</option>
+                  <option value="running" data-i18n="triggerHistoryRunning">Running</option>
+                  <option value="success" data-i18n="triggerHistorySuccess">Success</option>
+                  <option value="partial" data-i18n="triggerHistoryPartial">Partially complete</option>
+                  <option value="failure" data-i18n="triggerHistoryFailure">Failed</option>
+                  <option value="cancelled" data-i18n="triggerHistoryCancelled">Cancelled</option>
+                </select>
+                <input id="km-log-text-filter" class="ribbon-input" type="search" placeholder="Search commands and replies" data-i18n-placeholder="triggerHistorySearch" />
+              </div>
+              <div class="trigger-history-list" id="km-history-list"></div>
+              <div class="trigger-history-empty" id="km-history-empty" hidden></div>
+            </aside>
           </div>
         </section>
 

@@ -13,12 +13,19 @@ import {
   detectionSummary,
   detectionVoltages,
   deviceSupportsControl,
+  exportTriggerHistory,
+  filterTriggerHistory,
+  formatTriggerHistoryEntry,
   LOG_LIMIT,
   outcomeHead,
+  outcomeHistoryStatus,
   pdoToRequestFields,
+  pdVersionLabel,
   prependOutcome,
   protocolFields,
+  summarizeTriggerCommand,
   triggerTimeoutMs,
+  trimTriggerHistory,
 } from '../src/km003c-model.js';
 
 /** @param {Partial<import('../src/km003c-model.js').TriggerForm>} [over] */
@@ -133,6 +140,64 @@ test('partial scan results never become successful merely because one protocol w
   assert.equal(detectionCanSelect({ ...result, id: 'svooc' }), false);
 });
 
+test('detection terminal states separate partial results from command failure', () => {
+  const detection = (completion) => ({ completion });
+  assert.equal(outcomeHistoryStatus(outcome({ detection: detection('complete') })), 'success');
+  assert.equal(
+    outcomeHistoryStatus(outcome({ detection: detection('partial') })),
+    'partial',
+    'unconfirmed rows do not make a normally finished command fail',
+  );
+  assert.equal(outcomeHistoryStatus(outcome({ ok: false, detection: detection('failed') })), 'failure');
+  assert.equal(outcomeHistoryStatus(outcome({ ok: false, detection: detection('timeout') })), 'failure');
+  assert.equal(outcomeHistoryStatus(outcome({ ok: false, detection: detection('cancelled') })), 'cancelled');
+  assert.equal(outcomeHistoryStatus(outcome({ ok: false }), { cancelRequested: true }), 'cancelled');
+  assert.equal(outcomeHistoryStatus(outcome({ ok: false }), { cancelRequested: true, timedOut: true }), 'failure');
+  assert.equal(
+    outcomeHistoryStatus(outcome({ detection: detection('complete'), protocols: [] })),
+    'success',
+    'a complete scan with no supported protocols is still a successful scan',
+  );
+});
+
+test('PD version display prefers a standard response and does not understate PDO capability', () => {
+  const base = { id: 'pd', label: 'PD', state: 'supported', source: 'probe', detail: '', reason: '' };
+  assert.match(
+    pdVersionLabel({
+      ...base,
+      pd_revision: { revision_major: 3, revision_minor: 2, version_major: 1, version_minor: 2 },
+      pd_reported_version: { major: 3, minor: 1 },
+      pd_version_inference: { minimum_major: 3, minimum_minor: 0, basis: 'pps' },
+    }),
+    /PD 3\.2.*1\.2/,
+  );
+  assert.match(pdVersionLabel({ ...base, pd_reported_version: { major: 3, minor: 1 } }), /PD 3\.1.*meter scan/);
+  assert.match(
+    pdVersionLabel({
+      ...base,
+      pd_reported_version: { major: 3, minor: 0 },
+      pd_version_inference: { minimum_major: 3, minimum_minor: 1, basis: 'epr' },
+    }),
+    /at least PD 3\.1.*EPR PDO/i,
+  );
+  assert.match(
+    pdVersionLabel({
+      ...base,
+      pd_reported_version: { major: 3, minor: 2 },
+      pd_version_inference: { minimum_major: 3, minimum_minor: 0, basis: 'pps' },
+    }),
+    /PD 3\.2.*meter scan/,
+  );
+  assert.match(
+    pdVersionLabel({
+      ...base,
+      pd_version_inference: { minimum_major: 3, minimum_minor: 2, basis: 'spr_avs' },
+    }),
+    /at least PD 3\.2/i,
+  );
+  assert.match(pdVersionLabel(base), /cannot be inferred/i);
+});
+
 test('detection voltage display uses only scoped capabilities and preserves ranges', () => {
   const result = {
     id: 'pd',
@@ -169,6 +234,82 @@ test('the log shows streamed progress when the final reply is empty, newest firs
   assert.ok(log.startsWith('[10:00:01] ERR\nrequest rejected\n\n[10:00:00] OK'));
   const huge = prependOutcome('', outcome({ message: 'x'.repeat(LOG_LIMIT * 2) }), '', 't');
   assert.equal(huge.length, LOG_LIMIT);
+});
+
+test('command history can be filtered, copied and exported with status and timing', () => {
+  const entries = [
+    {
+      id: 'new',
+      command: { type: 'pd_req', position: 3, volt_mv: 15000, cur_ma: 3000 },
+      startedAt: 1_700_000_000_000,
+      elapsedMs: 240,
+      status: /** @type {const} */ ('success'),
+      progress: '> pd_req\nAccept, PS_RDY',
+      reply: 'PDO #3: 15.00V',
+    },
+    {
+      id: 'old',
+      command: { type: 'pd_data', hex: '018F1401A000FF' },
+      startedAt: 1_700_000_001_000,
+      elapsedMs: 81,
+      status: /** @type {const} */ ('failure'),
+      progress: '> pd_data',
+      reply: 'unsupported custom data',
+    },
+  ];
+
+  assert.equal(summarizeTriggerCommand(entries[0].command), 'pd_req position=3 volt_mv=15000 cur_ma=3000');
+  assert.deepEqual(
+    filterTriggerHistory(entries, { command: 'pd_req' }).map((entry) => entry.id),
+    ['new'],
+  );
+  assert.deepEqual(
+    filterTriggerHistory(entries, { status: 'failure' }).map((entry) => entry.id),
+    ['old'],
+  );
+  assert.deepEqual(
+    filterTriggerHistory(entries, { text: 'custom data' }).map((entry) => entry.id),
+    ['old'],
+  );
+  assert.match(formatTriggerHistoryEntry(entries[0]), /pd_req position=3/);
+  assert.match(formatTriggerHistoryEntry(entries[0]), /240 ms/);
+  assert.match(exportTriggerHistory(entries), /Accept, PS_RDY/);
+  assert.match(exportTriggerHistory(entries), /unsupported custom data/);
+});
+
+test('partial command history has a neutral label, filter value and export entry', () => {
+  const entry = {
+    id: 'partial',
+    command: { type: 'list', plus: false },
+    startedAt: 1_700_000_000_000,
+    elapsedMs: 1700,
+    status: /** @type {const} */ ('partial'),
+    progress: 'entry list\ndone',
+    reply: 'FCP: no response',
+  };
+  assert.match(formatTriggerHistoryEntry(entry), /Partially complete/);
+  assert.deepEqual(filterTriggerHistory([entry], { status: 'partial' }), [entry]);
+  assert.match(exportTriggerHistory([entry]), /FCP: no response/);
+});
+
+test('command history trims oldest commands and bounds a single oversized raw reply', () => {
+  const entry = (id, reply) => ({
+    id,
+    command: { type: 'raw', command: `test ${id}` },
+    startedAt: 1_700_000_000_000,
+    elapsedMs: 1,
+    status: /** @type {const} */ ('success'),
+    progress: '',
+    reply,
+  });
+  const bounded = trimTriggerHistory([entry('new', 'a'.repeat(34_000)), entry('old', 'b'.repeat(34_000))]);
+  assert.equal(bounded.length, 1, 'oldest entry is dropped to keep the visible log under 64 KB');
+  assert.equal(bounded[0].id, 'new');
+  assert.ok(exportTriggerHistory(bounded).length <= LOG_LIMIT);
+
+  const single = trimTriggerHistory([entry('single', 'x'.repeat(LOG_LIMIT * 2))]);
+  assert.ok(exportTriggerHistory(single).length <= LOG_LIMIT);
+  assert.ok(single[0].reply.length < LOG_LIMIT);
 });
 
 test('PDO rows read like the meter and fill the request form sensibly', () => {

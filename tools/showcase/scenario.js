@@ -65,6 +65,15 @@ export const PDOS = [
     programmable: false,
   })),
   { position: 6, kind: 'pps', volt_min_mv: 3300, volt_max_mv: 21000, cur_ma: 3000, label: 'PPS', programmable: true },
+  {
+    position: 7,
+    kind: 'spr_avs',
+    volt_min_mv: 9000,
+    volt_max_mv: 20000,
+    cur_ma: 3000,
+    label: 'SPR AVS',
+    programmable: true,
+  },
 ];
 export const PROTOCOLS = [
   { id: 'pd', label: 'PD 3.0' },

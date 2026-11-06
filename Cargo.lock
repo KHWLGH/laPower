@@ -2498,6 +2498,7 @@ dependencies = [
  "serde_json",
  "serialport",
  "thiserror 2.0.20",
+ "usbpd-parser",
 ]
 
 [[package]]

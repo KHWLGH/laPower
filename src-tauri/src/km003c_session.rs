@@ -319,7 +319,8 @@ pub(crate) async fn km003c_trigger(
                 let code = match outcome.code.as_deref() {
                     Some("pdm_required") => "triggerNeedPdm",
                     Some("cancelled") => "triggerCancelled",
-                    Some("scan_incomplete") => "scanPartial",
+                    Some("scan_timeout") => "triggerTimeout",
+                    Some("scan_failed") => "scanFailed",
                     _ => "operationFailed",
                 };
                 value["description"] =
@@ -726,6 +727,7 @@ impl Km003cSource {
         for event in response.pd_events {
             match event.kind {
                 PdEventKind::Message(message) => {
+                    self.pdo_cache.record_pd_message(&message);
                     if message.is_source_capabilities() {
                         self.pdo_cache.update(wire_pdos(&message.pdos));
                     }
@@ -794,6 +796,7 @@ impl Km003cSource {
         for event in &response.pd_events {
             match &event.kind {
                 PdEventKind::Message(message) => {
+                    self.pdo_cache.record_pd_message(message);
                     if message.is_source_capabilities() {
                         self.pdo_cache.update(wire_pdos(&message.pdos));
                     }

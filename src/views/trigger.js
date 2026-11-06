@@ -9,7 +9,7 @@
 
 import { getLastRealtime } from '../data.js';
 import { deviceStream } from '../device-stream.js';
-import { errorText, t } from '../i18n.js';
+import { errorText, onLanguageChange, t } from '../i18n.js';
 import {
   buildTriggerCommand,
   clampPdm,
@@ -22,11 +22,16 @@ import {
   detectionSummary,
   detectionVoltages,
   deviceSupportsControl,
+  exportTriggerHistory,
+  filterTriggerHistory,
   LOG_LIMIT,
+  outcomeHistoryStatus,
   pdoToRequestFields,
-  prependOutcome,
+  pdVersionLabel,
   protocolFields,
+  summarizeTriggerCommand,
   triggerTimeoutMs,
+  trimTriggerHistory,
 } from '../km003c-model.js';
 import { debouncedSaveSettings } from '../settings.js';
 import { state } from '../state.js';
@@ -35,22 +40,20 @@ import { toast } from '../ui/toast.js';
 /** @typedef {import('../km003c-model.js').TriggerCommand} TriggerCommand */
 /** @typedef {import('../km003c-model.js').TriggerOutcome} TriggerOutcome */
 /** @typedef {import('../km003c-model.js').TriggerPdo} TriggerPdo */
+/** @typedef {import('../km003c-model.js').TriggerHistoryStatus} TriggerHistoryStatus */
 
 let initialized = false;
 let busy = false;
 let pdmOpen = false;
 /** @type {string|null} */
 let pendingReqId = null;
-/** 当前命令已收到的进度行，最新在后。 */
-let progress = '';
-let logText = '';
-/** @type {(() => string)[]} */
-const logEntries = [];
-/** @param {() => string} entry */
-function addLog(entry) {
-  logEntries.unshift(entry);
-  while (logEntries.length > 1 && logEntries.map((item) => item()).join('\n\n').length > LOG_LIMIT) logEntries.pop();
-}
+/** @type {import('../km003c-model.js').TriggerHistoryEntry[]} */
+let historyEntries = [];
+let activeHistoryId = null;
+let cancelRequested = false;
+let timedOut = false;
+/** @type {'detection'|'trigger'} */
+let triggerMode = 'trigger';
 let requestCounter = 0;
 /** @type {TriggerPdo[]} */
 let pdos = [];
@@ -75,10 +78,6 @@ function select(id) {
   return /** @type {HTMLSelectElement|null} */ (el(id));
 }
 
-function stamp() {
-  return new Date().toLocaleTimeString(undefined, { hour12: false });
-}
-
 /** 当前连接支持协议控制，且流仍然在。 */
 function controllable() {
   return state.isConnected && deviceSupportsControl(state.connectedDevice);
@@ -90,19 +89,118 @@ function viewVisible() {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
+/** @param {TriggerHistoryStatus} status */
+function historyStatusKey(status) {
+  return {
+    running: 'triggerHistoryRunning',
+    success: 'triggerHistorySuccess',
+    partial: 'triggerHistoryPartial',
+    failure: 'triggerHistoryFailure',
+    cancelled: 'triggerHistoryCancelled',
+  }[status];
+}
+
+function renderHistory() {
+  const list = el('km-history-list');
+  const empty = el('km-history-empty');
+  const commandFilter = select('km-log-command-filter');
+  const statusFilter = select('km-log-status-filter');
+  if (!list || !empty || !commandFilter || !statusFilter) return;
+
+  const selectedCommand = commandFilter.value;
+  const commandTypes = [...new Set(historyEntries.map((entry) => entry.command.type))].sort();
+  commandFilter.replaceChildren(new Option(t('triggerHistoryCommandFilter'), ''));
+  for (const type of commandTypes) commandFilter.add(new Option(type, type));
+  commandFilter.value = commandTypes.includes(selectedCommand) ? selectedCommand : '';
+
+  const matches = filterTriggerHistory(historyEntries, {
+    command: commandFilter.value,
+    status: statusFilter.value,
+    text: input('km-log-text-filter')?.value ?? '',
+  });
+  list.replaceChildren(
+    ...matches.map((entry) => {
+      const item = document.createElement('details');
+      item.className = `trigger-history-item is-${entry.status}`;
+      item.open = entry.status === 'running' || entry.id === activeHistoryId;
+
+      const summary = document.createElement('summary');
+      const time = document.createElement('span');
+      time.className = 'trigger-history-meta';
+      time.textContent = new Date(entry.startedAt).toLocaleTimeString(undefined, { hour12: false });
+      const status = document.createElement('span');
+      status.className = 'trigger-history-result';
+      status.textContent = t(historyStatusKey(entry.status));
+      const command = document.createElement('span');
+      command.className = 'trigger-history-command';
+      command.textContent = summarizeTriggerCommand(entry.command);
+      const duration = document.createElement('span');
+      duration.className = 'trigger-history-meta';
+      duration.textContent = entry.elapsedMs === null ? '' : `${entry.elapsedMs} ms`;
+      summary.append(time, status, command, duration);
+
+      const body = document.createElement('div');
+      body.className = 'trigger-history-body';
+      const actions = document.createElement('div');
+      actions.className = 'trigger-history-actions';
+      const copyCommand = document.createElement('button');
+      copyCommand.type = 'button';
+      copyCommand.className = 'cmd-btn';
+      copyCommand.textContent = t('triggerHistoryCopyCommand');
+      copyCommand.title = t('triggerHistoryCopyCommand');
+      copyCommand.addEventListener('click', () => void copyText(summarizeTriggerCommand(entry.command)));
+      const fill = document.createElement('button');
+      fill.type = 'button';
+      fill.className = 'cmd-btn';
+      fill.textContent = t('triggerHistoryFillForm');
+      fill.title = t('triggerHistoryFillForm');
+      fill.disabled = busy || !historyCommandCanFill(entry.command);
+      fill.addEventListener('click', () => fillFromHistory(entry.command));
+      actions.append(copyCommand, fill);
+      body.appendChild(actions);
+
+      if (entry.progress) {
+        const progress = document.createElement('pre');
+        progress.className = 'trigger-history-progress';
+        progress.textContent = `${t('triggerHistoryProgress')}\n${entry.progress}`;
+        body.appendChild(progress);
+      }
+      const reply = document.createElement('pre');
+      reply.className = `trigger-history-reply${entry.status === 'failure' ? ' is-error' : ''}`;
+      reply.textContent = entry.reply ? `${t('triggerHistoryReply')}\n${entry.reply}` : t('triggerHistoryNoReply');
+      body.appendChild(reply);
+      item.append(summary, body);
+      return item;
+    }),
+  );
+  empty.hidden = matches.length > 0;
+  empty.textContent = historyEntries.length ? t('triggerHistoryNoMatch') : t('triggerHistoryEmpty');
+}
+
 function renderLog() {
-  logText = logEntries
-    .map((entry) => entry())
-    .join('\n\n')
-    .slice(0, LOG_LIMIT);
-  const log = /** @type {HTMLTextAreaElement|null} */ (el('km-log'));
-  if (!log) return;
-  const live = busy && progress ? `${progress}\n\n${logText}`.trim() : logText;
-  const text = live || (busy ? t('connecting') : t('noData'));
-  if (log.value !== text) log.value = text;
-  log.classList.toggle('is-live', busy);
-  const title = el('km-log-title');
-  if (title) title.textContent = busy ? t('triggerLogInProgress') : t('triggerLogTitle');
+  const pane = el('km-log-pane');
+  const activity = el('km-log-activity');
+  const stateLabel = el('km-log-state');
+  const copy = /** @type {HTMLButtonElement|null} */ (el('btn-km-log-copy'));
+  const exportButton = /** @type {HTMLButtonElement|null} */ (el('btn-km-log-export'));
+  const clear = /** @type {HTMLButtonElement|null} */ (el('btn-km-log-clear'));
+  if (!pane) return;
+  pane.hidden = false;
+  if (activity) {
+    activity.hidden = !busy;
+    activity.classList.toggle('is-running', busy);
+    activity.setAttribute('aria-label', busy ? t('triggerHistoryRunning') : '');
+  }
+  if (stateLabel) {
+    stateLabel.textContent = busy
+      ? t('triggerHistoryRunning')
+      : t('triggerHistoryCount', { count: historyEntries.length });
+    stateLabel.classList.toggle('is-running', busy);
+  }
+  if (copy) copy.disabled = historyEntries.length === 0;
+  if (exportButton) exportButton.disabled = historyEntries.length === 0;
+  if (clear) clear.disabled = historyEntries.length === 0 || busy;
+  renderHistory();
 }
 
 function renderPdmStatus() {
@@ -151,7 +249,14 @@ function renderEnabled() {
   ])
     enable(id, withPdm);
   const cancel = el('btn-km-cancel');
-  if (cancel) cancel.hidden = !busy;
+  if (cancel) {
+    cancel.hidden = !busy;
+    /** @type {HTMLButtonElement} */ (cancel).disabled = !busy;
+  }
+  for (const id of ['km-pdm-type', 'km-pdm-em', 'km-pdm-sink']) {
+    const node = select(id);
+    if (node) node.disabled = busy;
+  }
   const banner = el('km-banner');
   if (banner) {
     banner.hidden = available && pdmOpen;
@@ -240,94 +345,283 @@ function renderDetection() {
   const box = el('km-detection-results');
   if (!summary || !box) return;
   const diagnostics = el('km-detection-diagnostics');
-  if (diagnostics) diagnostics.textContent = '';
+  const diagnosticsDetails = el('km-detection-diagnostics-details');
+  const empty = el('km-detection-empty');
   summary.textContent = detection ? detectionSummary(detection) : scanning ? t('scanPhaseStandard') : t('scanEmpty');
   const expanded = new Set(
     [...box.querySelectorAll('details[open]')].map((node) => /** @type {HTMLElement} */ (node).dataset.protocol),
   );
   box.replaceChildren();
-  if (!detection) return;
-  const report = detection;
-  // Keep PD's independently read voltage table together at the end of the matrix.
-  const results = [...report.results.filter((r) => r.id !== 'pd'), ...report.results.filter((r) => r.id === 'pd')];
-  for (const result of results) {
-    const row = document.createElement('div');
-    row.className = `trigger-detection-result is-${result.state}${result.id === 'pd' ? ' is-pd' : ''}`;
-    row.dataset.protocol = result.id;
-    row.classList.toggle('is-checking', !report.completion && report.active === result.id);
-    const heading = document.createElement('div');
-    heading.className = 'trigger-detection-heading';
-    const name = document.createElement('button');
-    name.type = 'button';
-    name.className = 'trigger-protocol-select';
-    name.textContent = result.label;
-    name.disabled = busy || !controllable() || !pdmOpen || !detectionCanSelect(result);
-    name.title = t(detectionCanSelect(result) ? 'scanSelectProtocol' : 'scanDetectionOnly');
-    name.addEventListener('click', () => {
-      if (busy || !controllable() || !pdmOpen) return;
-      const proto = select('km-proto');
-      if (proto) proto.value = result.id;
-      // Never carry a prior high-voltage request into a newly selected protocol.
-      const volt = input('km-req-volt');
-      if (volt) volt.value = '5000';
-      const position = input('km-req-pos');
-      if (position) position.value = '1';
-      const current = input('km-req-cur');
-      if (current) current.value = '3000';
-      const fixed = select('km-qc-volt');
-      if (fixed) fixed.value = '5V';
-      renderFields();
-      el('km-trigger-form')?.scrollIntoView({ block: 'nearest' });
-    });
-    const status = document.createElement('span');
-    status.className = 'trigger-detection-state';
-    status.textContent =
-      !report.completion && report.active === result.id ? t('scanChecking') : detectionStateLabel(result);
-    heading.append(name, status);
-    const voltage = document.createElement('div');
-    voltage.className = 'trigger-detection-voltages';
-    voltage.setAttribute('aria-label', t('scanVoltages'));
-    const values = detectionVoltages(result);
-    if (values.length) {
-      for (const value of values) {
-        const chip = document.createElement('span');
-        chip.className = 'trigger-voltage-chip';
-        chip.textContent = value;
-        voltage.append(chip);
-      }
-    } else {
-      voltage.classList.add('is-empty');
-      voltage.textContent = t(result.state === 'supported' ? 'scanVoltageUnknown' : 'scanVoltageUnavailable');
-    }
-    row.append(heading, voltage);
-    const evidenceText = [detectionReason(result.reason), result.detail].filter(Boolean).join('\n');
-    if (evidenceText) {
-      const detail = document.createElement('details');
-      detail.className = 'trigger-detection-detail';
-      detail.dataset.protocol = result.id;
-      detail.open = expanded.has(result.id);
-      const source = document.createElement('summary');
-      source.textContent = t(
-        result.source === 'probe'
-          ? result.id === 'pd'
-            ? 'scanSourcePdo'
-            : 'scanSourceProbe'
-          : result.source === 'scan'
-            ? 'scanSourceDevice'
-            : 'scanSourceNone',
-      );
-      const evidence = document.createElement('div');
-      evidence.textContent = evidenceText;
-      detail.append(source, evidence);
-      row.append(detail);
-    }
-    box.append(row);
+  if (empty) empty.hidden = true;
+  if (!detection) {
+    if (diagnostics) diagnostics.textContent = '';
+    if (diagnosticsDetails) diagnosticsDetails.hidden = true;
+    return;
   }
+  const report = detection;
+  const filterText = (input('km-detection-filter')?.value ?? '').trim().toLocaleLowerCase();
+  const filterState = select('km-detection-state-filter')?.value ?? '';
+  const results = report.results.filter((result) => {
+    if (filterState && result.state !== filterState) return false;
+    if (!filterText) return true;
+    return [
+      result.label,
+      result.id,
+      result.detail,
+      detectionReason(result.reason),
+      ...detectionVoltages(result),
+      result.pd_revision ? `PD ${result.pd_revision.revision_major}.${result.pd_revision.revision_minor}` : '',
+      result.pd_reported_version ? `PD ${result.pd_reported_version.major}.${result.pd_reported_version.minor}` : '',
+    ]
+      .join('\n')
+      .toLocaleLowerCase()
+      .includes(filterText);
+  });
+  /** @param {string} id */
+  const groupId = (id) => (id === 'pd' ? 'pd' : ['qc', 'qc3', 'bc', 'apple'].includes(id) ? 'standard' : 'vendor');
+  const groups = [
+    ['pd', 'triggerGroupPd'],
+    ['standard', 'triggerGroupStandard'],
+    ['vendor', 'triggerGroupVendor'],
+  ];
+  for (const [id, labelKey] of groups) {
+    const groupResults = results.filter((result) => groupId(result.id) === id);
+    if (!groupResults.length) continue;
+    const group = document.createElement('section');
+    group.className = `trigger-detection-group is-${id}`;
+    const groupHeading = document.createElement('h3');
+    groupHeading.textContent = t(labelKey);
+    group.appendChild(groupHeading);
+    for (const result of groupResults) {
+      const row = document.createElement('div');
+      row.className = `trigger-detection-result is-${result.state}`;
+      row.dataset.protocol = result.id;
+      row.classList.toggle('is-pd', result.id === 'pd');
+      row.classList.toggle('is-checking', !report.completion && report.active === result.id);
+      const heading = document.createElement('div');
+      heading.className = 'trigger-detection-heading';
+      const name = document.createElement('span');
+      name.className = 'trigger-protocol-name';
+      name.textContent = result.label;
+      heading.appendChild(name);
+      const status = document.createElement('span');
+      status.className = 'trigger-detection-state';
+      status.textContent =
+        !report.completion && report.active === result.id ? t('scanChecking') : detectionStateLabel(result);
+      const voltage = document.createElement('div');
+      voltage.className = 'trigger-detection-voltages';
+      voltage.setAttribute('aria-label', t('scanVoltages'));
+      const values = detectionVoltages(result);
+      if (values.length) {
+        for (const value of values) {
+          const chip = document.createElement('span');
+          chip.className = 'trigger-voltage-chip';
+          chip.textContent = value;
+          voltage.append(chip);
+        }
+      } else {
+        voltage.classList.add('is-empty');
+        voltage.textContent = t(result.state === 'supported' ? 'scanVoltageUnknown' : 'scanVoltageUnavailable');
+      }
+      row.append(heading, status, voltage);
+      if (
+        result.id === 'pd' &&
+        (result.pd_revision || result.pd_reported_version || result.pd_version_inference || report.completion)
+      ) {
+        const version = document.createElement('div');
+        version.className = 'trigger-detection-version';
+        version.textContent = pdVersionLabel(result);
+        row.appendChild(version);
+      }
+      const action = document.createElement('div');
+      action.className = 'trigger-detection-action';
+      if (detectionCanSelect(result)) {
+        const use = document.createElement('button');
+        use.type = 'button';
+        use.className = 'cmd-btn';
+        use.textContent = t('triggerUseProtocol');
+        use.disabled = busy;
+        use.title = t('scanSelectProtocol');
+        use.addEventListener('click', () => fillDetectedProtocol(result));
+        action.appendChild(use);
+      }
+      row.appendChild(action);
+      const evidenceText = [detectionReason(result.reason), result.detail].filter(Boolean).join('\n');
+      if (evidenceText) {
+        const detail = document.createElement('details');
+        detail.className = 'trigger-detection-detail';
+        detail.dataset.protocol = result.id;
+        detail.open = expanded.has(result.id);
+        const source = document.createElement('summary');
+        source.textContent = t(
+          result.source === 'probe'
+            ? result.id === 'pd'
+              ? 'scanSourcePdo'
+              : 'scanSourceProbe'
+            : result.source === 'scan'
+              ? 'scanSourceDevice'
+              : 'scanSourceNone',
+        );
+        const evidence = document.createElement('div');
+        evidence.textContent = evidenceText;
+        detail.append(source, evidence);
+        row.appendChild(detail);
+      }
+      group.appendChild(row);
+    }
+    box.appendChild(group);
+  }
+  if (empty) empty.hidden = results.length > 0;
   if (diagnostics) {
     diagnostics.textContent = [report.pdm_version ? `PDM ${report.pdm_version}` : '', ...report.diagnostics]
       .filter(Boolean)
       .join('\n');
   }
+  if (diagnosticsDetails) diagnosticsDetails.hidden = !diagnostics?.textContent;
+}
+
+/** @param {'detection'|'trigger'} mode */
+function setTriggerMode(mode) {
+  triggerMode = mode === 'detection' ? 'detection' : 'trigger';
+  const modes = [
+    ['detection', 'btn-km-mode-detection', 'km-detection-panel'],
+    ['trigger', 'btn-km-mode-trigger', 'km-trigger-panel'],
+  ];
+  for (const [id, buttonId, panelId] of modes) {
+    const button = /** @type {HTMLButtonElement|null} */ (el(buttonId));
+    const panel = el(panelId);
+    const active = id === triggerMode;
+    if (button) {
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    }
+    if (panel) panel.hidden = !active;
+  }
+}
+
+/** @param {string} proto @param {{ position?: number, voltMv?: number, curMa?: number, volt?: string }} values */
+function setRequestForm(proto, values = {}) {
+  const protocol = select('km-proto');
+  if (!protocol || !Array.from(protocol.options, (option) => option.value).includes(proto)) return;
+  protocol.value = proto;
+  const position = input('km-req-pos');
+  const voltage = input('km-req-volt');
+  const current = input('km-req-cur');
+  const fixedVoltage = select('km-qc-volt');
+  if (position && values.position !== undefined) position.value = String(values.position);
+  if (voltage && values.voltMv !== undefined) voltage.value = String(values.voltMv);
+  if (current && values.curMa !== undefined) current.value = String(values.curMa);
+  if (fixedVoltage && values.volt !== undefined) fixedVoltage.value = values.volt;
+  renderFields();
+  setTriggerMode('trigger');
+}
+
+/** The operation only prepares the request. The user must press Trigger to send it. */
+function fillDetectedProtocol(result) {
+  if (busy || !detectionCanSelect(result)) return;
+  setRequestForm(result.id, { position: 1, voltMv: 5000, curMa: 3000, volt: '5V' });
+}
+
+/** @param {TriggerCommand} command */
+function historyCommandCanFill(command) {
+  return [
+    'pdm_set',
+    'pd_req',
+    'qc',
+    'qc3',
+    'fcp',
+    'afc',
+    'sfcp',
+    'scp',
+    'vfcp',
+    'ufcs',
+    'entry',
+    'pd_cmd',
+    'pd_data',
+    'ufcs_cmd',
+    'raw',
+  ].includes(command.type);
+}
+
+/** @param {TriggerCommand} command */
+function fillFromHistory(command) {
+  if (busy) return;
+  const openAdvanced = () => {
+    const advanced = document.querySelector('details.trigger-advanced');
+    if (advanced instanceof HTMLDetailsElement) advanced.open = true;
+  };
+  switch (command.type) {
+    case 'pdm_set': {
+      const values = clampPdm({ pdType: command.pd_type, em: command.em, sink: command.sink });
+      const pdType = select('km-pdm-type');
+      const em = select('km-pdm-em');
+      const sink = select('km-pdm-sink');
+      if (pdType) pdType.value = String(values.pdType);
+      if (em) em.value = String(values.em);
+      if (sink) sink.value = String(values.sink);
+      state.settings.km003cPdm = values;
+      debouncedSaveSettings();
+      break;
+    }
+    case 'pd_req':
+      setRequestForm('pd', {
+        position: Number(command.position),
+        voltMv: Number(command.volt_mv),
+        curMa: Number(command.cur_ma),
+      });
+      break;
+    case 'qc':
+      setRequestForm('qc', { volt: String(command.voltage) });
+      break;
+    case 'qc3':
+      setRequestForm('qc3', { voltMv: Number(command.volt_mv) });
+      break;
+    case 'fcp':
+    case 'afc':
+    case 'sfcp':
+      setRequestForm(command.type, { volt: String(command.voltage) });
+      break;
+    case 'scp':
+    case 'vfcp':
+      setRequestForm(command.type, { voltMv: Number(command.volt_mv), curMa: Number(command.cur_ma) });
+      break;
+    case 'ufcs':
+      setRequestForm('ufcs', {
+        position: Number(command.req ?? input('km-req-pos')?.value),
+        voltMv: command.volt_mv == null ? Number(input('km-req-volt')?.value) : Number(command.volt_mv),
+        curMa: command.cur_ma == null ? Number(input('km-req-cur')?.value) : Number(command.cur_ma),
+      });
+      break;
+    case 'entry':
+      if (typeof command.protocol === 'string') setRequestForm(command.protocol, {});
+      break;
+    case 'pd_cmd': {
+      const field = input('km-pd-cmd');
+      if (field) field.value = String(command.cmd);
+      openAdvanced();
+      break;
+    }
+    case 'pd_data': {
+      const field = input('km-pd-data');
+      if (field) field.value = String(command.hex);
+      openAdvanced();
+      break;
+    }
+    case 'ufcs_cmd': {
+      const field = input('km-ufcs-cmd');
+      if (field) field.value = String(command.cmd);
+      openAdvanced();
+      break;
+    }
+    case 'raw': {
+      const field = input('km-raw-cmd');
+      if (field) field.value = String(command.command);
+      openAdvanced();
+      break;
+    }
+  }
+  setTriggerMode('trigger');
 }
 
 function renderLive() {
@@ -348,6 +642,7 @@ function renderAll() {
   renderEnabled();
   renderLog();
   renderDetection();
+  setTriggerMode(triggerMode);
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -384,11 +679,33 @@ function currentPdm() {
   });
 }
 
+/** @param {string} text */
+function appendHistoryProgress(text) {
+  const entry = historyEntries.find((item) => item.id === activeHistoryId);
+  if (!entry || !text) return;
+  entry.progress = `${entry.progress}\n${text}`.trim().slice(-16_000);
+  historyEntries = trimTriggerHistory(historyEntries);
+}
+
+/** @param {TriggerHistoryStatus} status @param {string} reply */
+function completeHistoryEntry(status, reply) {
+  const entry = historyEntries.find((item) => item.id === activeHistoryId);
+  if (!entry) return;
+  entry.status = status;
+  entry.elapsedMs = Math.max(0, Date.now() - entry.startedAt);
+  entry.reply = String(reply ?? '').slice(0, LOG_LIMIT);
+  historyEntries = trimTriggerHistory(historyEntries);
+}
+
 function finish() {
+  const active = historyEntries.find((entry) => entry.id === activeHistoryId);
+  if (active?.status === 'running') completeHistoryEntry('failure', t('deviceConnectionLost'));
   busy = false;
   scanning = false;
   pendingReqId = null;
-  progress = '';
+  activeHistoryId = null;
+  cancelRequested = false;
+  timedOut = false;
   if (watchdog !== null) {
     clearTimeout(watchdog);
     watchdog = null;
@@ -398,15 +715,9 @@ function finish() {
 
 /** @param {TriggerOutcome} outcome */
 function applyOutcome(outcome) {
-  const time = stamp();
-  const finalProgress = progress;
-  addLog(() =>
-    prependOutcome(
-      '',
-      { ...outcome, message: outcome.description ? errorText(outcome.description) : outcome.message },
-      finalProgress,
-      time,
-    ),
+  completeHistoryEntry(
+    outcomeHistoryStatus(outcome, { cancelRequested, timedOut }),
+    outcome.message || (outcome.description ? errorText(outcome.description) : ''),
   );
   pdmOpen = outcome.pdm_open;
   if (outcome.detection) detection = outcome.detection;
@@ -430,7 +741,24 @@ async function run(cmd) {
   const generation = deviceStream.generation;
   busy = true;
   scanning = cmd.type === 'list';
+  cancelRequested = false;
+  timedOut = false;
+  const startedAt = Date.now();
+  activeHistoryId = reqId;
+  historyEntries = trimTriggerHistory([
+    {
+      id: reqId,
+      command: JSON.parse(JSON.stringify(cmd)),
+      startedAt,
+      elapsedMs: null,
+      status: 'running',
+      progress: '',
+      reply: '',
+    },
+    ...historyEntries,
+  ]);
   if (scanning) {
+    setTriggerMode('detection');
     detection = null;
     pdos = [];
     renderPdos();
@@ -441,13 +769,12 @@ async function run(cmd) {
     if (cmd.type !== 'pd_pdo') detection = null;
   }
   pendingReqId = reqId;
-  progress = '';
   renderAll();
   // 后端每条命令都有串口超时；这里只防后端事件丢失导致界面永远卡在进行中。
   watchdog = setTimeout(() => {
     if (pendingReqId !== reqId) return;
-    const time = stamp();
-    addLog(() => `[${time}] ERR\n${t('triggerTimeout')}`);
+    timedOut = true;
+    appendHistoryProgress(t('triggerTimeout'));
     // Request cancellation but keep the command slot occupied until the backend returns.
     // Late progress must not unlock another hardware command or overwrite a newer scan.
     void cancel();
@@ -462,8 +789,7 @@ async function run(cmd) {
     if (scanning && !outcome.detection && detection) detection.completion = outcome.ok ? 'partial' : 'failed';
   } catch (error) {
     if (pendingReqId !== reqId) return;
-    const time = stamp();
-    addLog(() => `[${time}] ERR\n${errorText(error)}`);
+    completeHistoryEntry(cancelRequested && !timedOut ? 'cancelled' : 'failure', errorText(error));
     if (scanning && detection) detection.completion = 'failed';
   }
   finish();
@@ -485,6 +811,7 @@ function triggerFromForm() {
 
 async function cancel() {
   if (!busy) return;
+  cancelRequested = true;
   try {
     await window.__TAURI__.core.invoke('km003c_cancel_trigger', { generation: deviceStream.generation });
   } catch (error) {
@@ -492,16 +819,52 @@ async function cancel() {
   }
 }
 
-async function copyLog() {
-  const log = /** @type {HTMLTextAreaElement|null} */ (el('km-log'));
-  if (!log || !log.value) return;
+/** @param {string} text */
+async function copyText(text) {
+  if (!text) return;
   try {
-    await navigator.clipboard.writeText(log.value);
+    await navigator.clipboard.writeText(text);
     toast.success(() => t('triggerCopied'));
   } catch {
-    log.focus();
-    log.select();
-    toast.info(() => t('triggerSelected'));
+    const fallback = document.createElement('textarea');
+    fallback.value = text;
+    fallback.readOnly = true;
+    fallback.style.position = 'fixed';
+    fallback.style.opacity = '0';
+    document.body.appendChild(fallback);
+    fallback.select();
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch {
+      copied = false;
+    }
+    fallback.remove();
+    if (copied) toast.success(() => t('triggerCopied'));
+    else toast.error(() => t('triggerHistoryCopyFailed'));
+  }
+}
+
+async function copyLog() {
+  const content = exportTriggerHistory(historyEntries);
+  if (!content) return;
+  await copyText(content);
+}
+
+async function exportLog() {
+  const content = exportTriggerHistory(historyEntries);
+  if (!content) return;
+  try {
+    const path = await window.__TAURI__.dialog.save({
+      title: t('triggerHistoryExport'),
+      defaultPath: `lapower-command-history-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`,
+      filters: [{ name: t('textFile'), extensions: ['txt'] }],
+    });
+    if (!path) return;
+    await window.__TAURI__.fs.writeTextFile(path, content);
+    toast.success(() => t('triggerHistoryExported'));
+  } catch (error) {
+    toast.error(() => t('triggerHistoryExportFailed', { detail: errorText(error) }));
   }
 }
 
@@ -519,7 +882,7 @@ export function handleTriggerProgress(payload) {
     detection = p.detection;
     if (initialized) renderDetection();
   }
-  if (p.text) progress = `${progress}\n${p.text}`.trim().slice(-16_000);
+  if (p.text) appendHistoryProgress(p.text);
   if (initialized) renderLog();
 }
 
@@ -539,8 +902,19 @@ export function handlePdmState(payload) {
     if (initialized) renderPdos();
   }
   if (p.description || p.message) {
-    const time = stamp();
-    addLog(() => `[${time}] ${errorText(p.description ?? p.message)}`);
+    const startedAt = Date.now();
+    historyEntries = trimTriggerHistory([
+      {
+        id: `pdm-${startedAt}-${++requestCounter}`,
+        command: { type: 'pdm_state' },
+        startedAt,
+        elapsedMs: 0,
+        status: p.description ? 'failure' : 'success',
+        progress: '',
+        reply: errorText(p.description ?? p.message),
+      },
+      ...historyEntries,
+    ]);
   }
   if (initialized) renderAll();
 }
@@ -626,16 +1000,33 @@ export function initTriggerView() {
   });
 
   click('btn-km-cancel', () => void cancel());
+  click('btn-km-mode-detection', () => setTriggerMode('detection'));
+  click('btn-km-mode-trigger', () => setTriggerMode('trigger'));
   click('btn-km-log-copy', () => void copyLog());
+  click('btn-km-log-export', () => void exportLog());
   click('btn-km-log-clear', () => {
-    logText = '';
-    logEntries.length = 0;
+    historyEntries = [];
     renderLog();
+  });
+  for (const id of ['km-log-command-filter', 'km-log-status-filter']) {
+    el(id)?.addEventListener('change', () => renderHistory());
+  }
+  el('km-log-text-filter')?.addEventListener('input', () => renderHistory());
+  el('km-detection-filter')?.addEventListener('input', renderDetection);
+  el('km-detection-state-filter')?.addEventListener('change', renderDetection);
+  el('km-detection-empty')?.addEventListener('click', () => {
+    input('km-detection-filter')?.focus();
   });
 
   renderFields();
   renderPdos();
+  setTriggerMode('trigger');
   renderAll();
+  onLanguageChange(() => {
+    renderFields();
+    renderPdos();
+    renderAll();
+  });
 }
 
 /** 视图显示：补齐状态并开始刷新读数条。 */

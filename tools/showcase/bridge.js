@@ -23,6 +23,11 @@ let pdCursor = 0;
 let pdmOpen = false;
 let targetVoltage = null;
 let trigger = null;
+let triggerCalls = 0;
+let triggerDelayMs = null;
+let failNextTrigger = false;
+let nextDetectionCompletion = 'complete';
+let pdVersionCapabilitiesEnabled = true;
 let maximized = false;
 let fullscreen = false;
 let minimized = false;
@@ -31,6 +36,7 @@ const handlers = new Map();
 const pdLog = [];
 const errors = [];
 const files = new Map();
+const textExports = [];
 let fileId = 0;
 const stored = new Map([
   [
@@ -213,11 +219,16 @@ async function runTrigger(args) {
     'raw',
   ];
   if (!supported.includes(cmd.type)) throw new Error(`Unsupported virtual trigger: ${cmd.type}`);
+  triggerCalls++;
   const active = { cancelled: false, generation };
   trigger = active;
   try {
     emit('km003c-trigger-progress', { generation, req_id: reqId, text: `> ${cmd.type}` });
-    await new Promise((accept) => setTimeout(accept, frozen ? 0 : 200));
+    await new Promise((accept) => setTimeout(accept, triggerDelayMs ?? (frozen ? 0 : 200)));
+    if (failNextTrigger) {
+      failNextTrigger = false;
+      throw new Error('Virtual trigger failure');
+    }
     if (active.cancelled || !device || generation !== active.generation) throw new Error('Virtual trigger cancelled');
     if (cmd.type === 'pdm_open') pdmOpen = true;
     if (cmd.type === 'pdm_close') pdmOpen = false;
@@ -233,28 +244,41 @@ async function runTrigger(args) {
     const detection = listed
       ? {
           results: [
-            ...PROTOCOLS.map((p) => ({
-              ...p,
-              state: 'supported',
-              source: p.id === 'pd' ? 'probe' : 'scan',
-              detail:
-                p.id === 'pd'
-                  ? PDOS.map((pdo) => pdo.label).join('\n')
-                  : p.id === 'qc3'
-                    ? `${p.label}: 3.6-12V`
-                    : p.id === 'apple'
-                      ? 'Apple 2.4A'
-                      : `${p.label}: 5V,9V,12V`,
-              voltages:
-                p.id === 'pd'
-                  ? PDOS.map(({ kind, volt_min_mv, volt_max_mv }) => ({ kind, volt_min_mv, volt_max_mv }))
-                  : p.id === 'qc3'
-                    ? [{ kind: 'range', volt_min_mv: 3600, volt_max_mv: 12000 }]
-                    : p.id === 'apple'
-                      ? []
-                      : [5000, 9000, 12000].map((mv) => ({ kind: 'fixed', volt_min_mv: mv, volt_max_mv: mv })),
-              reason: '',
-            })),
+            ...PROTOCOLS.map((p) => {
+              const reportedPdos =
+                p.id === 'pd' ? PDOS.filter((pdo) => pdVersionCapabilitiesEnabled || pdo.kind === 'fixed') : [];
+              return {
+                ...p,
+                state: 'supported',
+                source: p.id === 'pd' ? 'probe' : 'scan',
+                detail:
+                  p.id === 'pd'
+                    ? reportedPdos.map((pdo) => pdo.label).join('\n')
+                    : p.id === 'qc3'
+                      ? `${p.label}: 3.6-12V`
+                      : p.id === 'apple'
+                        ? 'Apple 2.4A'
+                        : `${p.label}: 5V,9V,12V`,
+                voltages:
+                  p.id === 'pd'
+                    ? reportedPdos.map(({ kind, volt_min_mv, volt_max_mv }) => ({ kind, volt_min_mv, volt_max_mv }))
+                    : p.id === 'qc3'
+                      ? [{ kind: 'range', volt_min_mv: 3600, volt_max_mv: 12000 }]
+                      : p.id === 'apple'
+                        ? []
+                        : [5000, 9000, 12000].map((mv) => ({ kind: 'fixed', volt_min_mv: mv, volt_max_mv: mv })),
+                ...(reportedPdos.some((pdo) => pdo.kind === 'spr_avs')
+                  ? {
+                      pd_version_inference: {
+                        minimum_major: 3,
+                        minimum_minor: 2,
+                        basis: 'spr_avs',
+                      },
+                    }
+                  : {}),
+                reason: '',
+              };
+            }),
             ...['BC 1.2', 'UFCS', 'VFCP', 'SCP', 'SFCP', 'TFCP'].map((label) => ({
               id: label === 'BC 1.2' ? 'bc' : label.toLowerCase(),
               label,
@@ -279,13 +303,14 @@ async function runTrigger(args) {
           ],
           phase: 'finished',
           active: null,
-          completion: 'complete',
+          completion: nextDetectionCompletion,
           pdm_version: '1.1',
           fallback_used: false,
           elapsed_ms: 200,
           diagnostics: [],
         }
       : undefined;
+    if (listed) nextDetectionCompletion = 'complete';
     if (listed) {
       targetVoltage = null;
       emit('km003c-trigger-progress', { generation, req_id: reqId, text: '', detection });
@@ -666,6 +691,7 @@ window.__TAURI__ = {
   window: { getCurrentWindow: () => appWindow },
   app: { getVersion: async () => __SHOWCASE_VERSION__, getName: async () => 'laPower' },
   dialog: {
+    save: async () => 'memory://trigger-history.txt',
     open: async () => {
       const file = await chooseFile('.json');
       if (!file) return null;
@@ -674,6 +700,10 @@ window.__TAURI__ = {
     },
   },
   fs: {
+    writeTextFile: async (path, content) => {
+      if (path !== 'memory://trigger-history.txt') throw new Error('Invalid virtual output path');
+      textExports.push(String(content));
+    },
     readTextFile: async (path) => {
       if (path !== 'memory://pd-import') throw new Error('Invalid virtual path');
       return files.get('pd-import').text();
@@ -702,7 +732,26 @@ window.__SHOWCASE__ = {
     pdEntries: pdLog.length,
     errors: [...errors],
     openFiles: files.size,
+    triggerCalls,
+    lastTextExport: textExports.at(-1) ?? null,
   }),
+  setTriggerDelay: (ms) => {
+    triggerDelayMs = Math.max(0, Number(ms) || 0);
+  },
+  resetTriggerDelay: () => {
+    triggerDelayMs = null;
+  },
+  failNextTrigger: () => {
+    failNextTrigger = true;
+  },
+  setNextDetectionCompletion: (completion) => {
+    nextDetectionCompletion = ['partial', 'failed', 'timeout', 'cancelled'].includes(completion)
+      ? completion
+      : 'complete';
+  },
+  setPdVersionCapabilities: (enabled) => {
+    pdVersionCapabilitiesEnabled = enabled === true;
+  },
   async waitFor(predicate) {
     const deadline = performance.now() + 10000;
     while (!predicate()) {

@@ -15,8 +15,13 @@ import { t } from './i18n.js';
  *   cur_ma?: number, label: string, programmable: boolean }} TriggerPdo
  * @typedef {{ id: string, label: string }} DetectedProtocol
  * @typedef {{ kind: string, volt_min_mv: number, volt_max_mv: number }} DetectionVoltage
+ * @typedef {{ revision_major: number, revision_minor: number, version_major: number, version_minor: number }} PdRevision
+ * @typedef {{ major: number, minor: number }} PdReportedVersion
+ * @typedef {{ minimum_major: number, minimum_minor: number, basis: 'pps'|'epr'|'spr_avs' }} PdVersionInference
  * @typedef {DetectedProtocol & { state: 'supported'|'unsupported'|'not_checked'|'failed',
- *   source: string, detail: string, reason: string, voltages?: DetectionVoltage[] }} ProtocolDetection
+ *   source: string, detail: string, reason: string, voltages?: DetectionVoltage[],
+ *   pd_revision?: PdRevision, pd_reported_version?: PdReportedVersion,
+ *   pd_version_inference?: PdVersionInference }} ProtocolDetection
  * @typedef {{ results: ProtocolDetection[], phase: string, active: string|null, completion: string|null,
  *   pdm_version: string|null, fallback_used: boolean, elapsed_ms: number, diagnostics: string[] }} DetectionReport
  * @typedef {{ ok: boolean, message: string, pdos: TriggerPdo[], protocols: DetectedProtocol[],
@@ -181,12 +186,133 @@ export function commandNeedsPdm(cmd) {
 export const LOG_LIMIT = 64_000;
 
 /**
+ * @typedef {'running'|'success'|'partial'|'failure'|'cancelled'} TriggerHistoryStatus
+ * @typedef {{ id: string, command: TriggerCommand, startedAt: number, elapsedMs: number|null,
+ *   status: TriggerHistoryStatus, progress: string, reply: string }} TriggerHistoryEntry
+ */
+
+/** @param {TriggerCommand} command */
+export function summarizeTriggerCommand(command) {
+  const params = Object.entries(command)
+    .filter(([key]) => key !== 'type')
+    .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`);
+  return [command.type, ...params].join(' ');
+}
+
+/** @param {TriggerHistoryEntry} entry */
+export function formatTriggerHistoryEntry(entry) {
+  const time = new Date(entry.startedAt).toLocaleTimeString(undefined, { hour12: false });
+  const duration = entry.elapsedMs === null ? t('triggerHistoryRunning') : `${Math.max(0, entry.elapsedMs)} ms`;
+  const statusKey = {
+    running: 'triggerHistoryRunning',
+    success: 'triggerHistorySuccess',
+    partial: 'triggerHistoryPartial',
+    failure: 'triggerHistoryFailure',
+    cancelled: 'triggerHistoryCancelled',
+  }[entry.status];
+  const lines = [`${time}  ${summarizeTriggerCommand(entry.command)}  ${t(statusKey)}  ${duration}`];
+  if (entry.progress) lines.push(`${t('triggerHistoryProgress')}:\n${entry.progress}`);
+  if (entry.reply) lines.push(`${t('triggerHistoryReply')}:\n${entry.reply}`);
+  return lines.join('\n');
+}
+
+/**
+ * Keep the newest history within the same 64 KB user-visible limit as the former reply log.
+ * A single oversized command retains its header and as much raw reply as fits.
+ * @param {TriggerHistoryEntry[]} entries
+ * @returns {TriggerHistoryEntry[]}
+ */
+export function trimTriggerHistory(entries) {
+  const kept = [...entries];
+  while (kept.length > 1 && kept.map(formatTriggerHistoryEntry).join('\n\n').length > LOG_LIMIT) kept.pop();
+  if (kept.length === 1 && formatTriggerHistoryEntry(kept[0]).length > LOG_LIMIT) {
+    const entry = { ...kept[0], progress: '', reply: '' };
+    const headerLength = formatTriggerHistoryEntry(entry).length;
+    const replyPrefix = `${t('triggerHistoryReply')}:\n`;
+    entry.reply = kept[0].reply.slice(0, Math.max(0, LOG_LIMIT - headerLength - replyPrefix.length));
+    kept[0] = entry;
+  }
+  return kept;
+}
+
+/** @param {TriggerHistoryEntry[]} entries @param {{ command?: string, status?: string, text?: string }} filters */
+export function filterTriggerHistory(entries, filters = {}) {
+  const command = String(filters.command ?? '').toLowerCase();
+  const status = String(filters.status ?? '');
+  const text = String(filters.text ?? '')
+    .trim()
+    .toLocaleLowerCase();
+  return entries.filter((entry) => {
+    if (command && entry.command.type !== command) return false;
+    if (status && entry.status !== status) return false;
+    if (!text) return true;
+    return `${summarizeTriggerCommand(entry.command)}\n${entry.progress}\n${entry.reply}`
+      .toLocaleLowerCase()
+      .includes(text);
+  });
+}
+
+/** @param {TriggerHistoryEntry[]} entries */
+export function exportTriggerHistory(entries) {
+  return entries.map(formatTriggerHistoryEntry).join('\n\n').slice(0, LOG_LIMIT);
+}
+
+/**
  * 只有结构化检测报告使用检测标题；普通命令的 : OK 不是列表扫描。
  * @param {TriggerOutcome} outcome
  */
 export function outcomeHead(outcome) {
   if (outcome.detection) return detectionSummary(outcome.detection);
   return outcome.ok ? 'OK' : 'ERR';
+}
+
+/** @param {TriggerOutcome} outcome @param {{ cancelRequested?: boolean, timedOut?: boolean }} [state] */
+/** @returns {TriggerHistoryStatus} */
+export function outcomeHistoryStatus(outcome, state = {}) {
+  if (state.timedOut) return 'failure';
+  if (outcome.detection?.completion === 'cancelled' || (state.cancelRequested && !outcome.ok)) return 'cancelled';
+  if (outcome.detection?.completion === 'partial') return 'partial';
+  return outcome.ok ? 'success' : 'failure';
+}
+
+/** @param {ProtocolDetection} result */
+export function pdVersionLabel(result) {
+  if (result.pd_revision) {
+    return t('scanPdVersionExact', {
+      revision: `${result.pd_revision.revision_major}.${result.pd_revision.revision_minor}`,
+      version: `${result.pd_revision.version_major}.${result.pd_revision.version_minor}`,
+    });
+  }
+  const inference = result.pd_version_inference;
+  const reported = result.pd_reported_version;
+  if (
+    inference &&
+    (!reported ||
+      inference.minimum_major > reported.major ||
+      (inference.minimum_major === reported.major && inference.minimum_minor > reported.minor))
+  ) {
+    return inferredPdVersionLabel(inference);
+  }
+  if (reported)
+    return t('scanPdVersionMeter', {
+      revision: `${reported.major}.${reported.minor}`,
+    });
+  if (inference) return inferredPdVersionLabel(inference);
+  return t('scanPdVersionUnknown');
+}
+
+/** @param {PdVersionInference} inference */
+function inferredPdVersionLabel(inference) {
+  return t('scanPdVersionInferred', {
+    revision: `${inference.minimum_major}.${inference.minimum_minor}`,
+    feature: t(
+      {
+        pps: 'scanPdFeaturePps',
+        epr: 'scanPdFeatureEpr',
+        spr_avs: 'scanPdFeatureSprAvs',
+      }[inference.basis],
+    ),
+  });
 }
 
 /** @param {DetectionReport} report */
@@ -207,6 +333,7 @@ export function detectionSummary(report) {
     fallback: 'scanPhaseFallback',
     probe: 'scanPhaseProbe',
     pd_pdo: 'scanPhasePdo',
+    pd_revision: 'scanPhaseRevision',
     reset: 'scanPhaseReset',
   };
   const label = report.results.find((r) => r.id === report.active)?.label ?? '';

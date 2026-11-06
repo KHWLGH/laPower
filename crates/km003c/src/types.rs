@@ -113,6 +113,35 @@ pub struct DetectionVoltage {
     pub volt_max_mv: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PdRevision {
+    pub revision_major: u8,
+    pub revision_minor: u8,
+    pub version_major: u8,
+    pub version_minor: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct PdReportedVersion {
+    pub major: u8,
+    pub minor: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PdVersionBasis {
+    Pps,
+    Epr,
+    SprAvs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PdVersionInference {
+    pub minimum_major: u8,
+    pub minimum_minor: u8,
+    pub basis: PdVersionBasis,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProtocolDetection {
     pub id: String,
@@ -124,6 +153,15 @@ pub struct ProtocolDetection {
     /// Only this protocol's reported capabilities or explicitly verified voltage.
     #[serde(default)]
     pub voltages: Vec<DetectionVoltage>,
+    /// Legacy exact USB-PD Revision response accepted from older report producers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pd_revision: Option<PdRevision>,
+    /// Explicit PD version label from a completed instrument scan, independent of PDO reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pd_reported_version: Option<PdReportedVersion>,
+    /// Lowest PD revision proven by a distinctive advertised PDO capability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pd_version_inference: Option<PdVersionInference>,
     /// Stable reason key for localization; detail retains the device's reply.
     pub reason: String,
 }
@@ -235,5 +273,40 @@ mod tests {
         assert!(value.get("code").is_none());
         assert!(value["pdos"][0].get("cur_ma").is_none());
         assert_eq!(value["pdm_open"], json!(true));
+    }
+
+    #[test]
+    fn protocol_detection_preserves_legacy_revision_without_inventing_inference() {
+        let legacy = json!({
+            "id": "pd",
+            "label": "PD",
+            "state": "supported",
+            "source": "probe",
+            "detail": "Fixed: 5.00V 3.00A",
+            "voltages": [],
+            "pd_revision": {
+                "revision_major": 3,
+                "revision_minor": 2,
+                "version_major": 1,
+                "version_minor": 2
+            },
+            "reason": ""
+        });
+        let detection: ProtocolDetection = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            detection.pd_revision,
+            Some(PdRevision {
+                revision_major: 3,
+                revision_minor: 2,
+                version_major: 1,
+                version_minor: 2,
+            })
+        );
+        assert_eq!(detection.pd_version_inference, None);
+        assert_eq!(detection.pd_reported_version, None);
+        let serialized = serde_json::to_value(detection).unwrap();
+        assert_eq!(serialized["pd_revision"]["revision_minor"], json!(2));
+        assert!(serialized.get("pd_reported_version").is_none());
+        assert!(serialized.get("pd_version_inference").is_none());
     }
 }
