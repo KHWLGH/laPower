@@ -11,7 +11,7 @@ import { t } from './i18n.js';
 /**
  * @typedef {{ pdType: number, em: number, sink: number }} PdmSettings
  * @typedef {{ type: string } & Record<string, unknown>} TriggerCommand
- * @typedef {{ position: number, kind: string, volt_min_mv: number, volt_max_mv: number,
+ * @typedef {{ protocol?: string, position: number, kind: string, volt_min_mv: number, volt_max_mv: number,
  *   cur_ma?: number, label: string, programmable: boolean }} TriggerPdo
  * @typedef {{ id: string, label: string }} DetectedProtocol
  * @typedef {{ kind: string, volt_min_mv: number, volt_max_mv: number }} DetectionVoltage
@@ -22,10 +22,14 @@ import { t } from './i18n.js';
  *   source: string, detail: string, reason: string, voltages?: DetectionVoltage[],
  *   pd_revision?: PdRevision, pd_reported_version?: PdReportedVersion,
  *   pd_version_inference?: PdVersionInference }} ProtocolDetection
+ * @typedef {{ firmware_version?: string|null, firmware_diagnostic?: string|null, pdm_version?: string|null,
+ *   applied_pdm?: {pd_type: number, em: number, sink: number}|null }} TriggerContext
+ * @typedef {{status: string, target_mv: number, measured_mv?: number|null, sample_count: number, detail: string}} VoltageVerification
  * @typedef {{ results: ProtocolDetection[], phase: string, active: string|null, completion: string|null,
- *   pdm_version: string|null, fallback_used: boolean, elapsed_ms: number, diagnostics: string[] }} DetectionReport
+ *   pdm_version: string|null, fallback_used: boolean, elapsed_ms: number, diagnostics: string[], context?: TriggerContext, reset_verification?: VoltageVerification }} DetectionReport
  * @typedef {{ ok: boolean, message: string, pdos: TriggerPdo[], protocols: DetectedProtocol[],
- *   detection?: DetectionReport, code?: string, pdm_open: boolean, description?: unknown }} TriggerOutcome
+ *   detection?: DetectionReport, code?: string, pdm_open: boolean, description?: unknown, context?: TriggerContext,
+ *   reset_verification?: VoltageVerification, transcript?: string, transcript_truncated?: boolean }} TriggerOutcome
  * @typedef {{ position: number, voltMv: number, curMa: number, volt: string }} TriggerForm
  */
 
@@ -120,13 +124,15 @@ function intIn(value, min, max) {
  * 按表单构造一条触发命令；数值不合法时给出当前语言的原因，不发送。
  * @param {string} proto
  * @param {TriggerForm} form
+ * @param {TriggerPdo[]} [pdos]
  * @returns {{ cmd: TriggerCommand } | { error: string }}
  */
-export function buildTriggerCommand(proto, form) {
+export function buildTriggerCommand(proto, form, pdos = []) {
+  const fixed = selectedFixedPdo(proto, form.position, pdos);
   const fields = protocolFields(proto);
   if (fields.position && !intIn(form.position, 1, 15))
     return { error: t('positionInvalid', { field: fields.positionLabel }) };
-  if (fields.voltMv && !intIn(form.voltMv, 0, 60000)) return { error: t('voltageInvalid') };
+  if (fields.voltMv && !fixed && !intIn(form.voltMv, 0, 60000)) return { error: t('voltageInvalid') };
   if (fields.curMa && !intIn(form.curMa, 0, 10000)) return { error: t('currentInvalid') };
   if (fields.fixedVolt && !fields.voltChoices.includes(form.volt)) return { error: t('selectVoltage') };
   const position = Number(form.position);
@@ -134,7 +140,7 @@ export function buildTriggerCommand(proto, form) {
   const curMa = Number(form.curMa);
   switch (proto) {
     case 'pd':
-      return { cmd: { type: 'pd_req', position, volt_mv: voltMv, cur_ma: curMa } };
+      return { cmd: { type: 'pd_req', position, volt_mv: fixed ? null : voltMv, cur_ma: curMa } };
     case 'qc':
       return { cmd: { type: 'qc', voltage: form.volt } };
     case 'qc3':
@@ -157,13 +163,18 @@ export function buildTriggerCommand(proto, form) {
 }
 
 /**
- * 清洗 `pd data` 的十六进制：只留十六进制字符，要求偶数位且至少 1 字节。
+ * 解析 `pd data` 的十六进制字节；只接受明确分隔符，非法字符或半字节直接报错。
  * @param {string} text
  * @returns {string|null}
  */
 export function cleanHex(text) {
-  const hex = String(text ?? '').replace(/[^0-9a-fA-F]/g, '');
-  return hex.length >= 2 && hex.length % 2 === 0 ? hex.toUpperCase() : null;
+  const tokens = String(text ?? '')
+    .split(/[\s,:-]+/)
+    .filter(Boolean);
+  if (!tokens.length) return null;
+  const parts = tokens.map((token) => token.replace(/^0x/i, ''));
+  if (parts.some((part) => !part || part.length % 2 || !/^[0-9a-f]+$/i.test(part))) return null;
+  return parts.join('').toUpperCase();
 }
 
 /**
@@ -188,7 +199,7 @@ export const LOG_LIMIT = 64_000;
 /**
  * @typedef {'running'|'success'|'partial'|'failure'|'cancelled'} TriggerHistoryStatus
  * @typedef {{ id: string, command: TriggerCommand, startedAt: number, elapsedMs: number|null,
- *   status: TriggerHistoryStatus, progress: string, reply: string }} TriggerHistoryEntry
+ *   status: TriggerHistoryStatus, progress: string, reply: string, truncated?: boolean }} TriggerHistoryEntry
  */
 
 /** @param {TriggerCommand} command */
@@ -211,6 +222,7 @@ export function formatTriggerHistoryEntry(entry) {
     cancelled: 'triggerHistoryCancelled',
   }[entry.status];
   const lines = [`${time}  ${summarizeTriggerCommand(entry.command)}  ${t(statusKey)}  ${duration}`];
+  if (entry.truncated) lines.push(t('triggerHistoryTruncated'));
   if (entry.progress) lines.push(`${t('triggerHistoryProgress')}:\n${entry.progress}`);
   if (entry.reply) lines.push(`${t('triggerHistoryReply')}:\n${entry.reply}`);
   return lines.join('\n');
@@ -218,21 +230,37 @@ export function formatTriggerHistoryEntry(entry) {
 
 /**
  * Keep the newest history within the same 64 KB user-visible limit as the former reply log.
- * A single oversized command retains its header and as much raw reply as fits.
+ * Evict completed commands first, then the oldest whole lines of an oversized entry.
  * @param {TriggerHistoryEntry[]} entries
  * @returns {TriggerHistoryEntry[]}
  */
 export function trimTriggerHistory(entries) {
   const kept = [...entries];
-  while (kept.length > 1 && kept.map(formatTriggerHistoryEntry).join('\n\n').length > LOG_LIMIT) kept.pop();
-  if (kept.length === 1 && formatTriggerHistoryEntry(kept[0]).length > LOG_LIMIT) {
-    const entry = { ...kept[0], progress: '', reply: '' };
-    const headerLength = formatTriggerHistoryEntry(entry).length;
-    const replyPrefix = `${t('triggerHistoryReply')}:\n`;
-    entry.reply = kept[0].reply.slice(0, Math.max(0, LOG_LIMIT - headerLength - replyPrefix.length));
-    kept[0] = entry;
+  const size = () => kept.map(formatTriggerHistoryEntry).join('\n\n').length;
+  while (kept.length > 1 && size() > LOG_LIMIT) {
+    let index = kept.length - 1;
+    while (index >= 0 && kept[index].status === 'running') index--;
+    if (index === -1) break;
+    kept.splice(index, 1);
+  }
+  while (size() > LOG_LIMIT) {
+    let index = kept.length - 1;
+    while (index >= 0 && !kept[index].progress && !kept[index].reply) index--;
+    if (index === -1) break;
+    const entry = { ...kept[index], truncated: true };
+    kept[index] = entry;
+    const field = entry.progress ? 'progress' : 'reply';
+    const end = entry[field].indexOf('\n', Math.max(0, size() - LOG_LIMIT - 1));
+    entry[field] = end === -1 ? '' : entry[field].slice(end + 1);
   }
   return kept;
+}
+
+/** Replace the streamed preview with the authoritative final process, including an empty one.
+ * @param {TriggerHistoryEntry} entry @param {TriggerOutcome} outcome */
+export function reconcileTriggerTranscript(entry, outcome) {
+  if (typeof outcome.transcript !== 'string') return entry;
+  return { ...entry, progress: outcome.transcript, truncated: outcome.transcript_truncated === true };
 }
 
 /** @param {TriggerHistoryEntry[]} entries @param {{ command?: string, status?: string, text?: string }} filters */
@@ -254,7 +282,7 @@ export function filterTriggerHistory(entries, filters = {}) {
 
 /** @param {TriggerHistoryEntry[]} entries */
 export function exportTriggerHistory(entries) {
-  return entries.map(formatTriggerHistoryEntry).join('\n\n').slice(0, LOG_LIMIT);
+  return trimTriggerHistory(entries).map(formatTriggerHistoryEntry).join('\n\n').slice(0, LOG_LIMIT);
 }
 
 /**
@@ -277,28 +305,64 @@ export function outcomeHistoryStatus(outcome, state = {}) {
 
 /** @param {ProtocolDetection} result */
 export function pdVersionLabel(result) {
+  const inference = pdCapabilityVersion(result);
+  const reported = result.pd_reported_version;
+  let label = t('scanPdVersionUnknown');
+  if (inference && (!reported || belowPdCapability(reported.major, reported.minor, inference))) {
+    label = inferredPdVersionLabel(inference);
+  } else if (reported) {
+    label = t('scanPdVersionMeter', { revision: `${reported.major}.${reported.minor}` });
+  }
   if (result.pd_revision) {
-    return t('scanPdVersionExact', {
+    const response = t('scanPdVersionExact', {
       revision: `${result.pd_revision.revision_major}.${result.pd_revision.revision_minor}`,
       version: `${result.pd_revision.version_major}.${result.pd_revision.version_minor}`,
     });
+    const reportedHigher =
+      reported &&
+      (reported.major > result.pd_revision.revision_major ||
+        (reported.major === result.pd_revision.revision_major && reported.minor > result.pd_revision.revision_minor));
+    if (
+      reportedHigher ||
+      belowPdCapability(result.pd_revision.revision_major, result.pd_revision.revision_minor, inference)
+    ) {
+      return `${label} · ${t('scanPdVersionConflict', { response })}`;
+    }
+    return response;
   }
-  const inference = result.pd_version_inference;
-  const reported = result.pd_reported_version;
-  if (
-    inference &&
-    (!reported ||
-      inference.minimum_major > reported.major ||
-      (inference.minimum_major === reported.major && inference.minimum_minor > reported.minor))
-  ) {
-    return inferredPdVersionLabel(inference);
+  return label;
+}
+
+/** @param {number} major @param {number} minor @param {PdVersionInference|undefined} minimum */
+function belowPdCapability(major, minor, minimum) {
+  return (
+    !!minimum && (major < minimum.minimum_major || (major === minimum.minimum_major && minor < minimum.minimum_minor))
+  );
+}
+
+/** Reconcile the summary with this PD row's independently read, structured PDOs.
+ * Do not infer from mixed command text or the selected PDM operating mode.
+ * @param {ProtocolDetection} result @returns {PdVersionInference|undefined} */
+function pdCapabilityVersion(result) {
+  let minimum = result.pd_version_inference;
+  if (result.id !== 'pd' || result.state !== 'supported' || result.source !== 'probe') return minimum;
+  for (const pdo of result.voltages ?? []) {
+    const { kind, volt_min_mv: min, volt_max_mv: max } = pdo;
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max < min) continue;
+    /** @type {PdVersionInference|undefined} */
+    let capability;
+    if (kind === 'spr_avs' || (kind === 'avs' && min >= 9000 && min < max && max <= 20000)) {
+      capability = { minimum_major: 3, minimum_minor: 2, basis: 'spr_avs' };
+    } else if (kind === 'epr_avs' || kind === 'epr_fixed' || (kind === 'fixed' && max > 20000)) {
+      capability = { minimum_major: 3, minimum_minor: 1, basis: 'epr' };
+    } else if (kind === 'pps') {
+      capability = { minimum_major: 3, minimum_minor: 0, basis: 'pps' };
+    }
+    if (capability && (!minimum || belowPdCapability(minimum.minimum_major, minimum.minimum_minor, capability))) {
+      minimum = capability;
+    }
   }
-  if (reported)
-    return t('scanPdVersionMeter', {
-      revision: `${reported.major}.${reported.minor}`,
-    });
-  if (inference) return inferredPdVersionLabel(inference);
-  return t('scanPdVersionUnknown');
+  return minimum;
 }
 
 /** @param {PdVersionInference} inference */
@@ -317,6 +381,7 @@ function inferredPdVersionLabel(inference) {
 
 /** @param {DetectionReport} report */
 export function detectionSummary(report) {
+  if (report.phase === 'reset') return t('scanPhaseReset');
   if (report.completion) {
     const keys = {
       complete: 'scanComplete',
@@ -423,6 +488,7 @@ const PDO_KIND_LABELS = {
   avs: 'AVS',
   spr_avs: 'SPR AVS',
   epr_avs: 'EPR AVS',
+  ufcs: 'UFCS',
   battery: 'Battery',
   variable: 'Variable',
 };
@@ -449,14 +515,14 @@ export function describePdo(pdo) {
  * 电流取 PDO 标称值，缺省时保留表单原值。
  * @param {TriggerPdo} pdo
  * @param {TriggerForm} current
- * @returns {{ proto: 'pd', position: number, voltMv: number, curMa: number }}
+ * @returns {{ proto: string, position: number, voltMv: number, curMa: number }}
  */
 export function pdoToRequestFields(pdo, current) {
   const voltMv = pdo.programmable
     ? Math.min(pdo.volt_max_mv, Math.max(pdo.volt_min_mv, Number(current.voltMv) || pdo.volt_min_mv))
     : pdo.volt_max_mv;
   return {
-    proto: 'pd',
+    proto: pdo.protocol ?? 'pd',
     position: pdo.position,
     voltMv,
     curMa: Number.isFinite(pdo.cur_ma) ? /** @type {number} */ (pdo.cur_ma) : Number(current.curMa),
@@ -469,4 +535,27 @@ export function pdoToRequestFields(pdo, current) {
  */
 export function deviceSupportsControl(info) {
   return !!info && info.family === 'km003c' && info.controls !== false;
+}
+
+/** @param {string} proto @param {number} position @param {TriggerPdo[]} pdos */
+export function selectedFixedPdo(proto, position, pdos) {
+  return proto === 'pd'
+    ? pdos.find(
+        (pdo) =>
+          (pdo.protocol ?? 'pd') === 'pd' &&
+          pdo.position === position &&
+          ['fixed', 'epr_fixed'].includes(pdo.kind) &&
+          !pdo.programmable,
+      )
+    : undefined;
+}
+
+/** Standard framing only; extended data remains available with an explicit notice.
+ * @param {string} hex @returns {'valid'|'extended'|'invalid'} */
+export function validatePdData(hex) {
+  const bytes = hex.match(/../g)?.map((byte) => Number.parseInt(byte, 16)) ?? [];
+  if (bytes.length < 3 || bytes[0] > 2) return 'invalid';
+  const header = bytes[1] | (bytes[2] << 8);
+  if (header & 0x8000) return 'extended';
+  return bytes.length === 3 + 4 * ((header >> 12) & 7) ? 'valid' : 'invalid';
 }

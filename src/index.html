@@ -438,6 +438,7 @@
           </div>
           <div class="trigger-body" id="km-trigger-body">
             <div class="trigger-controls">
+          <div class="trigger-config-status" id="km-pdm-config-status" role="status"></div>
               <div class="trigger-banner" id="km-banner"><span data-i18n="powerControlHint">Connect a POWER-Z device; open PDM before sending protocol commands except custom commands.</span></div>
               <div class="trigger-workspace-tabs" role="tablist" aria-label="Protocol workspace" data-i18n-aria-label="protocolWorkspace">
                 <button type="button" id="btn-km-mode-detection" class="trigger-mode-tab" role="tab" aria-selected="false" aria-controls="km-detection-panel" data-mode="detection"><span data-i18n="triggerModeDetection">Detection</span></button>
@@ -445,28 +446,16 @@
               </div>
               <section id="km-detection-panel" class="trigger-panel" role="tabpanel" aria-labelledby="btn-km-mode-detection" hidden>
                 <div class="trigger-panel-head">
-                  <h2 class="trigger-section-title"><span data-i18n="scanTitle">Protocol detection</span></h2>
+                  <div class="trigger-panel-heading">
+                    <h2 class="trigger-section-title"><span data-i18n="scanTitle">Protocol detection</span><span class="trigger-hint" data-i18n="scanDisconnectLoad">Disconnect the downstream load before detection.</span></h2>
+                    <span id="km-detection-summary" class="trigger-hint" role="status" aria-live="polite" hidden></span>
+                  </div>
                   <div class="trigger-actions">
                     <button type="button" class="btn" id="btn-km-scan" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
                     <button type="button" class="btn" id="btn-km-scan-full" data-i18n-title="fullScanHint"><span data-i18n="fullScan">Full scan</span></button>
                   </div>
                 </div>
-                <div class="trigger-scan-status">
-                  <div id="km-detection-summary" class="trigger-hint" role="status" aria-live="polite" data-i18n="scanEmpty">Run detection to view protocol support and evidence.</div>
-                  <div class="trigger-hint" data-i18n="scanActiveHint">Detection changes the negotiated protocol. Missing standard results are checked individually, including 5 V verification. Disconnect the downstream load first.</div>
-                </div>
-                <div class="trigger-detection-filters">
-                  <input id="km-detection-filter" class="ribbon-input" type="search" placeholder="Filter protocols" data-i18n-placeholder="triggerDetectionSearch" />
-                  <select id="km-detection-state-filter" class="ribbon-select" aria-label="Status" data-i18n-aria-label="triggerDetectionState">
-                    <option value="" data-i18n="triggerDetectionAllStates">All states</option>
-                    <option value="supported" data-i18n="scanSupported">Supported</option>
-                    <option value="unsupported" data-i18n="scanUnsupported">Not supported</option>
-                    <option value="not_checked" data-i18n="scanNotChecked">Not checked</option>
-                    <option value="failed" data-i18n="scanCheckFailed">Unconfirmed</option>
-                  </select>
-                </div>
                 <div id="km-detection-results" class="trigger-detection-results"></div>
-                <div class="trigger-detection-empty" id="km-detection-empty" hidden data-i18n="triggerDetectionNoMatch">No protocols match this filter</div>
                 <details class="trigger-detection-diagnostics" id="km-detection-diagnostics-details" hidden>
                   <summary><span data-i18n="scanDiagnostics">Scan diagnostics</span></summary>
                   <pre id="km-detection-diagnostics"></pre>
@@ -540,36 +529,44 @@
                 </section>
                 <details class="trigger-section trigger-advanced">
                   <summary><span data-i18n="advanced">Advanced protocol commands</span></summary>
-                  <div class="trigger-form">
-                    <label class="trigger-field">
-                      <span class="trigger-field-label">PD cmd</span>
-                      <input type="number" id="km-pd-cmd" class="ribbon-input" min="0" max="255" step="1" value="7" />
-                    </label>
-                    <div class="trigger-form-actions">
-                      <button type="button" class="btn" id="btn-km-pd-cmd"><span data-i18n="sendPdCmd">Send pd cmd</span></button>
-                      <button type="button" class="btn" id="btn-km-get-src-cap">Get_Source_Cap</button>
+                  <div class="trigger-command-list">
+                    <div class="trigger-command-row">
+                      <label class="trigger-field">
+                        <span class="trigger-field-label">PD cmd</span>
+                        <input type="number" id="km-pd-cmd" class="ribbon-input" min="0" max="255" step="1" value="7" />
+                      </label>
+                      <div class="trigger-actions">
+                        <button type="button" class="btn" id="btn-km-pd-cmd"><span data-i18n="sendPdCmd">Send pd cmd</span></button>
+                        <button type="button" class="btn" id="btn-km-get-src-cap">Get_Source_Cap</button>
+                      </div>
                     </div>
-                    <label class="trigger-field trigger-field-wide">
-                      <span class="trigger-field-label">PD data</span>
-                      <input type="text" id="km-pd-data" class="ribbon-input" placeholder="018F1401A000FF" spellcheck="false" />
-                    </label>
-                    <div class="trigger-form-actions">
-                      <button type="button" class="btn" id="btn-km-pd-data"><span data-i18n="sendPdData">Send pd data</span></button>
-                      <button type="button" class="btn" id="btn-km-ufcs-pdo"><span data-i18n="readUfcs">Read UFCS PDOs</span></button>
+                    <div class="trigger-command-row">
+                      <label class="trigger-field">
+                        <span class="trigger-field-label">PD data</span>
+                        <input type="text" id="km-pd-data" class="ribbon-input" placeholder="018F1401A000FF" spellcheck="false" />
+                      </label>
+                      <div class="trigger-actions">
+                        <button type="button" class="btn" id="btn-km-pd-data"><span data-i18n="sendPdData">Send pd data</span></button>
+                      </div>
                     </div>
-                    <label class="trigger-field">
-                      <span class="trigger-field-label">UFCS cmd</span>
-                      <input type="number" id="km-ufcs-cmd" class="ribbon-input" min="0" step="1" value="6" />
-                    </label>
-                    <div class="trigger-form-actions">
-                      <button type="button" class="btn" id="btn-km-ufcs-cmd"><span data-i18n="sendUfcs">Send ufcs cmd</span></button>
+                    <div class="trigger-command-row">
+                      <label class="trigger-field">
+                        <span class="trigger-field-label">UFCS cmd</span>
+                        <input type="number" id="km-ufcs-cmd" class="ribbon-input" min="0" step="1" value="6" />
+                      </label>
+                      <div class="trigger-actions">
+                        <button type="button" class="btn" id="btn-km-ufcs-cmd"><span data-i18n="sendUfcs">Send ufcs cmd</span></button>
+                        <button type="button" class="btn" id="btn-km-ufcs-pdo"><span data-i18n="readUfcs">Read UFCS PDOs</span></button>
+                      </div>
                     </div>
-                    <label class="trigger-field trigger-field-wide">
-                      <span class="trigger-field-label"><span data-i18n="customCommand">Custom command</span></span>
-                      <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="For example: pd pdo" data-i18n-placeholder="customPlaceholder" spellcheck="false" />
-                    </label>
-                    <div class="trigger-form-actions">
-                      <button type="button" class="btn" id="btn-km-raw"><span data-i18n="sendCommand">Send command</span></button>
+                    <div class="trigger-command-row">
+                      <label class="trigger-field">
+                        <span class="trigger-field-label"><span data-i18n="customCommand">Custom command</span></span>
+                        <input type="text" id="km-raw-cmd" class="ribbon-input" placeholder="For example: pd pdo" data-i18n-placeholder="customPlaceholder" spellcheck="false" />
+                      </label>
+                      <div class="trigger-actions">
+                        <button type="button" class="btn" id="btn-km-raw"><span data-i18n="sendCommand">Send command</span></button>
+                      </div>
                     </div>
                   </div>
                 </details>

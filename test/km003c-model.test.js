@@ -23,9 +23,11 @@ import {
   pdVersionLabel,
   prependOutcome,
   protocolFields,
+  reconcileTriggerTranscript,
   summarizeTriggerCommand,
   triggerTimeoutMs,
   trimTriggerHistory,
+  validatePdData,
 } from '../src/km003c-model.js';
 
 /** @param {Partial<import('../src/km003c-model.js').TriggerForm>} [over] */
@@ -86,9 +88,15 @@ test('invalid numbers are refused with a reason instead of being sent', () => {
   assert.ok('cmd' in buildTriggerCommand('qc', form({ position: 0, curMa: -1 })));
 });
 
-test('pd data keeps hex digits only and needs whole bytes', () => {
+test('pd data preserves bytes and refuses malformed input', () => {
   assert.equal(cleanHex('01 8f-14 01'), '018F1401');
+  assert.equal(cleanHex('0x01, 0x8f:0x14-0x01'), '018F1401');
+  assert.equal(cleanHex('01 GG 02'), null);
+  assert.equal(cleanHex('0x1 02'), null);
   assert.equal(cleanHex('abc'), null);
+  assert.equal(validatePdData('008F5141A000FF992E0018181500000000000040400800'), 'valid');
+  assert.equal(validatePdData('018F1401'), 'invalid');
+  assert.equal(validatePdData('000080'), 'extended');
   assert.equal(cleanHex(''), null);
 });
 
@@ -196,6 +204,64 @@ test('PD version display prefers a standard response and does not understate PDO
     /at least PD 3\.2/i,
   );
   assert.match(pdVersionLabel(base), /cannot be inferred/i);
+});
+
+test('SPR AVS evidence survives lower or missing version summaries and conflicting revision replies', () => {
+  const base = {
+    id: 'pd',
+    label: 'PD',
+    state: 'supported',
+    source: 'probe',
+    reason: '',
+    detail: 'max power 140W\nAVS: 9-20V3.00A,5.00A\nFixed: 28.00V 5.00A\nAVS: 15.00-28.00V 140W',
+    voltages: [
+      { kind: 'avs', volt_min_mv: 9000, volt_max_mv: 15000 },
+      { kind: 'avs', volt_min_mv: 15000, volt_max_mv: 20000 },
+      { kind: 'epr_fixed', volt_min_mv: 28000, volt_max_mv: 28000 },
+      { kind: 'epr_avs', volt_min_mv: 15000, volt_max_mv: 28000 },
+    ],
+  };
+  for (const summary of [undefined, { minimum_major: 3, minimum_minor: 1, basis: 'epr' }]) {
+    assert.match(pdVersionLabel({ ...base, pd_version_inference: summary }), /at least PD 3\.2.*SPR AVS/i);
+    assert.match(
+      pdVersionLabel({ ...base, pd_version_inference: summary, pd_reported_version: { major: 3, minor: 1 } }),
+      /at least PD 3\.2.*SPR AVS/i,
+    );
+    assert.match(
+      pdVersionLabel({ ...base, pd_version_inference: summary, pd_reported_version: { major: 3, minor: 2 } }),
+      /PD 3\.2.*meter scan/,
+    );
+  }
+  const conflict = pdVersionLabel({
+    ...base,
+    pd_revision: { revision_major: 3, revision_minor: 1, version_major: 1, version_minor: 7 },
+  });
+  assert.match(conflict, /^At least PD 3\.2.*SPR AVS/i);
+  assert.match(conflict, /conflict.*PD 3\.1.*Get_Revision/i, 'keep the contradictory response visible');
+  assert.match(
+    pdVersionLabel({
+      ...base,
+      voltages: [],
+      pd_reported_version: { major: 3, minor: 2 },
+      pd_revision: { revision_major: 3, revision_minor: 1, version_major: 1, version_minor: 7 },
+    }),
+    /^PD 3\.2.*meter scan.*conflict.*PD 3\.1/i,
+    'a lower standard response cannot silently replace the meter scan either',
+  );
+  assert.match(
+    pdVersionLabel({ ...base, voltages: [{ kind: 'spr_avs', volt_min_mv: 9000, volt_max_mv: 15000 }] }),
+    /at least PD 3\.2.*SPR AVS/i,
+  );
+  assert.match(
+    pdVersionLabel({ ...base, voltages: base.voltages.slice(2) }),
+    /at least PD 3\.1.*EPR/i,
+    'EPR AVS alone does not prove PD 3.2',
+  );
+  assert.match(
+    pdVersionLabel({ ...base, voltages: [] }),
+    /cannot be inferred/i,
+    'a raw text log is not structured PDO evidence',
+  );
 });
 
 test('detection voltage display uses only scoped capabilities and preserves ranges', () => {
@@ -312,6 +378,104 @@ test('command history trims oldest commands and bounds a single oversized raw re
   assert.ok(single[0].reply.length < LOG_LIMIT);
 });
 
+test('final transcript fills missing events without duplicating the streamed preview', () => {
+  const entry = {
+    id: 'pdo',
+    command: { type: 'pd_pdo' },
+    startedAt: 0,
+    elapsedMs: null,
+    status: /** @type {const} */ ('running'),
+    progress: '> pd pdo\nready',
+    reply: '',
+  };
+  const transcript = '> pd pdo\nready\n#1 FIXED 5V\n#2 FIXED 9V';
+  const final = reconcileTriggerTranscript(entry, outcome({ transcript }));
+  assert.equal(final.progress, transcript);
+  assert.equal(final.progress.match(/ready/g).length, 1);
+  assert.equal(entry.progress, '> pd pdo\nready', 'the original preview stays independent');
+  assert.equal(reconcileTriggerTranscript(entry, outcome()).progress, entry.progress, 'old backend compatibility');
+  assert.equal(reconcileTriggerTranscript(entry, outcome({ transcript: '' })).progress, '');
+  assert.equal(reconcileTriggerTranscript(entry, outcome({ transcript, transcript_truncated: true })).truncated, true);
+  const repeated = [
+    '> entry pd',
+    'ok',
+    'cc1 attach',
+    'ready:5100mV,0mA',
+    '> pd pdo',
+    'ok',
+    'cc1 detach',
+    'cc2 attach',
+    'ready:5097mV,0mA',
+    '> pd pdo',
+    'ok',
+    'ready:5100mV,0mA',
+    'ready:5100mV,0mA',
+  ].join('\n');
+  const reconciled = reconcileTriggerTranscript({ ...entry, progress: repeated }, outcome({ transcript: repeated }));
+  assert.equal(reconciled.progress, repeated, 'identical replies at different times are separate occurrences');
+  assert.equal(exportTriggerHistory([reconciled]).split('ready:5100mV,0mA').length - 1, 3);
+});
+
+test('large process logs retain lines above 16000 characters and trim only the necessary oldest lines', () => {
+  const progress = Array.from({ length: 250 }, (_, i) => `stage-${i} ${'p'.repeat(100)}`).join('\n');
+  const entry = {
+    id: 'pdo',
+    command: { type: 'pd_pdo' },
+    startedAt: 0,
+    elapsedMs: 1,
+    status: /** @type {const} */ ('success'),
+    progress,
+    reply: 'OK',
+  };
+  assert.ok(progress.length > 16_000);
+  assert.equal(trimTriggerHistory([entry])[0].progress, progress);
+  const reply = Array.from({ length: 400 }, (_, i) => `reply-${i} ${'r'.repeat(100)}`).join('\n');
+  const [trimmed] = trimTriggerHistory([{ ...entry, reply }]);
+  assert.ok(trimmed.progress.length > 0, 'combined overflow must not clear the entire process');
+  assert.ok(progress.endsWith(trimmed.progress));
+  assert.match(trimmed.progress, /^stage-\d+ /, 'never retain a partial line');
+  assert.equal(trimmed.reply, reply);
+  assert.equal(trimmed.truncated, true);
+  const exported = exportTriggerHistory([trimmed]);
+  assert.ok(exported.length <= LOG_LIMIT);
+  assert.match(exported, /Earlier log content was removed/);
+  assert.ok(exported.includes(trimmed.progress));
+  assert.ok(exported.includes(trimmed.reply));
+  assert.deepEqual(trimTriggerHistory([trimmed]), [trimmed], 'repeated updates do not discard further content');
+});
+
+test('history eviction protects an active command even when a newer PDM status arrives', () => {
+  const entry = {
+    id: 'running',
+    command: { type: 'list' },
+    startedAt: 0,
+    elapsedMs: null,
+    status: /** @type {const} */ ('running'),
+    progress: 'line\n'.repeat(11_000),
+    reply: '',
+  };
+  const notice = {
+    ...entry,
+    id: 'pdm',
+    command: { type: 'pdm_state' },
+    status: /** @type {const} */ ('failure'),
+    progress: '',
+    reply: 'connection lost\n'.repeat(1000),
+  };
+  assert.deepEqual(
+    trimTriggerHistory([notice, entry]).map((item) => item.id),
+    ['running'],
+  );
+  const [final] = trimTriggerHistory([
+    reconcileTriggerTranscript(
+      entry,
+      outcome({ transcript: `${entry.progress}final line`, transcript_truncated: true }),
+    ),
+  ]);
+  assert.ok(final.progress.endsWith('final line'));
+  assert.match(exportTriggerHistory([final]), /Earlier log content was removed/);
+});
+
 test('PDO rows read like the meter and fill the request form sensibly', () => {
   const fixed = {
     position: 2,
@@ -363,4 +527,36 @@ test('only POWER-Z devices offer protocol control; older payloads count as WITRN
   assert.equal(deviceSupportsControl({ family: 'witrn', controls: false }), false);
   assert.equal(deviceSupportsControl({ family: 'km003c', controls: true }), true);
   assert.equal(deviceSupportsControl({ family: 'km003c', controls: false }), false);
+});
+
+test('fixed PD requests omit ignored voltage and UFCS capabilities retain their own route', () => {
+  const fixed = {
+    position: 2,
+    kind: 'fixed',
+    volt_min_mv: 9000,
+    volt_max_mv: 9000,
+    cur_ma: 3000,
+    programmable: false,
+    label: '9V',
+  };
+  assert.deepEqual(buildTriggerCommand('pd', form({ voltMv: 5000 }), [fixed]), {
+    cmd: { type: 'pd_req', position: 2, volt_mv: null, cur_ma: 3000 },
+  });
+  const ufcs = {
+    ...fixed,
+    protocol: 'ufcs',
+    position: 3,
+    kind: 'ufcs',
+    volt_min_mv: 3400,
+    volt_max_mv: 11000,
+    programmable: true,
+  };
+  const fields = pdoToRequestFields(ufcs, form());
+  assert.equal(fields.proto, 'ufcs');
+  assert.equal(fields.position, 3);
+  assert.deepEqual(buildTriggerCommand(fields.proto, { ...form(), ...fields }), {
+    cmd: { type: 'ufcs', req: 3, volt_mv: 9000, cur_ma: 3000 },
+  });
+  assert.ok('cmd' in buildTriggerCommand('qc3', form({ voltMv: 5010 })));
+  assert.ok('cmd' in buildTriggerCommand('vfcp', form({ voltMv: 5000 })));
 });

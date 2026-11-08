@@ -12,7 +12,7 @@ struct ProtoPat {
 const SCAN_FIELD_NAMES: &[&str] = &[
     "bc1.2", "bc 1.2", "dcp", "apple", "ufcs", "vfcp", "vifc", "vifcp", "qc2.0", "qc 2.0", "qc2",
     "qc3.0", "qc 3.0", "qc3+", "qc3", "afc", "fcp", "scp", "sfcp", "tfcp", "svooc", "vooc",
-    "mtkpe", "mtkpe2.0", "mtk pe", "mtk",
+    "mtkpe", "mtkpe1.0", "mtkpe2.0", "mtk pe", "mtk",
 ];
 
 const PROTO_PATS: &[ProtoPat] = &[
@@ -85,9 +85,14 @@ const PROTO_PATS: &[ProtoPat] = &[
         tokens: &["svooc", "vooc"],
     },
     ProtoPat {
-        id: "mtk",
-        label: "MTK PE",
-        tokens: &["mtk pe", "mtkpe", "mtk"],
+        id: "pe1",
+        label: "MTK PE 1.0",
+        tokens: &["mtkpe1.0", "mtkpe", "mtk", "pe1"],
+    },
+    ProtoPat {
+        id: "pe2",
+        label: "MTK PE 2.0",
+        tokens: &["mtkpe2.0", "pe2"],
     },
 ];
 
@@ -158,7 +163,11 @@ pub fn parse_pdos(text: &str) -> Vec<TriggerPdo> {
             continue;
         }
         let lower = trimmed.to_ascii_lowercase();
-        if lower.contains("ready") || lower == "ok" || lower.starts_with("entry") {
+        if lower.contains("ready")
+            || lower == "ok"
+            || lower.starts_with("entry")
+            || lower.starts_with("req:")
+        {
             continue;
         }
         for chunk in split_pdo_chunks(trimmed) {
@@ -263,6 +272,14 @@ pub fn parse_pdos(text: &str) -> Vec<TriggerPdo> {
                     position = auto;
                 }
                 let kind = kind_for(&chunk_kind, it.vmin, it.vmax);
+                // EPR Source Capabilities reserve all seven SPR positions, even
+                // when the text summary omits the empty SPR slots (confirmed on V2.0.6).
+                if pos_hint.is_none()
+                    && !chunk.to_ascii_lowercase().starts_with("num")
+                    && matches!(kind.as_str(), "epr_fixed" | "epr_avs")
+                {
+                    position = position.max(8);
+                }
                 let mut cur = it.cur;
                 if cur.is_none() {
                     if let Some(w) = pdp_w {
@@ -277,6 +294,12 @@ pub fn parse_pdos(text: &str) -> Vec<TriggerPdo> {
                         .or_else(|| avs_current_ma(it.i20, it.i9, pdp_w, it.vmax));
                     rec.label =
                         format_avs_label(position, &kind, it.vmin, it.vmax, it.i9, it.i20, pdp_w);
+                }
+                if chunk.to_ascii_lowercase().starts_with("num") {
+                    rec.protocol = "ufcs".into();
+                    rec.kind = "ufcs".into();
+                    rec.programmable = it.vmin != it.vmax;
+                    rec.label = format!("NUM{position} {}–{} mV", it.vmin, it.vmax);
                 }
                 out.push(rec);
                 if !share {
@@ -621,6 +644,7 @@ pub fn make_pdo(
     programmable: bool,
 ) -> TriggerPdo {
     TriggerPdo {
+        protocol: "pd".into(),
         position,
         kind: kind.to_string(),
         volt_min_mv,
@@ -638,7 +662,13 @@ pub fn parse_detected_protocols(text: &str) -> Vec<DetectedProtocol> {
         if trimmed.is_empty() {
             continue;
         }
-        let lower = trimmed.to_ascii_lowercase();
+        // Canonicalize the displayed MTK names before token matching, so the
+        // generic PE name cannot consume the spaced PE 2.0 name.
+        let lower = trimmed
+            .to_ascii_lowercase()
+            .replace("mtk pe", "mtkpe")
+            .replace("mtkpe 1.0", "mtkpe1.0")
+            .replace("mtkpe 2.0", "mtkpe2.0");
         if line_negative(&lower) {
             continue;
         }
@@ -743,7 +773,7 @@ pub fn sanitize_trigger_text(text: &str) -> String {
 }
 
 fn is_scan_field_name(name: &str) -> bool {
-    SCAN_FIELD_NAMES.contains(&name)
+    SCAN_FIELD_NAMES.contains(&name.replace(' ', "").as_str())
 }
 
 /// `svooc:PD3.2:60W PDO:7` → (`svooc:`, `PD3.2:60W PDO:7`).
@@ -887,8 +917,7 @@ fn block_key(lines: &[String]) -> String {
         .join("\n")
 }
 
-/// Deduplicate detailed `entry list` blocks (e.g. repeated PD3.0 + Fixed/PPS tables).
-pub(crate) fn dedupe_detail_blocks(text: &str) -> String {
+fn scan_detail_blocks(text: &str) -> Vec<Vec<String>> {
     let cleaned = sanitize_trigger_text(text);
     let mut blocks: Vec<Vec<String>> = Vec::new();
     for line in cleaned.lines() {
@@ -907,6 +936,21 @@ pub(crate) fn dedupe_detail_blocks(text: &str) -> String {
     }
 
     attach_orphan_values(&mut blocks);
+    blocks
+}
+
+/// Resolve split firmware fields without removing repeated result transitions.
+pub(crate) fn resolve_scan_reply(text: &str) -> String {
+    scan_detail_blocks(text)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Deduplicate display summaries, never the chronological history or result-state input.
+fn dedupe_detail_blocks(text: &str) -> String {
+    let blocks = scan_detail_blocks(text);
 
     let mut pd_keys_under_pd = Vec::new();
     for (i, block) in blocks.iter().enumerate() {
@@ -941,6 +985,8 @@ pub(crate) fn dedupe_detail_blocks(text: &str) -> String {
 /// 1. If classic `Name : OK|FAIL|n/a` lines exist, keep those (deduped).
 /// 2. Otherwise keep the detailed firmware format but collapse repeated
 ///    PD capability blocks (`PD3.0:…` + Fixed/PPS tables).
+///
+/// This is a display summary, not a chronological command transcript or state input.
 pub fn normalize_scan_text(text: &str) -> String {
     let mut kept = Vec::new();
     let mut seen = Vec::new();
@@ -980,6 +1026,9 @@ fn line_negative(lower: &str) -> bool {
         || lower.ends_with("n/a")
         || lower.contains(":null")
         || lower.contains(": null")
+        || lower
+            .split_once([':', '：'])
+            .is_some_and(|(_, value)| value.split_whitespace().next() == Some("false"))
         || empty_scan_field(lower)
 }
 
@@ -991,7 +1040,7 @@ fn empty_scan_field(lower: &str) -> bool {
         return false;
     }
     let key = key.trim();
-    SCAN_FIELD_NAMES.contains(&key)
+    is_scan_field_name(key)
 }
 
 fn contains_token(hay: &str, needle: &str) -> bool {
@@ -1025,7 +1074,7 @@ fn parse_position(raw: &str) -> Option<u8> {
         return raw[1..end].trim().parse().ok();
     }
     let lower = raw.to_ascii_lowercase();
-    for prefix in ["pdo", "obj", "#"] {
+    for prefix in ["pdo", "obj", "num", "#"] {
         if let Some(rest) = lower.strip_prefix(prefix) {
             let rest = rest.trim_start_matches(['=', ' ', ':', '：']);
             let num: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -1057,7 +1106,7 @@ fn skip_pdo_index(lower: &str) -> &str {
             return rest[end + 1..].trim();
         }
     }
-    for prefix in ["pdo", "obj", "#"] {
+    for prefix in ["pdo", "obj", "num", "#"] {
         if let Some(rest) = s.strip_prefix(prefix) {
             let rest = rest.trim_start_matches(['=', ' ', ':', '：']);
             let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
@@ -1284,6 +1333,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn real_epr_text_reserves_spr_positions_and_request_echo_is_not_a_capability() {
+        let pdos = parse_pdos("Fixed:5V3A\nFixed:9V3A\nFixed:12V3A\nFixed:15V3A\nFixed:20V5A\nPPS:5-21V5A\nFixed:28V5A\nAVS:15-28V140W");
+        assert_eq!(pdos[6].position, 8);
+        assert_eq!(pdos[7].position, 9);
+        assert!(parse_pdos("req:9000mV,1000mA\nready:8992mV,0mA").is_empty());
+        assert_eq!(
+            parse_pdos("#7 Fixed 28V5A")[0].position,
+            7,
+            "explicit nonstandard numbering is preserved"
+        );
+    }
+
+    #[test]
+    fn ufcs_num_indices_are_not_relabelled_as_pd_pps() {
+        let pdos = parse_pdos("NUM1 3.40-11.00V 0.50-3.00A\nNUM3 5.00-20.00V 0.50-5.00A");
+        assert_eq!(
+            pdos.iter().map(|p| p.position).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert!(pdos
+            .iter()
+            .all(|p| p.protocol == "ufcs" && p.kind == "ufcs"));
+        assert_eq!(pdos[1].volt_max_mv, 20_000);
+    }
+
+    #[test]
     fn parse_fixed_and_pps_lines() {
         let text = "\
 [1] Fixed 5.00V 3.00A
@@ -1346,6 +1421,34 @@ UFCS : OK
         let found = parse_detected_protocols("QC3.0 : OK\n");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "qc3");
+    }
+
+    #[test]
+    fn mtk_pe_versions_keep_separate_protocol_identities() {
+        for text in [
+            "mtkpe:true\nmtkpe2.0:true",
+            "MTK PE : OK\nMTK PE 2.0 : OK",
+            "MTK PE 1.0 : OK\nMTK PE 2.0 : OK",
+        ] {
+            let found = parse_detected_protocols(text);
+            assert_eq!(
+                found.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+                ["pe1", "pe2"],
+                "{text}"
+            );
+        }
+        for text in ["mtkpe2.0:true", "MTK PE 2.0 : OK"] {
+            let found = parse_detected_protocols(text);
+            assert_eq!(found.len(), 1, "{text}");
+            assert_eq!(found[0].id, "pe2");
+        }
+        for negative in ["null", "false", " false 5000mV,0mA"] {
+            let found = parse_detected_protocols(&format!("mtkpe:{negative}\nmtkpe2.0:true"));
+            assert_eq!(
+                found.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+                ["pe2"]
+            );
+        }
     }
 
     #[test]

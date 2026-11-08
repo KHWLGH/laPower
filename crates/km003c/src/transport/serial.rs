@@ -150,6 +150,10 @@ impl CdcPort {
         wait: Duration,
         mut on_line: impl FnMut(&str),
     ) -> Result<(String, Vec<u8>)> {
+        anyhow::ensure!(
+            !self.stop.as_ref().is_some_and(StopSignal::is_set),
+            "已取消"
+        );
         let _ = self.port.clear(serialport::ClearBuffer::Input);
         let payload = if command.ends_with('\n') {
             command.to_string()
@@ -194,78 +198,120 @@ fn read_reply(
     let mut tmp = [0u8; 256];
     let mut last_payload = Instant::now();
     let mut saw_payload = false;
-    let mut emitted = 0usize;
+    let mut lines = ReplyLines::default();
 
-    while start.elapsed() < overall {
-        if stop.is_some_and(StopSignal::is_set) {
-            anyhow::bail!("已取消");
-        }
-        match port.read(&mut tmp) {
-            Ok(0) => {}
-            Ok(n) => {
-                anyhow::ensure!(
-                    buf.len() + n <= MAX_REPLY_BYTES,
-                    "串口响应超过 256 KiB 上限"
-                );
-                buf.extend_from_slice(&tmp[..n]);
-                let decoded = decode_serial_text(&buf);
-                let payload = strip_command_echo(&decoded, command);
-                if !payload.trim().is_empty() {
-                    last_payload = Instant::now();
-                    saw_payload = true;
+    let result = (|| -> Result<()> {
+        while start.elapsed() < overall {
+            anyhow::ensure!(!stop.is_some_and(StopSignal::is_set), "已取消");
+            match port.read(&mut tmp) {
+                Ok(0) => {}
+                Ok(n) => {
+                    anyhow::ensure!(
+                        buf.len() + n <= MAX_REPLY_BYTES,
+                        "串口响应超过 256 KiB 上限"
+                    );
+                    buf.extend_from_slice(&tmp[..n]);
+                    lines.push(&buf, command, on_line);
+                    if lines.has_payload(&buf, command) {
+                        last_payload = Instant::now();
+                        saw_payload = true;
+                    }
+                    // Only a complete scan terminator ends reading immediately. Entry
+                    // replies can print status/capabilities after ready; drain their idle window.
+                    if is_scan_command(command) && response_complete(command, &lines.text) {
+                        break;
+                    }
                 }
-                emit_new_lines(&payload, &mut emitted, on_line);
-                if response_complete(command, &payload) {
-                    break;
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => {
+                    // PDM close may drop CDC after its ACK; keep that complete ACK,
+                    // but never promote a partial/progress reply to success.
+                    lines.finish(&buf, command, on_line);
+                    if saw_payload
+                        && (is_scan_command(command) || control_reply_confirmed(&lines.text))
+                    {
+                        break;
+                    }
+                    return Err(e).context("serial read failed");
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(e) => {
-                // PDM close may drop CDC after its ACK; keep that complete ACK,
-                // but never promote a partial/progress reply to success.
-                let payload = strip_command_echo(&decode_serial_text(&buf), command);
-                if saw_payload && (is_scan_command(command) || control_reply_confirmed(&payload)) {
-                    break;
-                }
-                return Err(e).context("serial read failed");
+            // Echo-only must not start the idle clock. Handshake is often silent
+            // until ready/fail; list gaps between protocols are much longer.
+            if saw_payload && last_payload.elapsed() >= idle {
+                break;
             }
         }
-        // Echo-only must not start the idle clock. Handshake is often silent
-        // until ready/fail; list gaps between protocols are much longer.
-        if saw_payload && last_payload.elapsed() >= idle {
-            break;
-        }
-    }
-
-    let decoded = decode_serial_text(&buf);
-    let payload = strip_command_echo(&decoded, command);
-    flush_remaining_line(&payload, &mut emitted, on_line);
-    Ok((payload, buf))
+        Ok(())
+    })();
+    // Cancellation, buffer limits and transport failures must retain the last
+    // received line too. Finishing advances the cursor, so it cannot emit twice.
+    lines.finish(&buf, command, on_line);
+    result?;
+    Ok((lines.text.trim().to_string(), buf))
 }
 
-fn emit_new_lines(payload: &str, emitted: &mut usize, on_line: &mut dyn FnMut(&str)) {
-    let complete = payload.matches('\n').count();
-    if complete <= *emitted {
-        return;
-    }
-    let lines: Vec<&str> = payload.split('\n').collect();
-    while *emitted < complete {
-        let line = lines.get(*emitted).map(|s| s.trim()).unwrap_or("");
-        if !line.is_empty() {
-            on_line(line);
-        }
-        *emitted += 1;
-    }
+/// Decode only complete byte lines: later binary/GBK data must not change the
+/// encoding of text already emitted. Raw bytes remain untouched for PDO parsing.
+#[derive(Default)]
+struct ReplyLines {
+    start: usize,
+    scanned: usize,
+    skip_lf: bool,
+    saw_first: bool,
+    text: String,
 }
 
-fn flush_remaining_line(payload: &str, emitted: &mut usize, on_line: &mut dyn FnMut(&str)) {
-    let lines: Vec<&str> = payload.split('\n').collect();
-    while *emitted < lines.len() {
-        let line = lines[*emitted].trim();
-        if !line.is_empty() {
-            on_line(line);
+impl ReplyLines {
+    fn push(&mut self, buf: &[u8], command: &str, on_line: &mut dyn FnMut(&str)) {
+        for i in self.scanned..buf.len() {
+            let byte = buf[i];
+            if self.skip_lf && byte == b'\n' {
+                self.start = i + 1;
+                self.skip_lf = false;
+                continue;
+            }
+            self.skip_lf = byte == b'\r';
+            if matches!(byte, b'\r' | b'\n') {
+                self.emit(&buf[self.start..i], command, on_line);
+                self.start = i + 1;
+            }
         }
-        *emitted += 1;
+        self.scanned = buf.len();
+    }
+
+    fn emit(&mut self, raw: &[u8], command: &str, on_line: &mut dyn FnMut(&str)) {
+        let decoded = decode_serial_text(raw);
+        if decoded.trim().is_empty() {
+            return;
+        }
+        let line = if self.saw_first {
+            decoded.trim().to_string()
+        } else {
+            self.saw_first = true;
+            strip_command_echo(&decoded, command)
+        };
+        if !line.is_empty() {
+            self.text.push_str(&line);
+            self.text.push('\n');
+            on_line(&line);
+        }
+    }
+
+    fn has_payload(&self, buf: &[u8], command: &str) -> bool {
+        let tail = String::from_utf8_lossy(&buf[self.start..]);
+        !self.text.is_empty()
+            || (!tail.trim().is_empty()
+                && (self.saw_first
+                    || !command
+                        .trim()
+                        .to_ascii_lowercase()
+                        .starts_with(&tail.trim().to_ascii_lowercase())))
+    }
+
+    fn finish(&mut self, buf: &[u8], command: &str, on_line: &mut dyn FnMut(&str)) {
+        self.emit(&buf[self.start..], command, on_line);
+        self.start = buf.len();
+        self.scanned = buf.len();
     }
 }
 
@@ -467,6 +513,7 @@ fn strip_command_echo(text: &str, command: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     fn gbk_bytes(s: &str) -> Vec<u8> {
         encoding_rs::GB18030.encode(s).0.into_owned()
@@ -642,20 +689,108 @@ mod tests {
     }
 
     #[test]
-    fn emit_new_lines_skips_incomplete_tail() {
+    fn complete_lines_survive_split_echo_crlf_and_multibyte_encodings() {
         let mut out = Vec::new();
-        let mut emitted = 0;
-        emit_new_lines("PD : OK\nQC", &mut emitted, &mut |s| {
-            out.push(s.to_string())
-        });
-        assert_eq!(out, ["PD : OK"]);
-        emit_new_lines("PD : OK\nQC2.0 : OK\n", &mut emitted, &mut |s| {
-            out.push(s.to_string())
-        });
-        assert_eq!(out, ["PD : OK", "QC2.0 : OK"]);
-        flush_remaining_line("PD : OK\nQC2.0 : OK\nUFCS", &mut emitted, &mut |s| {
-            out.push(s.to_string())
-        });
-        assert_eq!(out.last().map(String::as_str), Some("UFCS"));
+        let mut lines = ReplyLines::default();
+        let mut raw = b"\r\npd pdo\r\n".to_vec();
+        raw.extend_from_slice("就绪\r\nready:5100mV,0mA\r".as_bytes());
+        raw.extend_from_slice(b"\n");
+        raw.extend_from_slice(&gbk_bytes("最大功率 100W"));
+        raw.extend_from_slice(b"\nno trailing newline");
+        for end in 1..=raw.len() {
+            lines.push(&raw[..end], "pd pdo", &mut |line| {
+                out.push(line.to_string())
+            });
+        }
+        assert_eq!(out, ["就绪", "ready:5100mV,0mA", "最大功率 100W"]);
+        lines.finish(&raw, "pd pdo", &mut |line| out.push(line.to_string()));
+        lines.finish(&raw, "pd pdo", &mut |line| out.push(line.to_string()));
+        assert_eq!(out.last().unwrap(), "no trailing newline");
+        assert_eq!(out.len(), 4);
+        assert_eq!(lines.text.trim(), out.join("\n"));
+    }
+
+    #[test]
+    fn entry_drains_after_split_ready_and_errors_flush_the_tail() {
+        struct Chunks(VecDeque<Vec<u8>>);
+        impl Read for Chunks {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if let Some(chunk) = self.0.pop_front() {
+                    buf[..chunk.len()].copy_from_slice(&chunk);
+                    Ok(chunk.len())
+                } else {
+                    Err(std::io::ErrorKind::BrokenPipe.into())
+                }
+            }
+        }
+        let mut input = Chunks(
+            [
+                b"entry pd\r\nrea".to_vec(),
+                b"dy:5100mV,0mA\r\n".to_vec(),
+                b"max power 100W\r\nlast status".to_vec(),
+            ]
+            .into(),
+        );
+        let mut out = Vec::new();
+        let result = read_reply(
+            &mut input,
+            None,
+            Duration::from_secs(1),
+            IDLE_ENTRY,
+            "entry pd",
+            &mut |line| out.push(line.to_string()),
+        );
+        assert!(
+            result.is_err(),
+            "ready must not hide a subsequent transport error"
+        );
+        assert_eq!(out, ["ready:5100mV,0mA", "max power 100W", "last status"]);
+    }
+
+    #[test]
+    fn cancellation_and_deadline_retain_unterminated_reply_lines() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        struct CancelAfter {
+            cancel: Arc<AtomicBool>,
+        }
+        impl Read for CancelAfter {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let bytes = b"pd req=2\nrequest pending";
+                buf[..bytes.len()].copy_from_slice(bytes);
+                self.cancel.store(true, Ordering::Release);
+                Ok(bytes.len())
+            }
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = StopSignal::new(Arc::new(AtomicBool::new(true)), cancel.clone());
+        let mut out = Vec::new();
+        let result = read_reply(
+            &mut CancelAfter { cancel },
+            Some(&stop),
+            Duration::from_secs(1),
+            IDLE_PD,
+            "pd req=2",
+            &mut |line| out.push(line.to_string()),
+        );
+        assert_eq!(result.unwrap_err().to_string(), "已取消");
+        assert_eq!(out, ["request pending"]);
+
+        let bytes = b"pd pdo\nready:5100mV,0mA";
+        let mut input = std::io::Cursor::new(bytes);
+        out.clear();
+        let result = read_reply(
+            &mut input,
+            None,
+            Duration::from_millis(2),
+            IDLE_PD,
+            "pd pdo",
+            &mut |line| out.push(line.to_string()),
+        )
+        .unwrap();
+        assert_eq!(out, ["ready:5100mV,0mA"]);
+        assert_eq!(result.1, bytes);
     }
 }

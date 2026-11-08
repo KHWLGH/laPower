@@ -70,13 +70,18 @@ pub enum TriggerCommand {
         em: u8,
         sink: u8,
     },
-    PdmOpen,
+    PdmOpen {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config: Option<PdmConfig>,
+    },
     PdmClose,
 }
 
 /// A source capability the trigger can request, as the meter reported it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TriggerPdo {
+    #[serde(default = "pd_protocol")]
+    pub protocol: String,
     /// 1-based object position; SPR AVS bands share their physical position.
     pub position: u8,
     pub kind: String,
@@ -86,6 +91,41 @@ pub struct TriggerPdo {
     pub cur_ma: Option<u32>,
     pub label: String,
     pub programmable: bool,
+}
+
+fn pd_protocol() -> String {
+    "pd".into()
+}
+
+/// A measured voltage check, independent of command acknowledgement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VoltageVerification {
+    pub status: String,
+    pub target_mv: u32,
+    pub measured_mv: Option<u32>,
+    pub sample_count: usize,
+    pub detail: String,
+}
+
+impl VoltageVerification {
+    pub fn unavailable(target_mv: u32, detail: impl Into<String>) -> Self {
+        Self {
+            status: "unavailable".into(),
+            target_mv,
+            measured_mv: None,
+            sample_count: 0,
+            detail: detail.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TriggerContext {
+    pub firmware_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware_diagnostic: Option<String>,
+    pub pdm_version: Option<String>,
+    pub applied_pdm: Option<PdmConfig>,
 }
 
 /// A fast-charge protocol the meter's `entry list` scan reported as supported.
@@ -164,6 +204,8 @@ pub struct ProtocolDetection {
     pub pd_version_inference: Option<PdVersionInference>,
     /// Stable reason key for localization; detail retains the device's reply.
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<VoltageVerification>,
 }
 
 /// Also emitted during detection; every snapshot belongs to one command/generation.
@@ -177,6 +219,10 @@ pub struct DetectionReport {
     pub fallback_used: bool,
     pub elapsed_ms: u64,
     pub diagnostics: Vec<String>,
+    #[serde(default)]
+    pub context: TriggerContext,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_verification: Option<VoltageVerification>,
 }
 
 /// Sink-emulation settings applied with `pdm set type=..,em=..,sink=..`.
@@ -214,6 +260,9 @@ pub struct TriggerOutcome {
     pub code: Option<String>,
     /// Session state after the command, authoritative for the UI's PDM indicator.
     pub pdm_open: bool,
+    pub context: TriggerContext,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_verification: Option<VoltageVerification>,
 }
 
 #[cfg(test)]
@@ -240,7 +289,7 @@ mod tests {
             json!({"type": "list", "plus": true})
         );
         assert_eq!(
-            serde_json::to_value(TriggerCommand::PdmOpen).unwrap(),
+            serde_json::to_value(TriggerCommand::PdmOpen { config: None }).unwrap(),
             json!({"type": "pdm_open"})
         );
         assert_eq!(
@@ -256,6 +305,7 @@ mod tests {
             ok: true,
             message: "ok".into(),
             pdos: vec![TriggerPdo {
+                protocol: "pd".into(),
                 position: 1,
                 kind: "fixed".into(),
                 volt_min_mv: 5000,
@@ -268,6 +318,8 @@ mod tests {
             detection: None,
             code: None,
             pdm_open: true,
+            context: TriggerContext::default(),
+            reset_verification: None,
         };
         let value = serde_json::to_value(outcome).unwrap();
         assert!(value.get("code").is_none());

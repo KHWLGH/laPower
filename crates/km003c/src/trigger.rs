@@ -19,8 +19,8 @@ use crate::text::{
 };
 use crate::transport::serial::{self, CdcPort};
 use crate::types::{
-    DetectedProtocol, DetectionReport, DetectionState, PdmConfig, TriggerCommand, TriggerOutcome,
-    TriggerPdo,
+    DetectedProtocol, DetectionReport, DetectionState, PdmConfig, TriggerCommand, TriggerContext,
+    TriggerOutcome, TriggerPdo, VoltageVerification,
 };
 use crate::StopSignal;
 
@@ -266,21 +266,26 @@ fn pick_trigger_pdos(binary: Vec<TriggerPdo>, ascii: Vec<TriggerPdo>) -> Vec<Tri
     merge_trigger_pdos(binary, ascii)
 }
 
-fn pdos_lack_epr(pdos: &[TriggerPdo]) -> bool {
-    pdos.is_empty()
-        || pdos.iter().all(|p| {
-            p.position <= 7
-                && p.volt_max_mv <= 20_000
-                && !matches!(p.kind.as_str(), "epr_avs" | "epr_fixed")
-        })
+fn pdo_reply_incomplete(pdos: &[TriggerPdo], raw: &[u8]) -> bool {
+    if pdos.is_empty() {
+        return true;
+    }
+    let lower = String::from_utf8_lossy(raw).to_ascii_lowercase();
+    let Some((_, tail)) = lower.split_once("pdo:") else {
+        return false;
+    };
+    let count: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
+    // Zero words are legal EPR padding. Count occupied positions, not visible rows.
+    count
+        .parse::<u8>()
+        .ok()
+        .is_some_and(|count| count > pdos.iter().map(|p| p.position).max().unwrap_or(0))
 }
 
-fn decode_pd_pdo_reply(entry: &str, pdo: &str, raw: &[u8]) -> (Vec<TriggerPdo>, String) {
+fn decode_pd_pdos(pdo: &str, raw: &[u8]) -> Vec<TriggerPdo> {
     let binary = parse_binary_pdos(raw);
     let ascii = parse_pdos(&sanitize_trigger_text(pdo));
-    let pdos = pick_trigger_pdos(binary, ascii);
-    let message = nonempty(format_pdo_message(entry, pdo, &pdos));
-    (pdos, message)
+    pick_trigger_pdos(binary, ascii)
 }
 
 #[derive(Default)]
@@ -289,6 +294,7 @@ struct CdcState {
     pdm_version: Option<String>,
     // Owned by one device session, not by the short-lived CDC transport.
     pdm: ConfirmedPdm,
+    pdm_applied: bool,
     /// Session stop or command cancel; aborts replies and the waits between steps.
     stop: StopSignal,
 }
@@ -310,7 +316,7 @@ impl ConfirmedPdm {
         send: impl FnOnce(&str) -> Result<String>,
     ) -> Result<String> {
         let reply = send(&Self::command(&config))?;
-        ensure_trigger_reply(&reply)?;
+        ensure_action_reply(&reply)?;
         self.0 = Some(config);
         Ok(reply)
     }
@@ -321,8 +327,7 @@ impl ConfirmedPdm {
         if let Some(config) = &self.0 {
             let command = Self::command(config);
             let reply = send(&command).with_context(|| format!("恢复 PDM 参数失败：{command}"))?;
-            ensure_trigger_reply(&reply)
-                .with_context(|| format!("恢复 PDM 参数失败：{command}"))?;
+            ensure_action_reply(&reply).with_context(|| format!("恢复 PDM 参数失败：{command}"))?;
         }
         Ok(())
     }
@@ -332,6 +337,7 @@ fn ensure_cdc<'a>(
     cdc: &'a mut CdcState,
     serial: Option<&str>,
     pdm_open: bool,
+    on_line: &mut dyn FnMut(&str),
 ) -> Result<&'a mut CdcPort> {
     if cdc.port.is_none() {
         if cdc.stop.is_set() {
@@ -340,13 +346,20 @@ fn ensure_cdc<'a>(
         let mut port = serial::open_matching(None, serial)?;
         port.set_stop(cdc.stop.clone());
         if pdm_open {
+            cdc.pdm_applied = false;
             cdc.pdm.reopen(|command| {
-                let reply = port.send_command(command, serial::suggested_wait(command))?;
+                on_line(&format!("> {command}"));
+                let reply = port.send_command_stream(
+                    command,
+                    serial::suggested_wait(command),
+                    &mut *on_line,
+                )?;
                 if command == "pdm open" {
                     cdc.pdm_version = detection::pdm_version(&reply);
                 }
                 Ok(reply)
             })?;
+            cdc.pdm_applied = cdc.pdm.0.is_some();
         }
         cdc.port = Some(port);
     }
@@ -363,16 +376,23 @@ fn reopen_cdc(
     serial: Option<&str>,
     mode: &mut Option<String>,
     pdm_open: bool,
+    on_line: &mut dyn FnMut(&str),
 ) -> Result<()> {
     cdc.port = None;
     *mode = None;
     cdc.stop.sleep(Duration::from_millis(300))?;
-    let _ = ensure_cdc(cdc, serial, pdm_open)?;
+    let _ = ensure_cdc(cdc, serial, pdm_open, on_line)?;
     Ok(())
 }
 
 fn pdm_raw_kind(command: &str) -> Option<bool> {
-    match command.trim().to_ascii_lowercase().as_str() {
+    match command
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "pdm open" => Some(true),
         "pdm close" => Some(false),
         _ => None,
@@ -382,7 +402,7 @@ fn pdm_raw_kind(command: &str) -> Option<bool> {
 fn cmd_requires_pdm(cmd: &TriggerCommand) -> bool {
     !matches!(
         cmd,
-        TriggerCommand::PdmOpen | TriggerCommand::PdmClose | TriggerCommand::Raw { .. }
+        TriggerCommand::PdmOpen { .. } | TriggerCommand::PdmClose | TriggerCommand::Raw { .. }
     )
 }
 
@@ -459,7 +479,8 @@ fn send_stream(
     pdm_open: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<String> {
-    let port = ensure_cdc(cdc, serial, pdm_open)?;
+    let port = ensure_cdc(cdc, serial, pdm_open, on_line)?;
+    on_line(&format!("> {command}"));
     port.send_command_stream(command, serial::suggested_wait(command), |line| {
         on_line(line);
     })
@@ -474,7 +495,8 @@ fn send_stream_raw(
     pdm_open: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<(String, Vec<u8>)> {
-    let port = ensure_cdc(cdc, serial, pdm_open)?;
+    let port = ensure_cdc(cdc, serial, pdm_open, on_line)?;
+    on_line(&format!("> {command}"));
     let (text, raw) =
         port.send_command_stream_raw(command, serial::suggested_wait(command), |line| {
             on_line(line);
@@ -620,33 +642,15 @@ fn is_pdo_status_line(line: &str) -> bool {
         || t.contains("最大功率")
 }
 
-/// Keep handshake/status lines from CDC text and append binary-parsed `#N` labels once.
+/// Keep every handshake/status occurrence in order; only the capability table is summarized once.
 fn format_pdo_message(entry: &str, pdo_text: &str, pdos: &[TriggerPdo]) -> String {
     let mut status = Vec::new();
-    let mut seen = Vec::new();
     for part in [entry, pdo_text] {
-        for line in part.lines() {
+        for line in sanitize_trigger_text(part).lines() {
             let trimmed = line.trim();
             if !is_pdo_status_line(trimmed) {
                 continue;
             }
-            let lower = trimmed.to_ascii_lowercase();
-            // Collapse near-duplicate status lines (e.g. ready:5217mV vs ready:5215mV).
-            let key = if lower == "ok" {
-                "ok".to_string()
-            } else if lower.contains("ready") {
-                "ready".to_string()
-            } else if lower.contains("max power") || trimmed.contains("最大功率") {
-                "max_power".to_string()
-            } else if lower.contains("attach") || lower.contains("detach") {
-                "attach".to_string()
-            } else {
-                lower.split_whitespace().collect::<Vec<_>>().join(" ")
-            };
-            if seen.iter().any(|s: &String| s == &key) {
-                continue;
-            }
-            seen.push(key);
             status.push(trimmed.to_string());
         }
     }
@@ -667,30 +671,14 @@ fn run_pd_pdo(
     pdm_open: bool,
     on_line: &mut dyn FnMut(&str),
 ) -> Result<TriggerOut> {
-    let attempt = |cdc: &mut CdcState,
-                   mode: &mut Option<String>,
-                   on_line: &mut dyn FnMut(&str)|
-     -> Result<(String, String, Vec<u8>)> {
+    let (mut message, pdos) = read_pd_pdos(|recover| {
+        if recover {
+            reopen_cdc(cdc, serial, mode, pdm_open, on_line)?;
+        }
         let entry = ensure_protocol(cdc, serial, mode, "pd", pdm_open, on_line)?;
         let (pdo, raw) = send_stream_raw(cdc, serial, "pd pdo", pdm_open, on_line)?;
         Ok((entry, pdo, raw))
-    };
-    let (mut entry, mut pdo, raw) = attempt(cdc, mode, on_line)?;
-    let (mut pdos, mut message) = decode_pd_pdo_reply(&entry, &pdo, &raw);
-    if looks_empty(&pdo) || pdos_lack_epr(&pdos) {
-        reopen_cdc(cdc, serial, mode, pdm_open)?;
-        let again = attempt(cdc, mode, on_line)?;
-        let (pdos2, message2) = decode_pd_pdo_reply(&again.0, &again.1, &again.2);
-        if pdo_list_score(&pdos2) > pdo_list_score(&pdos) {
-            entry = again.0;
-            pdo = again.1;
-            pdos = pdos2;
-            message = message2;
-        } else if !pdos2.is_empty() {
-            pdos = merge_trigger_pdos(pdos, pdos2);
-            message = nonempty(format_pdo_message(&entry, &pdo, &pdos));
-        }
-    }
+    })?;
     if !pdos.is_empty() {
         let protocols = parse_detected_protocols(&message);
         return Ok(TriggerOut {
@@ -701,12 +689,50 @@ fn run_pd_pdo(
             code: None,
         });
     }
-    let mut parts = vec![entry, sanitize_trigger_text(&pdo)];
-    if parse_pdos(&join_text(&parts)).is_empty() {
+    if parse_pdos(&message).is_empty() {
         let cap = send_stream(cdc, serial, "pd cmd=7", pdm_open, on_line).unwrap_or_default();
-        parts.push(cap);
+        message = join_text(&[message, cap]);
     }
-    Ok(pack(join_text(&parts)))
+    Ok(pack(message))
+}
+
+fn read_pd_pdos(
+    mut attempt: impl FnMut(bool) -> Result<(String, String, Vec<u8>)>,
+) -> Result<(String, Vec<TriggerPdo>)> {
+    let (entry, pdo, raw) = attempt(false)?;
+    let mut pdos = decode_pd_pdos(&pdo, &raw);
+    let mut replies = vec![entry, pdo];
+    let mut diagnostic = String::new();
+    if pdo_reply_incomplete(&pdos, &raw) {
+        match attempt(true) {
+            Err(error) => {
+                if pdos.is_empty() {
+                    return Err(anyhow!("PDO retry failed: {error:#}"));
+                }
+                diagnostic =
+                    format!("PDO retry failed; retained first capability table: {error:#}");
+            }
+            Ok((entry, pdo, raw)) => {
+                let pdos2 = decode_pd_pdos(&pdo, &raw);
+                if pdos2.is_empty() && !pdos.is_empty() {
+                    diagnostic = format!(
+                        "PDO retry returned no capabilities; retained first capability table: {}",
+                        sanitize_trigger_text(&pdo)
+                    );
+                }
+                pdos = merge_trigger_pdos(pdos, pdos2);
+                // Selecting the better table must not discard either attempt's statuses.
+                replies.extend([entry, pdo]);
+            }
+        }
+    }
+    let received = sanitize_trigger_text(&join_text(&replies));
+    let message = if pdos.is_empty() {
+        received
+    } else {
+        format_pdo_message("", &received, &pdos)
+    };
+    Ok((join_text(&[message, diagnostic]), pdos))
 }
 
 fn run_ufcs_pdo(
@@ -719,18 +745,54 @@ fn run_ufcs_pdo(
 ) -> Result<String> {
     let mut text = then_follow(cdc, serial, mode, "ufcs", follow, pdm_open, on_line)?;
     if follow == "ufcs pdo" && parse_pdos(&text).is_empty() {
-        reopen_cdc(cdc, serial, mode, pdm_open)?;
+        reopen_cdc(cdc, serial, mode, pdm_open, on_line)?;
         text = then_follow(cdc, serial, mode, "ufcs", follow, pdm_open, on_line)?;
     }
     Ok(text)
 }
 
 fn clean_hex(src: &str) -> Result<String> {
-    let hex: String = src.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    if hex.len() < 2 || hex.len() % 2 != 0 {
-        bail!("pd data 需要偶数位十六进制，例如 018F1401A000FF");
+    let mut hex = String::new();
+    for token in src
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ':' | '-'))
+        .filter(|s| !s.is_empty())
+    {
+        let digits = token
+            .strip_prefix("0x")
+            .or_else(|| token.strip_prefix("0X"))
+            .unwrap_or(token);
+        if digits.is_empty()
+            || digits.len() % 2 != 0
+            || !digits.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            bail!("Invalid hexadecimal byte sequence");
+        }
+        hex.push_str(digits);
+    }
+    if hex.is_empty() {
+        bail!("Empty hexadecimal byte sequence");
     }
     Ok(hex.to_ascii_uppercase())
+}
+
+fn validate_pd_data(hex: &str) -> Result<bool> {
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    anyhow::ensure!(
+        bytes.len() >= 3 && bytes[0] <= 2,
+        "Expected SOP 0/1/2 and a two-byte PD header"
+    );
+    let header = u16::from_le_bytes([bytes[1], bytes[2]]);
+    let extended = header & 0x8000 != 0;
+    if !extended {
+        anyhow::ensure!(
+            bytes.len() == 3 + 4 * ((header >> 12) & 7) as usize,
+            "PD payload length does not match header NDO (CRC must be omitted)"
+        );
+    }
+    Ok(extended)
 }
 
 fn run_trigger(
@@ -752,15 +814,24 @@ fn run_trigger(
     }
     let ready = *pdm_open;
     let message = match cmd {
-        TriggerCommand::PdmOpen => {
-            // Explicit opens are followed by the caller's frozen PdmSet. Do not
-            // implicitly open/restore and then open a second time here.
+        TriggerCommand::PdmOpen { config } => {
             *mode = None;
+            cdc.pdm_applied = false;
             let text = send_stream(cdc, serial, "pdm open", false, on_line)?;
             ensure_trigger_reply(&text)?;
             cdc.pdm_version = detection::pdm_version(&text);
             *pdm_open = true;
-            text
+            let selected = config.clone().or_else(|| cdc.pdm.0.clone());
+            if let Some(config) = selected {
+                let reply =
+                    send_stream(cdc, serial, &ConfirmedPdm::command(&config), false, on_line)?;
+                ensure_action_reply(&reply)?;
+                cdc.pdm.0 = Some(config);
+                cdc.pdm_applied = true;
+                join_text(&[text, reply])
+            } else {
+                text
+            }
         }
         TriggerCommand::PdmClose => {
             // Losing CDC does not mean the hardware stopped its PPS negotiation.
@@ -768,38 +839,43 @@ fn run_trigger(
             let result = send_stream(cdc, serial, "pdm close", false, on_line);
             cdc.port = None;
             cdc.pdm_version = None;
+            cdc.pdm_applied = false;
             *mode = None;
             *pdm_open = false;
             result?
         }
         TriggerCommand::List { .. } => bail!("Detection must run through the session observer"),
         TriggerCommand::PdmSet { pd_type, em, sink } => {
+            cdc.pdm_applied = false;
             // The negotiated mode predates these settings, even if applying them fails.
             *mode = None;
             // This command supplies authoritative settings. A reconnect must
             // not replay older settings that could prevent applying the new ones.
             let reopening = cdc.port.is_none();
-            ensure_cdc(cdc, serial, false)?;
+            ensure_cdc(cdc, serial, false, on_line)?;
             if reopening && ready {
                 let reply = send_stream(cdc, serial, "pdm open", false, on_line)?;
                 ensure_trigger_reply(&reply)?;
                 cdc.pdm_version = detection::pdm_version(&reply);
             }
             let CdcState { port, pdm, .. } = cdc;
-            pdm.apply(
+            let reply = pdm.apply(
                 PdmConfig {
                     pd_type: *pd_type,
                     em: *em,
                     sink: *sink,
                 },
                 |command| {
+                    on_line(&format!("> {command}"));
                     port.as_mut().context("CDC 未打开")?.send_command_stream(
                         command,
                         serial::suggested_wait(command),
                         on_line,
                     )
                 },
-            )?
+            )?;
+            cdc.pdm_applied = true;
+            reply
         }
         TriggerCommand::Entry { protocol } => ensure_protocol(
             cdc,
@@ -823,10 +899,18 @@ fn run_trigger(
                 s.push_str(&format!(",cur={c}"));
             }
             let entry = ensure_protocol(cdc, serial, mode, "pd", ready, on_line)?;
+            // V2.0.6 first reports an SPR-ready contract, then finishes EPR entry.
+            // Read capabilities before an EPR-position request after a fresh entry;
+            // otherwise the meter rejects the valid advertised object with error -1.
+            let preparation = if *position >= 8 && !entry.is_empty() {
+                run_pd_pdo(cdc, serial, mode, ready, on_line)?.message
+            } else {
+                String::new()
+            };
             let response = send_stream(cdc, serial, &s, ready, on_line)?;
             // An earlier "PD ready" must not hide an empty/rejected PDO response.
             ensure_action_reply(&response).with_context(|| format!("KM003 请求失败：{s}"))?;
-            join_text(&[entry, response])
+            join_text(&[entry, preparation, response])
         }
         TriggerCommand::PdCmd { cmd } => then_follow(
             cdc,
@@ -839,6 +923,9 @@ fn run_trigger(
         )?,
         TriggerCommand::PdData { hex } => {
             let hex = clean_hex(hex)?;
+            if validate_pd_data(&hex)? {
+                on_line("Extended PD data format is not verified; bytes are sent unchanged");
+            }
             then_follow(
                 cdc,
                 serial,
@@ -952,16 +1039,25 @@ fn run_trigger(
             "reset".into()
         }
         TriggerCommand::Raw { command } => {
+            *mode = None;
             // Raw configuration may contain firmware-specific or partial fields.
             // Do not replay an older typed configuration over a manual change.
-            if command.trim().to_ascii_lowercase().starts_with("pdm set ") {
+            let lower = command.trim().to_ascii_lowercase();
+            if lower.split_whitespace().take(2).eq(["pdm", "set"])
+                || pdm_raw_kind(command) == Some(true)
+            {
                 cdc.pdm = ConfirmedPdm::default();
+                cdc.pdm_applied = false;
                 *mode = None;
             }
-            let text = send_stream(cdc, serial, command, ready, on_line)?;
+            let text = send_stream(cdc, serial, command, false, on_line)?;
             if let Some(open) = pdm_raw_kind(command) {
                 ensure_trigger_reply(&text)?;
                 *pdm_open = open;
+                cdc.pdm_applied = false;
+                if open {
+                    cdc.pdm = ConfirmedPdm::default();
+                }
                 cdc.pdm_version = if open {
                     detection::pdm_version(&text)
                 } else {
@@ -978,7 +1074,7 @@ fn run_trigger(
 
     if matches!(
         cmd,
-        TriggerCommand::PdmOpen
+        TriggerCommand::PdmOpen { .. }
             | TriggerCommand::PdmClose
             | TriggerCommand::PdmSet { .. }
             | TriggerCommand::PdReq { .. }
@@ -1043,6 +1139,16 @@ struct DetectionCdc<'a> {
 }
 
 impl DetectionIo for DetectionCdc<'_> {
+    fn verify_voltage(
+        &mut self,
+        target_mv: u32,
+        since: Instant,
+        budget: Duration,
+    ) -> VoltageVerification {
+        self.pdo_cache
+            .voltage_cache()
+            .verify(target_mv, since, budget, &self.cdc.stop)
+    }
     fn send(
         &mut self,
         command: &str,
@@ -1054,7 +1160,7 @@ impl DetectionIo for DetectionCdc<'_> {
             .port
             .as_mut()
             .context("CDC 未打开")?
-            .send_command_stream_raw(command, timeout, line)?;
+            .send_command_stream_raw(command, timeout, &mut *line)?;
         let pdos = if command == "pd pdo" {
             pick_trigger_pdos(
                 parse_binary_pdos(&raw),
@@ -1063,9 +1169,18 @@ impl DetectionIo for DetectionCdc<'_> {
         } else {
             Vec::new()
         };
-        let pd_revision = (command == "pd cmd=24")
-            .then(|| detection::parse_pd_revision_reply(&text, &raw))
-            .flatten();
+        let pd_revision = if command == "pd cmd=24" {
+            if !raw.is_empty() {
+                line(&format!(
+                    "PD Get_Revision CDC bytes ({} total): {:02X?}",
+                    raw.len(),
+                    &raw[..raw.len().min(256)]
+                ));
+            }
+            detection::parse_pd_revision_reply(&text, &raw)
+        } else {
+            None
+        };
         Ok(detection::Reply {
             text,
             pdos,
@@ -1081,6 +1196,41 @@ impl DetectionIo for DetectionCdc<'_> {
     fn pd_messages_since(&mut self, since: Instant) -> Vec<PdMessage> {
         self.pdo_cache.pd_messages_since(since)
     }
+}
+
+fn recover_reset_io(
+    io: &mut impl DetectionIo,
+    stop: &StopSignal,
+    deadline: Instant,
+    log: &mut dyn FnMut(&str),
+) -> VoltageVerification {
+    if stop.is_set() {
+        return VoltageVerification::unavailable(5000, "Session stopped during reset recovery");
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return VoltageVerification::unavailable(5000, "Reset recovery time budget exhausted");
+    }
+    match io.send("reset", remaining.min(Duration::from_secs(3)), log) {
+        Ok(reply) if serial::command_failed(&reply.text) => {
+            return VoltageVerification::unavailable(
+                5000,
+                format!("Reset rejected: {}", reply.text),
+            );
+        }
+        Err(error) => {
+            return VoltageVerification::unavailable(5000, format!("Reset failed: {error:#}"));
+        }
+        Ok(_) => {}
+    }
+    if stop.is_set() {
+        return VoltageVerification::unavailable(5000, "Session stopped during reset recovery");
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return VoltageVerification::unavailable(5000, "Reset verification time budget exhausted");
+    }
+    io.verify_voltage(5000, Instant::now(), remaining.min(Duration::from_secs(12)))
 }
 
 /// How often a PD-ish command re-checks the sniffer while waiting for capabilities.
@@ -1102,6 +1252,9 @@ type CachedPdos = (Instant, Vec<TriggerPdo>);
 struct PdoCacheState {
     pdos: Option<CachedPdos>,
     revision_messages: VecDeque<CapturedPdMessage>,
+    firmware_version: Option<String>,
+    firmware_diagnostic: Option<String>,
+    voltages: crate::evidence::VoltageCache,
 }
 
 struct CapturedPdMessage {
@@ -1113,6 +1266,36 @@ const MAX_CAPTURED_REVISION_MESSAGES: usize = 64;
 const CAPTURED_REVISION_MESSAGE_TTL: Duration = Duration::from_secs(10);
 
 impl PdoCache {
+    pub fn voltage_cache(&self) -> crate::evidence::VoltageCache {
+        self.0
+            .lock()
+            .map(|state| state.voltages.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn set_firmware_version(&self, version: Option<String>) {
+        if let Ok(mut state) = self.0.lock() {
+            state.firmware_version = version;
+        }
+    }
+
+    pub fn set_firmware_diagnostic(&self, diagnostic: Option<String>) {
+        if let Ok(mut state) = self.0.lock() {
+            state.firmware_diagnostic = diagnostic;
+        }
+    }
+
+    pub fn invalidate(&self) {
+        if let Ok(mut state) = self.0.lock() {
+            state.pdos = None;
+            state.revision_messages.clear();
+        }
+    }
+
+    pub fn clear(&self) {
+        self.invalidate();
+        self.voltage_cache().clear();
+    }
     /// Record a capability list. Empty lists are ignored.
     pub fn update(&self, pdos: Vec<TriggerPdo>) {
         if pdos.is_empty() {
@@ -1198,7 +1381,7 @@ pub struct TriggerSession {
     cdc: CdcState,
     mode: Option<String>,
     pdm_open: bool,
-    /// A cancelled scan leaves the firmware mid-sequence; reset before the next command.
+    /// Recovery remains mandatory until a fresh measurement confirms the reset.
     needs_reset: bool,
 }
 
@@ -1210,6 +1393,7 @@ impl TriggerSession {
                 port: None,
                 pdm_version: None,
                 pdm: ConfirmedPdm::default(),
+                pdm_applied: false,
                 stop,
             },
             mode: None,
@@ -1229,6 +1413,7 @@ impl TriggerSession {
         let was_open = self.pdm_open;
         self.cdc.port = None;
         self.cdc.pdm_version = None;
+        self.cdc.pdm_applied = false;
         self.mode = None;
         self.pdm_open = false;
         was_open
@@ -1253,28 +1438,50 @@ impl TriggerSession {
         detection_progress: &mut dyn FnMut(&DetectionReport),
     ) -> TriggerOutcome {
         let started = Instant::now();
+        if matches!(
+            cmd,
+            TriggerCommand::Raw { .. }
+                | TriggerCommand::PdmOpen { .. }
+                | TriggerCommand::PdmClose
+                | TriggerCommand::PdmSet { .. }
+        ) {
+            pdo_cache.invalidate();
+        }
         let mut on_line = |line: &str| {
             let text = sanitize_trigger_text(line);
             if !text.is_empty() {
                 progress(&text);
             }
         };
+        if matches!(cmd, TriggerCommand::Reset) && self.pdm_open {
+            let verification = self.recover_reset(pdo_cache, &mut on_line);
+            return TriggerOutcome {
+                ok: verification.status == "verified",
+                message: verification.detail.clone(),
+                pdos: Vec::new(),
+                protocols: Vec::new(),
+                detection: None,
+                code: (verification.status != "verified").then(|| "reset_unconfirmed".into()),
+                pdm_open: self.pdm_open,
+                context: self.context(pdo_cache),
+                reset_verification: Some(verification),
+            };
+        }
         if self.needs_reset && self.pdm_open && cmd_requires_pdm(cmd) {
-            // Reopen only CDC before the recovery reset, not a second PDM session
-            // while the firmware may still be busy with the interrupted scan.
-            if let Err(error) = ensure_cdc(&mut self.cdc, self.serial.as_deref(), false) {
-                return self.failure(cmd, error);
+            let verification = self.recover_reset(pdo_cache, &mut on_line);
+            if verification.status != "verified" {
+                return TriggerOutcome {
+                    ok: false,
+                    message: verification.detail.clone(),
+                    pdos: Vec::new(),
+                    protocols: Vec::new(),
+                    detection: None,
+                    code: Some("reset_unconfirmed".into()),
+                    pdm_open: self.pdm_open,
+                    context: self.context(pdo_cache),
+                    reset_verification: Some(verification),
+                };
             }
-            if let Err(error) = reset_module(
-                &mut self.cdc,
-                self.serial.as_deref(),
-                &mut self.mode,
-                true,
-                &mut on_line,
-            ) {
-                return self.failure(cmd, error);
-            }
-            self.needs_reset = false;
         }
         if let TriggerCommand::List { plus } = cmd {
             if self.pdm_open {
@@ -1290,6 +1497,15 @@ impl TriggerSession {
             &mut on_line,
         ) {
             Ok(mut out) => {
+                if matches!(
+                    cmd,
+                    TriggerCommand::Ufcs { .. } | TriggerCommand::UfcsCmd { .. }
+                ) {
+                    for pdo in &mut out.pdos {
+                        pdo.protocol = "ufcs".into();
+                        pdo.kind = "ufcs".into();
+                    }
+                }
                 if out.ok && wants_pd_drain(cmd) && out.pdos.is_empty() {
                     if let Some(pdos) =
                         pdo_cache.wait_since(started, PDO_CACHE_WAIT, &self.cdc.stop)
@@ -1309,9 +1525,15 @@ impl TriggerSession {
                     detection: None,
                     code: out.code,
                     pdm_open: self.pdm_open,
+                    context: self.context(pdo_cache),
+                    reset_verification: None,
                 }
             }
-            Err(error) => self.failure(cmd, error),
+            Err(error) => {
+                let mut outcome = self.failure(cmd, error);
+                outcome.context = self.context(pdo_cache);
+                outcome
+            }
         }
     }
 
@@ -1322,14 +1544,16 @@ impl TriggerSession {
         log: &mut dyn FnMut(&str),
         progress: &mut dyn FnMut(&DetectionReport),
     ) -> TriggerOutcome {
+        let started = Instant::now();
         let cmd = TriggerCommand::List { plus };
-        if let Err(error) = ensure_cdc(&mut self.cdc, self.serial.as_deref(), true) {
+        if let Err(error) = ensure_cdc(&mut self.cdc, self.serial.as_deref(), true, log) {
             return self.failure(&cmd, error);
         }
         self.mode = None;
         let stop = self.cdc.stop.clone();
         let version = self.cdc.pdm_version.clone();
-        let result = detection::run(
+        let context = self.context(pdo_cache);
+        let mut result = detection::run(
             &mut DetectionCdc {
                 cdc: &mut self.cdc,
                 pdo_cache,
@@ -1337,17 +1561,43 @@ impl TriggerSession {
             plus,
             version,
             &stop,
-            progress,
+            &mut |report| {
+                let mut report = report.clone();
+                report.context = context.clone();
+                progress(&report);
+            },
             log,
         );
-        let completion = result.report.completion.as_deref().unwrap_or("failed");
-        // An interrupted scan may still be executing in firmware. The next command
-        // must reset it; do not auto-reopen PDM on top of a cancelled scan now.
-        self.needs_reset = matches!(completion, "cancelled" | "failed" | "timeout");
+        result.report.context = self.context(pdo_cache);
+        let completion = result
+            .report
+            .completion
+            .clone()
+            .unwrap_or_else(|| "failed".into());
+        // An interrupted scan may still run in firmware. Recover using reset only;
+        // never auto-open another PDM session on top of the unfinished scan.
+        self.needs_reset = matches!(completion.as_str(), "cancelled" | "failed" | "timeout");
         if completion == "failed" {
             self.cdc.port = None;
         }
-        let code = match completion {
+        if self.needs_reset && result.report.reset_verification.is_none() {
+            result.report.phase = "reset".into();
+            progress(&result.report);
+            result.report.reset_verification = Some(self.recover_reset(pdo_cache, log));
+            result.report.phase = "finished".into();
+            result.report.context = self.context(pdo_cache);
+            result.report.elapsed_ms = started.elapsed().as_millis() as u64;
+            progress(&result.report);
+        }
+        if result
+            .report
+            .reset_verification
+            .as_ref()
+            .is_some_and(|v| v.status == "verified")
+        {
+            self.needs_reset = false;
+        }
+        let code = match completion.as_str() {
             "complete" | "partial" => None,
             "cancelled" => Some("cancelled".into()),
             "timeout" => Some("scan_timeout".into()),
@@ -1363,7 +1613,7 @@ impl TriggerSession {
             .collect::<Vec<_>>()
             .join("\n");
         TriggerOutcome {
-            ok: matches!(completion, "complete" | "partial"),
+            ok: matches!(completion.as_str(), "complete" | "partial"),
             message,
             protocols: result
                 .report
@@ -1376,10 +1626,67 @@ impl TriggerSession {
                 })
                 .collect(),
             pdos: result.pdos,
+            reset_verification: result.report.reset_verification.clone(),
+            context: self.context(pdo_cache),
             detection: Some(result.report),
             code,
             pdm_open: self.pdm_open,
         }
+    }
+
+    fn context(&self, cache: &PdoCache) -> TriggerContext {
+        TriggerContext {
+            firmware_version: cache.0.lock().ok().and_then(|s| s.firmware_version.clone()),
+            firmware_diagnostic: cache
+                .0
+                .lock()
+                .ok()
+                .and_then(|s| s.firmware_diagnostic.clone()),
+            pdm_version: self.cdc.pdm_version.clone(),
+            applied_pdm: self
+                .cdc
+                .pdm_applied
+                .then(|| self.cdc.pdm.0.clone())
+                .flatten(),
+        }
+    }
+
+    fn recover_reset(
+        &mut self,
+        cache: &PdoCache,
+        log: &mut dyn FnMut(&str),
+    ) -> VoltageVerification {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let original = self.cdc.stop.clone();
+        let recovery = original.recovery();
+        self.cdc.stop = recovery.clone();
+        if let Some(port) = self.cdc.port.as_mut() {
+            port.set_stop(recovery.clone());
+        }
+        self.mode = None;
+        cache.invalidate();
+        log("> reset (recovering; voltage verification pending)");
+        let verification = match ensure_cdc(&mut self.cdc, self.serial.as_deref(), false, log) {
+            Ok(_) => recover_reset_io(
+                &mut DetectionCdc {
+                    cdc: &mut self.cdc,
+                    pdo_cache: cache,
+                },
+                &recovery,
+                deadline,
+                log,
+            ),
+            Err(error) => {
+                VoltageVerification::unavailable(5000, format!("Reset failed: {error:#}"))
+            }
+        };
+        self.needs_reset = verification.status != "verified";
+        log(&verification.detail);
+        self.cdc.stop = original.clone();
+        if let Some(port) = self.cdc.port.as_mut() {
+            port.set_stop(original);
+        }
+        verification
     }
 
     fn failure(&mut self, cmd: &TriggerCommand, error: anyhow::Error) -> TriggerOutcome {
@@ -1393,6 +1700,7 @@ impl TriggerSession {
         if !can_retry_pd_in_session(cmd, self.mode.as_deref(), &error) {
             self.cdc.port = None;
             self.mode = None;
+            self.cdc.pdm_applied = false;
         }
         let code = if cancelled {
             "cancelled"
@@ -1409,6 +1717,17 @@ impl TriggerSession {
             detection: None,
             code: Some(code.into()),
             pdm_open: self.pdm_open,
+            context: TriggerContext {
+                pdm_version: self.cdc.pdm_version.clone(),
+                applied_pdm: self
+                    .cdc
+                    .pdm_applied
+                    .then(|| self.cdc.pdm.0.clone())
+                    .flatten(),
+                firmware_version: None,
+                firmware_diagnostic: None,
+            },
+            reset_verification: None,
         }
     }
 }
@@ -1416,6 +1735,208 @@ impl TriggerSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct RecoveryIo {
+        reply: &'static str,
+        verification: &'static str,
+        commands: Vec<String>,
+        shutdown_on_send: Option<Arc<std::sync::atomic::AtomicBool>>,
+        exhaust_budget: bool,
+        measured: bool,
+    }
+
+    impl RecoveryIo {
+        fn new(reply: &'static str, verification: &'static str) -> Self {
+            Self {
+                reply,
+                verification,
+                commands: Vec::new(),
+                shutdown_on_send: None,
+                exhaust_budget: false,
+                measured: false,
+            }
+        }
+    }
+
+    impl DetectionIo for RecoveryIo {
+        fn send(
+            &mut self,
+            command: &str,
+            timeout: Duration,
+            _: &mut dyn FnMut(&str),
+        ) -> Result<detection::Reply> {
+            assert_eq!(
+                command, "reset",
+                "recovery must not open PDM over an unfinished scan"
+            );
+            assert!(timeout <= Duration::from_secs(3));
+            self.commands.push(command.into());
+            if let Some(alive) = &self.shutdown_on_send {
+                alive.store(false, std::sync::atomic::Ordering::Release);
+            }
+            if self.exhaust_budget {
+                std::thread::sleep(timeout + Duration::from_millis(1));
+            }
+            if self.reply == "transport error" {
+                bail!("simulated CDC disconnect");
+            }
+            Ok(detection::Reply {
+                text: self.reply.into(),
+                ..Default::default()
+            })
+        }
+        fn settle(&mut self, _: Duration) -> Result<()> {
+            unreachable!()
+        }
+        fn verify_voltage(
+            &mut self,
+            target_mv: u32,
+            _: Instant,
+            budget: Duration,
+        ) -> VoltageVerification {
+            assert!(budget <= Duration::from_secs(12));
+            assert_eq!(self.commands, ["reset"]);
+            self.measured = true;
+            let mut result = VoltageVerification::unavailable(target_mv, "simulated ADC result");
+            result.status = self.verification.into();
+            result
+        }
+    }
+
+    #[test]
+    fn cancelled_command_recovery_keeps_success_failure_and_missing_adc_distinct() {
+        let original = StopSignal::new(
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        );
+        assert!(original.is_set());
+        let recovery = original.recovery();
+        for (reply, measurement, expected, measured) in [
+            ("ok", "verified", "verified", true),
+            ("ok", "mismatch", "mismatch", true),
+            ("ok", "unavailable", "unavailable", true),
+            ("request rejected", "verified", "unavailable", false),
+            ("transport error", "verified", "unavailable", false),
+        ] {
+            let mut io = RecoveryIo::new(reply, measurement);
+            let result = recover_reset_io(
+                &mut io,
+                &recovery,
+                Instant::now() + Duration::from_secs(15),
+                &mut |_| {},
+            );
+            assert_eq!(result.status, expected);
+            assert_eq!(io.measured, measured);
+            assert_eq!(io.commands, ["reset"]);
+        }
+    }
+
+    #[test]
+    fn reset_recovery_deadline_and_session_shutdown_have_explicit_terminals() {
+        let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let stop = StopSignal::new(
+            alive.clone(),
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        )
+        .recovery();
+        let mut io = RecoveryIo::new("ok", "verified");
+        let expired = recover_reset_io(&mut io, &stop, Instant::now(), &mut |_| {});
+        assert_eq!(expired.status, "unavailable");
+        assert!(expired.detail.contains("budget exhausted"));
+        assert!(io.commands.is_empty());
+
+        io.exhaust_budget = true;
+        let expired = recover_reset_io(
+            &mut io,
+            &stop,
+            Instant::now() + Duration::from_millis(2),
+            &mut |_| {},
+        );
+        assert!(expired.detail.contains("budget exhausted"));
+        assert!(!io.measured);
+
+        let mut io = RecoveryIo::new("ok", "verified");
+        io.shutdown_on_send = Some(alive.clone());
+        let closed = recover_reset_io(
+            &mut io,
+            &stop,
+            Instant::now() + Duration::from_secs(15),
+            &mut |_| {},
+        );
+        assert_eq!(closed.status, "unavailable");
+        assert!(closed.detail.contains("Session stopped"));
+        assert!(!io.measured);
+        assert_eq!(io.commands, ["reset"]);
+        io.commands.clear();
+        let closed = recover_reset_io(
+            &mut io,
+            &stop,
+            Instant::now() + Duration::from_secs(15),
+            &mut |_| {},
+        );
+        assert_eq!(closed.status, "unavailable");
+        assert!(io.commands.is_empty());
+    }
+
+    #[test]
+    fn spr_is_complete_and_truncated_counts_request_a_retry() {
+        let pdos = vec![make_pdo(1, "fixed", 5000, 5000, Some(3000), false)];
+        assert!(!pdo_reply_incomplete(&pdos, b"pdo:1"));
+        assert!(pdo_reply_incomplete(&pdos, b"pdo:2"));
+        let binary = [b"pdo:1".as_slice(), &fixed_pdo_le(5000, 3000)].concat();
+        for (text, raw) in [("Fixed: 5.00V 3.00A", b"pdo:1".to_vec()), ("", binary)] {
+            let mut attempts = 0;
+            let (_, pdos) = read_pd_pdos(|recover| {
+                attempts += 1;
+                assert!(!recover, "a complete SPR table must not reopen PDM");
+                Ok(("PD3.1 ready".into(), text.into(), raw.clone()))
+            })
+            .unwrap();
+            assert_eq!(attempts, 1);
+            assert_eq!(pdos.len(), 1);
+        }
+    }
+
+    #[test]
+    fn optional_pdo_retry_preserves_first_table_on_transport_or_protocol_failure() {
+        for transport_failure in [false, true] {
+            let mut attempts = 0;
+            let (message, pdos) = read_pd_pdos(|recover| {
+                attempts += 1;
+                if recover {
+                    if transport_failure {
+                        bail!("simulated CDC disconnect");
+                    }
+                    return Ok((String::new(), "request rejected".into(), Vec::new()));
+                }
+                Ok((
+                    String::new(),
+                    "Fixed: 5.00V 3.00A".into(),
+                    b"pdo:2".to_vec(),
+                ))
+            })
+            .unwrap();
+            assert_eq!(attempts, 2);
+            assert_eq!(pdos.len(), 1);
+            assert_eq!(pdos[0].volt_max_mv, 5000);
+            assert!(message.contains("retained first capability table"));
+            assert!(message.contains(if transport_failure {
+                "disconnect"
+            } else {
+                "rejected"
+            }));
+        }
+    }
+
+    #[test]
+    fn pd_data_never_silently_discards_non_hex_characters() {
+        assert_eq!(clean_hex("0x01,0x8f:14-01").unwrap(), "018F1401");
+        assert!(clean_hex("01 GG 02").is_err());
+        assert!(clean_hex("0x1 02").is_err());
+        assert!(validate_pd_data("018F1401").is_err());
+        assert!(!validate_pd_data("008F5141A000FF992E0018181500000000000040400800").unwrap());
+        assert!(validate_pd_data("000080").unwrap());
+    }
 
     #[test]
     fn pdm_reopen_restores_confirmed_settings_before_entry_and_pdo() {
@@ -1720,7 +2241,7 @@ mod tests {
     }
 
     #[test]
-    fn format_pdo_message_keeps_status_and_labels_once() {
+    fn format_pdo_message_keeps_all_status_updates_and_labels_once() {
         let entry = "ok\ncc1 attach";
         let pdo_text = concat!(
             "pdo:7\n",
@@ -1766,8 +2287,80 @@ mod tests {
         assert!(!msg.contains("Fixed:"));
         assert!(!msg.contains("PPS:"));
         assert!(!msg.contains('\u{52A9}'));
-        assert_eq!(msg.matches("ready:").count(), 1);
+        assert!(msg.contains("ready:5215mV,0mA"));
+        assert_eq!(msg.matches("ready:").count(), 2);
         assert_eq!(msg.matches("#1 FIXED").count(), 1);
+    }
+
+    #[test]
+    fn pdo_reply_preserves_repeated_statuses_and_connection_transitions() {
+        let entry = "ok\ncc1 attach\nready:5100mV,0mA";
+        let pdo = concat!(
+            "ok\ncc1 detach\ncc2 attach\nready:5097mV,0mA\n",
+            "max power 100W\nmax power 60W\n",
+            "cc2 detach\ncc1 attach\nready:5100mV,0mA\nok"
+        );
+        let pdos = vec![make_pdo(1, "fixed", 5000, 5000, Some(3000), false)];
+        assert_eq!(
+            format_pdo_message(entry, pdo, &pdos),
+            format!("{entry}\n{pdo}\n{}", pdos[0].label)
+        );
+    }
+
+    #[test]
+    fn pdo_retry_preserves_both_attempts_with_one_selected_capability_table() {
+        for retry_count in [1, 2, 3] {
+            let mut attempts = 0;
+            let (message, pdos) = read_pd_pdos(|recover| {
+                attempts += 1;
+                let count = if recover { retry_count } else { 3 };
+                let voltage = if recover { 5097 } else { 5100 };
+                let rows = if recover {
+                    "Fixed: 5.00V 3.00A\n".repeat(retry_count)
+                } else {
+                    "Fixed: 5.00V 3.00A\n".repeat(2)
+                };
+                Ok((
+                    "ok\ncc1 attach".into(),
+                    format!("ready:{voltage}mV,0mA\n{rows}"),
+                    format!("pdo:{count}").into_bytes(),
+                ))
+            })
+            .unwrap();
+            assert_eq!(attempts, 2);
+            assert_eq!(pdos.len(), retry_count.max(2));
+            assert_eq!(message.matches("ok\ncc1 attach").count(), 2, "{message}");
+            assert!(
+                message.find("ready:5100mV").unwrap() < message.find("ready:5097mV").unwrap(),
+                "{message}"
+            );
+            assert_eq!(message.matches("#1 FIXED").count(), 1, "{message}");
+        }
+    }
+
+    #[test]
+    fn empty_pdo_retries_keep_both_attempts_diagnostics() {
+        let mut attempts = 0;
+        let (message, pdos) = read_pd_pdos(|recover| {
+            attempts += 1;
+            Ok((
+                "ok\ncc1 attach".into(),
+                if recover {
+                    "second attempt unavailable"
+                } else {
+                    "first attempt unavailable"
+                }
+                .into(),
+                Vec::new(),
+            ))
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+        assert!(pdos.is_empty());
+        assert_eq!(
+            message,
+            "ok\ncc1 attach\nfirst attempt unavailable\nok\ncc1 attach\nsecond attempt unavailable"
+        );
     }
 
     #[test]
@@ -1893,7 +2486,9 @@ mod tests {
         assert!(!msg.contains("Fixed:"));
         assert!(!msg.contains("AVS:"));
         assert!(!msg.contains("PPS:"));
-        assert_eq!(msg.matches("ready:").count(), 1);
+        assert!(msg.contains("ready:5097mV,0mA"));
+        assert!(msg.contains("ready:5099mV,0mA"));
+        assert_eq!(msg.matches("ready:").count(), 3);
     }
 
     #[test]
@@ -1913,7 +2508,7 @@ mod tests {
         assert_eq!(pdm_raw_kind("pdm open"), Some(true));
         assert_eq!(pdm_raw_kind("PDM CLOSE"), Some(false));
         assert_eq!(pdm_raw_kind("pd pdo"), None);
-        assert!(!cmd_requires_pdm(&TriggerCommand::PdmOpen));
+        assert!(!cmd_requires_pdm(&TriggerCommand::PdmOpen { config: None }));
         assert!(!cmd_requires_pdm(&TriggerCommand::PdmClose));
         assert!(!cmd_requires_pdm(&TriggerCommand::Raw {
             command: "pdm open".into()

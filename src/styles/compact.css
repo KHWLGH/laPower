@@ -34,6 +34,10 @@
   .titlebar-connect .ribbon-select {
     max-width: 200px;
   }
+
+  .trigger-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ── W3：视口 ≤ 900（最小窗宽 + 极端 DPI / 浏览器安全网） ───── */
@@ -56,6 +60,30 @@
 /* ── W4：视口 < 700，PD 分栏纵向堆叠（安全网） ───────────────── */
 
 @media (max-width: 699.98px) {
+  .trigger-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .trigger-pdo-row {
+    grid-template-columns: 2em minmax(0, 1fr) auto;
+    gap: 2px var(--space-2);
+  }
+
+  .trigger-pdo-pos {
+    grid-row: 1 / span 2;
+  }
+
+  .trigger-pdo-kind,
+  .trigger-pdo-volt {
+    grid-column: 2;
+  }
+
+  .trigger-pdo-cur {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
   .pd-master,
   .pd-detail-pane {
     min-height: 100px;

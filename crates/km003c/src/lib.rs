@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub mod detection;
+pub mod evidence;
 pub mod meter;
 pub mod protocol;
 pub mod text;
@@ -62,6 +63,14 @@ impl StopSignal {
                 .is_some_and(|alive| !alive.load(Ordering::Acquire))
     }
 
+    /// Recovery ignores the cancelled command, but must still stop on session shutdown.
+    pub fn recovery(&self) -> Self {
+        Self {
+            alive: self.alive.clone(),
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     /// Sleep for `duration`, waking early with an error once the signal is set.
     pub fn sleep(&self, duration: Duration) -> anyhow::Result<()> {
         let deadline = Instant::now() + duration;
@@ -91,9 +100,12 @@ mod tests {
         assert!(!stop.is_set());
         cancel.store(true, Ordering::Release);
         assert!(stop.is_set());
+        let recovery = stop.recovery();
+        assert!(!recovery.is_set());
         cancel.store(false, Ordering::Release);
         alive.store(false, Ordering::Release);
         assert!(stop.is_set());
+        assert!(recovery.is_set());
     }
 
     #[test]

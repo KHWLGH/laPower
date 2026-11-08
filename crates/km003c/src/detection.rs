@@ -7,12 +7,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
-use crate::protocol::pd::{PdMessage, Sop};
-use crate::text::{dedupe_detail_blocks, sanitize_trigger_text, scan_voltage_ranges};
+use crate::protocol::pd::{PdHeader, PdMessage, Sop};
+use crate::text::{resolve_scan_reply, sanitize_trigger_text, scan_voltage_ranges};
 use crate::transport::serial;
 use crate::types::{
     DetectionReport, DetectionState, DetectionVoltage, PdReportedVersion, PdRevision,
-    PdVersionBasis, PdVersionInference, ProtocolDetection, TriggerPdo,
+    PdVersionBasis, PdVersionInference, ProtocolDetection, TriggerContext, TriggerPdo,
+    VoltageVerification,
 };
 use crate::StopSignal;
 use usbpd_parser::{ParseOptions, Parser};
@@ -101,6 +102,14 @@ pub(crate) trait DetectionIo {
         line: &mut dyn FnMut(&str),
     ) -> Result<Reply>;
     fn settle(&mut self, duration: Duration) -> Result<()>;
+    fn verify_voltage(
+        &mut self,
+        target_mv: u32,
+        _since: Instant,
+        _budget: Duration,
+    ) -> VoltageVerification {
+        VoltageVerification::unavailable(target_mv, "Voltage measurement unavailable")
+    }
     fn pd_messages_since(&mut self, _since: Instant) -> Vec<PdMessage> {
         Vec::new()
     }
@@ -191,6 +200,17 @@ fn valid_pd_revision(revision: PdRevision) -> Option<PdRevision> {
 
 fn parse_revision_message(raw: &[u8]) -> Option<PdRevision> {
     if raw.len() != 6 {
+        return None;
+    }
+    let header = PdHeader::parse(u16::from_le_bytes([raw[0], raw[1]]));
+    // Revision must be a PD 3.x non-extended, one-object Source reply.
+    // A Sink echo or an arbitrary matching window is not charger evidence.
+    if header.extended
+        || header.num_objects != 1
+        || header.message_type != 12
+        || header.raw & (1 << 8) == 0
+        || (header.raw >> 6) & 3 != 2
+    {
         return None;
     }
     let mut parser = Parser::new();
@@ -335,11 +355,7 @@ fn pair_value(text: &str, label: &str) -> Option<(u8, u8)> {
 fn parse_revision_hex_dump(text: &str) -> Option<PdRevision> {
     text.lines()
         .filter_map(parse_hex_dump_line)
-        .find_map(|bytes| {
-            bytes
-                .windows(6)
-                .find_map(|window| parse_revision_message(window))
-        })
+        .find_map(|bytes| parse_revision_message(&bytes))
 }
 
 fn parse_hex_dump_line(line: &str) -> Option<Vec<u8>> {
@@ -374,9 +390,15 @@ fn parse_hex_dump_line(line: &str) -> Option<Vec<u8>> {
 }
 
 pub(crate) fn parse_pd_revision_reply(text: &str, raw: &[u8]) -> Option<PdRevision> {
+    let raw = raw.trim_ascii();
+    let raw = raw
+        .strip_prefix(b"pd cmd=24\r\n")
+        .or_else(|| raw.strip_prefix(b"pd cmd=24\n"))
+        .unwrap_or(raw)
+        .trim_ascii();
     parse_revision_text(text)
         .or_else(|| parse_revision_hex_dump(text))
-        .or_else(|| raw.windows(6).find_map(parse_revision_message))
+        .or_else(|| parse_revision_message(raw))
 }
 
 fn revision_reply_is_expected_absence(text: &str) -> bool {
@@ -488,7 +510,7 @@ fn protocol_id(name: &str) -> Option<&'static str> {
         "qc2.0" | "qc2" | "qc" => Some("qc"),
         "qc3.0" | "qc3" | "qc3+" => Some("qc3"),
         "vifc" | "vifcp" | "vfcp" => Some("vfcp"),
-        "mtkpe" | "mtkpe1.0" | "pe1" => Some("pe1"),
+        "mtk" | "mtkpe" | "mtkpe1.0" | "pe1" => Some("pe1"),
         "mtkpe2.0" | "pe2" => Some("pe2"),
         "pd" | "pd2.0" | "pd3.0" | "pd3.1" | "pd3.2" => Some("pd"),
         other => PROTOCOLS
@@ -532,20 +554,6 @@ fn reported_voltages(id: &str, detail: &str) -> Vec<DetectionVoltage> {
         }
     }
     voltages
-}
-
-fn confirms_five_volt_contract(text: &str) -> bool {
-    text.lines().any(|line| {
-        let lower = line.to_ascii_lowercase();
-        if !["ready", "vbus", "bus voltage"]
-            .iter()
-            .any(|tag| lower.contains(tag))
-        {
-            return false;
-        }
-        let voltages = scan_voltage_ranges(line);
-        matches!(voltages.as_slice(), [(min, max)] if min == max && (4750..=5250).contains(min))
-    })
 }
 
 fn update_result(
@@ -635,6 +643,7 @@ pub(crate) fn run(
                     pd_reported_version: None,
                     pd_version_inference: None,
                     reason: "not_requested".into(),
+                    verification: None,
                 })
                 .collect(),
             phase: "scan".into(),
@@ -644,6 +653,8 @@ pub(crate) fn run(
             fallback_used: false,
             elapsed_ms: 0,
             diagnostics: Vec::new(),
+            context: TriggerContext::default(),
+            reset_verification: None,
         },
         pdos: Vec::new(),
         reported_pd_version: None,
@@ -710,41 +721,6 @@ impl<I: DetectionIo> Runner<'_, I> {
         (self.progress)(&self.report);
     }
 
-    fn update_pd_pdo_evidence(&mut self, reply: Reply) {
-        if reply.pdos.is_empty() || serial::command_failed(&reply.text) {
-            return;
-        }
-
-        self.pdos = reply.pdos;
-        let inference = infer_pd_version(&self.pdos);
-        let voltages = self
-            .pdos
-            .iter()
-            .map(|pdo| DetectionVoltage {
-                kind: pdo.kind.clone(),
-                volt_min_mv: pdo.volt_min_mv,
-                volt_max_mv: pdo.volt_max_mv,
-            })
-            .fold(Vec::new(), |mut voltages, voltage| {
-                if !voltages.contains(&voltage) {
-                    voltages.push(voltage);
-                }
-                voltages
-            });
-        let detail = pd_detail(&reply.text, &self.pdos);
-        if let Some(pd) = self
-            .report
-            .results
-            .iter_mut()
-            .find(|result| result.id == "pd")
-        {
-            pd.pd_version_inference = inference;
-            pd.voltages = voltages;
-            pd.detail = detail.chars().take(4096).collect();
-        }
-        self.emit();
-    }
-
     fn send(&mut self, command: &str, scanning: bool) -> Result<Reply> {
         if self.stop.is_set() {
             bail!("Detection cancelled");
@@ -802,8 +778,8 @@ impl<I: DetectionIo> Runner<'_, I> {
         }
         if scanning {
             // Resolve firmware split/orphan values after the complete response arrives;
-            // unlike display normalization, keep both classic and detailed result rows.
-            for line in dedupe_detail_blocks(&reply.text).lines() {
+            // Preserve every state transition; summary deduplication can erase the last result.
+            for line in resolve_scan_reply(&reply.text).lines() {
                 if let Some((id, state)) = scan_line(line) {
                     if id == "pd" {
                         continue;
@@ -837,7 +813,11 @@ impl<I: DetectionIo> Runner<'_, I> {
         if serial::command_failed(&reply.text) {
             bail!("Reset rejected: {}", reply.text);
         }
-        self.io.settle(Duration::from_millis(800))
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            bail!("Detection time budget exhausted during reset");
+        }
+        self.io.settle(remaining.min(Duration::from_millis(800)))
     }
 
     fn scan(&mut self, plus: bool) -> Result<bool> {
@@ -915,7 +895,30 @@ impl<I: DetectionIo> Runner<'_, I> {
         self.report.phase = "reset".into();
         self.report.active = None;
         self.emit();
-        self.reset()?;
+        self.deadline = self.deadline.min(Instant::now() + Duration::from_secs(15));
+        if let Err(error) = self.reset() {
+            // A user cancellation still needs the independent recovery path;
+            // an ordinary reset failure must not start another 15-second cycle.
+            if !self.stop.is_set() {
+                self.report.reset_verification = Some(VoltageVerification::unavailable(
+                    5000,
+                    format!("Reset failed: {error:#}"),
+                ));
+            }
+            return Err(error);
+        }
+        let verification = self.io.verify_voltage(
+            5000,
+            Instant::now(),
+            self.deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_secs(12)),
+        );
+        let verified = verification.status == "verified";
+        self.report.reset_verification = Some(verification);
+        if !verified {
+            bail!("Final reset voltage was not verified");
+        }
         Ok(())
     }
 
@@ -954,8 +957,7 @@ impl<I: DetectionIo> Runner<'_, I> {
         };
         if let Some(command) = verification {
             let reply = self.send(command, false)?;
-            let current_five_volt_contract = id == "pd" && confirms_five_volt_contract(&reply.text);
-            let state = if id == "pd" {
+            let mut state = if id == "pd" {
                 if !reply.pdos.is_empty() && !serial::command_failed(&reply.text) {
                     self.pdos = reply.pdos;
                     DetectionState::Supported
@@ -972,13 +974,34 @@ impl<I: DetectionIo> Runner<'_, I> {
                     state
                 }
             };
-            let detail = if id == "pd" {
+            let verification = if id != "pd" && state == DetectionState::Supported {
+                let result = self.io.verify_voltage(
+                    5000,
+                    Instant::now(),
+                    self.deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_secs(12)),
+                );
+                if self.stop.is_set() {
+                    bail!("Detection cancelled");
+                }
+                if result.status != "verified" {
+                    state = DetectionState::Failed;
+                }
+                Some(result)
+            } else {
+                None
+            };
+            let mut detail = if id == "pd" {
                 // Binary PDOs may have no readable table. Include only this read
                 // and its decoded objects, never the preceding multi-protocol scan.
                 pd_detail(&reply.text, &self.pdos)
             } else {
                 format!("{}\n{}", entry.text, reply.text)
             };
+            if let Some(result) = &verification {
+                detail.push_str(&format!("\n{}", result.detail));
+            }
             self.set(
                 id,
                 state,
@@ -990,6 +1013,9 @@ impl<I: DetectionIo> Runner<'_, I> {
                     ""
                 },
             );
+            if let Some(result) = self.report.results.iter_mut().find(|r| r.id == id) {
+                result.verification = verification;
+            }
             if state == DetectionState::Supported {
                 let pd_version_inference = if id == "pd" {
                     infer_pd_version(&self.pdos)
@@ -1021,7 +1047,7 @@ impl<I: DetectionIo> Runner<'_, I> {
                 };
                 self.emit();
                 if id == "pd" {
-                    self.read_pd_revision(current_five_volt_contract)?;
+                    self.read_pd_revision()?;
                 }
             }
         } else {
@@ -1030,63 +1056,22 @@ impl<I: DetectionIo> Runner<'_, I> {
         Ok(())
     }
 
-    fn read_pd_revision(&mut self, has_five_volt_contract: bool) -> Result<()> {
-        let five_volt_pdo = self
-            .pdos
-            .iter()
-            .find(|pdo| pdo.kind == "fixed" && pdo.volt_min_mv == 5000 && pdo.volt_max_mv == 5000);
-        if !has_five_volt_contract && five_volt_pdo.is_none() {
+    fn read_pd_revision(&mut self) -> Result<()> {
+        if self.pdos.is_empty() {
             return Ok(());
         }
 
-        // Keep enough budget for every optional command and the mandatory final reset.
+        // Entry and the independent PDO read have already established a PD session.
+        // Get_Revision is a read-only control message, not a voltage request: it
+        // does not require a 5 V contract or a particular CDC voltage ACK format.
+        // Keep enough budget for the optional query and the mandatory final reset.
         let reset_reserve = Duration::from_millis(6800);
-        let setup_budget = if has_five_volt_contract {
-            Duration::ZERO
-        } else {
-            serial::suggested_wait("pd req=1,volt=5000,cur=500") + serial::suggested_wait("pd pdo")
-        };
-        let query_budget = setup_budget + PD_REVISION_QUERY_WAIT;
-        if self.deadline.saturating_duration_since(Instant::now()) < reset_reserve + query_budget {
+        if self.deadline.saturating_duration_since(Instant::now())
+            < reset_reserve + PD_REVISION_QUERY_WAIT
+        {
             self.report
                 .diagnostics
                 .push("PD revision query skipped to preserve the final protocol reset".into());
-            return Ok(());
-        }
-
-        let mut confirmed = has_five_volt_contract;
-        if !confirmed {
-            if let Some(five_volt) = five_volt_pdo {
-                let current_ma = five_volt.cur_ma.unwrap_or(500).min(500);
-                if current_ma > 0 {
-                    let request =
-                        format!("pd req={},volt=5000,cur={current_ma}", five_volt.position);
-                    match self.send(&request, false) {
-                        Ok(reply) if serial::reply_confirmed(&reply.text) => {
-                            confirmed = confirms_five_volt_contract(&reply.text);
-                            match self.send("pd pdo", false) {
-                                Ok(readback) => {
-                                    confirmed |= confirms_five_volt_contract(&readback.text);
-                                    self.update_pd_pdo_evidence(readback);
-                                }
-                                Err(error) if self.stop.is_set() => return Err(error),
-                                Err(error) => self.report.diagnostics.push(format!(
-                                    "PD revision query skipped: 5 V contract could not be verified ({error:#})"
-                                )),
-                            }
-                        }
-                        Ok(_) => self.report.diagnostics.push(
-                            "PD revision query skipped: 5 V request was not confirmed".into(),
-                        ),
-                        Err(error) if self.stop.is_set() => return Err(error),
-                        Err(error) => self.report.diagnostics.push(format!(
-                            "PD revision query skipped: 5 V request failed ({error:#})"
-                        )),
-                    }
-                }
-            }
-        }
-        if !confirmed {
             return Ok(());
         }
 
@@ -1096,31 +1081,95 @@ impl<I: DetectionIo> Runner<'_, I> {
         let query_started = Instant::now();
         match self.send("pd cmd=24", false) {
             Ok(reply) => {
-                if let Some(revision) = reply.pd_revision {
+                let messages = self.io.pd_messages_since(query_started);
+                let (request_observed, captured) = captured_revision_reply(&messages);
+                for message in &messages {
+                    if message.sop == Sop::Sop
+                        && message.header.is_some_and(|header| {
+                            matches!(
+                                (header.message_type, header.num_objects, header.extended),
+                                (24, 0, false) | (12, 1, false) | (16, 0, false) | (4, 0, false)
+                            )
+                        })
+                    {
+                        (self.log)(&format!(
+                            "PD Get_Revision CC SOP bytes: {:02X?}",
+                            message.wire
+                        ));
+                    }
+                }
+                // A correlated Source response on the CC bus takes precedence
+                // over CDC fields, which can contain instrument-local output.
+                let revision = match &captured {
+                    Some(CapturedRevisionReply::Revision(revision)) => {
+                        if reply
+                            .pd_revision
+                            .as_ref()
+                            .is_some_and(|cdc| cdc != revision)
+                        {
+                            self.report.diagnostics.push(
+                                "PD Get_Revision CDC and CC responses differ; using the correlated CC Source response".into(),
+                            );
+                        }
+                        Some(revision.clone())
+                    }
+                    None => reply.pd_revision,
+                    _ => None,
+                };
+                if let Some(revision) = revision {
+                    let source = if captured.is_some() {
+                        "CC SOP Source"
+                    } else {
+                        "CDC"
+                    };
+                    let detail = format!(
+                        "Get_Revision ({source}): PD {}.{}, spec {}.{}",
+                        revision.revision_major,
+                        revision.revision_minor,
+                        revision.version_major,
+                        revision.version_minor
+                    );
+                    (self.log)(&detail);
+                    let revision_pair = (revision.revision_major, revision.revision_minor);
+                    let mut higher_evidence = Vec::new();
+                    if let Some(minimum) = infer_pd_version(&self.pdos) {
+                        if (minimum.minimum_major, minimum.minimum_minor) > revision_pair {
+                            higher_evidence.push(format!(
+                                "PDO capability minimum PD {}.{}",
+                                minimum.minimum_major, minimum.minimum_minor
+                            ));
+                        }
+                    }
+                    if let Some(reported) = self.reported_pd_version {
+                        if (reported.major, reported.minor) > revision_pair {
+                            higher_evidence.push(format!(
+                                "meter scan PD {}.{}",
+                                reported.major, reported.minor
+                            ));
+                        }
+                    }
+                    if !higher_evidence.is_empty() {
+                        let conflict = format!(
+                            "PD version evidence conflict: {detail}; {}; all evidence retained",
+                            higher_evidence.join("; ")
+                        );
+                        (self.log)(&conflict);
+                        self.report.diagnostics.push(conflict);
+                    }
                     if let Some(pd) = self
                         .report
                         .results
                         .iter_mut()
                         .find(|result| result.id == "pd")
                     {
+                        pd.detail.push('\n');
+                        pd.detail.push_str(&detail);
                         pd.pd_revision = Some(revision);
                     }
                     self.emit();
                 } else {
-                    let messages = self.io.pd_messages_since(query_started);
-                    let (request_observed, captured) = captured_revision_reply(&messages);
                     match captured {
-                        Some(CapturedRevisionReply::Revision(revision)) => {
-                            if let Some(pd) = self
-                                .report
-                                .results
-                                .iter_mut()
-                                .find(|result| result.id == "pd")
-                            {
-                                pd.pd_revision = Some(revision);
-                            }
-                            self.emit();
-                        }
+                        Some(CapturedRevisionReply::Revision(_)) => unreachable!(),
                         Some(CapturedRevisionReply::NotSupported) => self.report.diagnostics.push(
                             "PD partner replied Not_Supported to Get_Revision; PDO version evidence was retained"
                                 .into(),
@@ -1183,6 +1232,7 @@ mod tests {
         settle_delay: Duration,
         cancel_on_scan: Option<Arc<AtomicBool>>,
         fail_on: Option<&'static str>,
+        voltage_mv: Option<u32>,
     }
 
     impl FakeIo {
@@ -1207,11 +1257,34 @@ mod tests {
                 settle_delay: Duration::ZERO,
                 cancel_on_scan: None,
                 fail_on: None,
+                voltage_mv: Some(5000),
             }
         }
     }
 
     impl DetectionIo for FakeIo {
+        fn verify_voltage(
+            &mut self,
+            target_mv: u32,
+            _since: Instant,
+            _budget: Duration,
+        ) -> VoltageVerification {
+            let Some(measured_mv) = self.voltage_mv else {
+                return VoltageVerification::unavailable(target_mv, "simulated missing ADC");
+            };
+            VoltageVerification {
+                status: if measured_mv.abs_diff(target_mv) <= 200 {
+                    "verified"
+                } else {
+                    "mismatch"
+                }
+                .into(),
+                target_mv,
+                measured_mv: Some(measured_mv),
+                sample_count: 5,
+                detail: format!("simulated ADC {measured_mv} mV"),
+            }
+        }
         fn send(
             &mut self,
             command: &str,
@@ -1304,6 +1377,64 @@ mod tests {
     }
 
     #[test]
+    fn probe_ack_does_not_verify_five_volts_without_fresh_adc() {
+        for voltage in [Some(9000), None] {
+            let mut io = FakeIo::new(vec![
+                ("entry qc", "ready".into()),
+                ("qc 5V", "ready:9000mV,0mA".into()),
+            ]);
+            io.voltage_mv = voltage;
+            let stop = StopSignal::default();
+            let now = Instant::now();
+            let mut runner = Runner {
+                io: &mut io,
+                stop: &stop,
+                progress: &mut |_| {},
+                log: &mut |_| {},
+                started: now,
+                deadline: now + STANDARD_BUDGET,
+                report: DetectionReport {
+                    results: vec![ProtocolDetection {
+                        id: "qc".into(),
+                        label: "QC".into(),
+                        state: DetectionState::NotChecked,
+                        source: "none".into(),
+                        detail: String::new(),
+                        voltages: Vec::new(),
+                        pd_revision: None,
+                        pd_reported_version: None,
+                        pd_version_inference: None,
+                        reason: String::new(),
+                        verification: None,
+                    }],
+                    phase: "probe".into(),
+                    active: None,
+                    completion: None,
+                    pdm_version: None,
+                    fallback_used: false,
+                    elapsed_ms: 0,
+                    diagnostics: Vec::new(),
+                    context: TriggerContext::default(),
+                    reset_verification: None,
+                },
+                pdos: Vec::new(),
+                reported_pd_version: None,
+            };
+            runner.probe("qc").unwrap();
+            assert_eq!(runner.report.results[0].state, DetectionState::Failed);
+            assert!(runner.report.results[0].voltages.is_empty());
+            assert_ne!(
+                runner.report.results[0]
+                    .verification
+                    .as_ref()
+                    .unwrap()
+                    .status,
+                "verified"
+            );
+        }
+    }
+
+    #[test]
     fn explicit_negative_is_distinct_from_timeout_or_unknown_output() {
         for value in [
             "FAIL",
@@ -1347,6 +1478,43 @@ mod tests {
     fn get_revision_uses_a_bounded_best_effort_wait() {
         assert_eq!(command_wait("pd cmd=24"), PD_REVISION_QUERY_WAIT);
         assert_eq!(command_wait("pd pdo"), serial::suggested_wait("pd pdo"));
+    }
+
+    #[test]
+    fn revision_query_keeps_reset_budget_and_obeys_cancellation() {
+        let mut io = FakeIo::new(Vec::new());
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = StopSignal::new(Arc::new(AtomicBool::new(true)), cancel.clone());
+        let now = Instant::now();
+        let mut runner = Runner {
+            io: &mut io,
+            stop: &stop,
+            progress: &mut |_| {},
+            log: &mut |_| {},
+            started: now,
+            deadline: now + PD_REVISION_QUERY_WAIT + Duration::from_secs(6),
+            report: DetectionReport {
+                results: Vec::new(),
+                phase: "pd_pdo".into(),
+                active: Some("pd".into()),
+                completion: None,
+                pdm_version: None,
+                fallback_used: false,
+                elapsed_ms: 0,
+                diagnostics: Vec::new(),
+                context: TriggerContext::default(),
+                reset_verification: None,
+            },
+            pdos: parse_pdos("Fixed: 5V 3A"),
+            reported_pd_version: None,
+        };
+        runner.read_pd_revision().unwrap();
+        assert!(runner.io.commands.is_empty());
+        assert!(runner.report.diagnostics[0].contains("preserve the final protocol reset"));
+        runner.deadline = Instant::now() + Duration::from_secs(60);
+        cancel.store(true, Ordering::Release);
+        assert!(runner.read_pd_revision().is_err());
+        assert!(runner.io.commands.is_empty());
     }
 
     #[test]
@@ -1490,6 +1658,95 @@ mod tests {
     }
 
     #[test]
+    fn revision_reply_rejects_sink_echoes_extended_frames_and_unframed_byte_windows() {
+        let frame = revision_frame(3, 1, 1, 7);
+        let mut sink = frame.clone();
+        sink[1] &= !1;
+        assert_eq!(parse_pd_revision_reply("", &sink), None);
+        let mut extended = frame.clone();
+        extended[1] |= 0x80;
+        assert_eq!(parse_pd_revision_reply("", &extended), None);
+        let mut pd20 = frame.clone();
+        pd20[0] = (pd20[0] & !0xC0) | 0x40;
+        assert_eq!(parse_pd_revision_reply("", &pd20), None);
+        let embedded = [b"unrelated payload: ".as_slice(), &frame, &[0xFF]].concat();
+        assert_eq!(parse_pd_revision_reply("", &embedded), None);
+        let hex = embedded
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(parse_pd_revision_reply(&hex, &[]), None);
+        let framed = [b"\r\n".as_slice(), &frame, b"\r\n"].concat();
+        assert_eq!(
+            parse_pd_revision_reply("", &framed),
+            parse_pd_revision_reply("", &frame)
+        );
+        let echoed = [b"pd cmd=24\r\n".as_slice(), &frame].concat();
+        assert_eq!(
+            parse_pd_revision_reply("", &echoed),
+            parse_pd_revision_reply("", &frame)
+        );
+    }
+
+    #[test]
+    fn correlated_source_revision_takes_precedence_over_conflicting_cdc_fields() {
+        for source_reply in [revision_frame(3, 2, 1, 2), vec![0x90, 0x05]] {
+            let supported = source_reply.len() == 6;
+            let mut io = FakeIo::new(vec![
+                ("entry list", standard_except("pd")),
+                ("entry pd", "ready".into()),
+                ("pd pdo", "AVS: 9-20V3.00A,5.00A".into()),
+                ("pd cmd=24", "Revision: 3.1, Version: 1.7".into()),
+            ]);
+            io.replies.get_mut(2).unwrap().1.pdos = parse_pdos("AVS: 9-20V3.00A,5.00A");
+            io.replies.get_mut(3).unwrap().1.pd_revision =
+                parse_pd_revision_reply("Revision: 3.1, Version: 1.7", &[]);
+            io.pd_messages = vec![
+                captured_pd_message(&[0x98, 0x0C]),
+                captured_pd_message(&source_reply),
+            ];
+            let mut log = Vec::new();
+            let result = run(
+                &mut io,
+                false,
+                None,
+                &StopSignal::default(),
+                &mut |_| {},
+                &mut |line| log.push(line.to_owned()),
+            );
+            let pd = &result.report.results[11];
+            assert_eq!(
+                pd.pd_revision,
+                supported.then_some(PdRevision {
+                    revision_major: 3,
+                    revision_minor: 2,
+                    version_major: 1,
+                    version_minor: 2,
+                })
+            );
+            assert_eq!(pd.pd_version_inference.unwrap().minimum_minor, 2);
+            assert!(log.iter().any(|line| line.contains("CC SOP bytes")));
+            if supported {
+                assert!(pd
+                    .detail
+                    .contains("Get_Revision (CC SOP Source): PD 3.2, spec 1.2"));
+                assert!(result
+                    .report
+                    .diagnostics
+                    .iter()
+                    .any(|line| line.contains("CDC and CC responses differ")));
+            } else {
+                assert!(result
+                    .report
+                    .diagnostics
+                    .iter()
+                    .any(|line| line.contains("Not_Supported")));
+            }
+        }
+    }
+
+    #[test]
     fn absent_or_refused_get_revision_response_is_not_a_parse_diagnostic() {
         for text in [
             "",
@@ -1584,6 +1841,133 @@ mod tests {
             .commands
             .iter()
             .any(|command| command.as_str() == "entry scp"));
+    }
+
+    #[test]
+    fn repeated_scan_states_keep_the_last_result_and_every_log_occurrence() {
+        for (rows, expected) in [
+            ("scp:null\nscp:22W\nscp:null", DetectionState::Unsupported),
+            ("scp:22W\nscp:null\nscp:22W", DetectionState::Supported),
+        ] {
+            let scan = standard_except("scp").replace("done", &format!("{rows}\ndone"));
+            let mut io = FakeIo::new(vec![
+                ("entry list", scan.clone()),
+                ("entry pd", "FAIL".into()),
+            ]);
+            let mut log = Vec::new();
+            let mut snapshots = Vec::new();
+            let result = run(
+                &mut io,
+                false,
+                None,
+                &StopSignal::default(),
+                &mut |report| snapshots.push(report.clone()),
+                &mut |line| log.push(line.to_string()),
+            );
+            assert!(io.replies.is_empty());
+            let scp = result
+                .report
+                .results
+                .iter()
+                .find(|r| r.id == "scp")
+                .unwrap();
+            assert_eq!(scp.state, expected, "{rows}");
+            assert_eq!(scp.detail, rows.lines().last().unwrap());
+            let last_scan = snapshots
+                .iter()
+                .rfind(|report| report.phase == "scan")
+                .unwrap();
+            assert_eq!(
+                last_scan
+                    .results
+                    .iter()
+                    .find(|r| r.id == "scp")
+                    .unwrap()
+                    .state,
+                expected
+            );
+            assert!(log.join("\n").contains(&format!("> entry list\n{scan}")));
+            assert_eq!(
+                log.iter()
+                    .filter(|line| line.as_str() == "scp:null")
+                    .count(),
+                rows.matches("scp:null").count()
+            );
+            assert_eq!(
+                log.iter().filter(|line| line.as_str() == "scp:22W").count(),
+                rows.matches("scp:22W").count()
+            );
+        }
+    }
+
+    #[test]
+    fn mtk_pe_scan_results_and_repeated_logs_stay_independent() {
+        for (rows, pe1, pe2) in [
+            (
+                "mtkpe:true\nmtkpe2.0:true",
+                DetectionState::Supported,
+                DetectionState::Supported,
+            ),
+            (
+                "mtkpe:null\nmtkpe2.0:true",
+                DetectionState::Unsupported,
+                DetectionState::Supported,
+            ),
+            (
+                "mtkpe:true\nmtkpe2.0:null",
+                DetectionState::Supported,
+                DetectionState::Unsupported,
+            ),
+            (
+                "mtkpe:\ntrue\nmtkpe2.0:\nfalse",
+                DetectionState::Supported,
+                DetectionState::Unsupported,
+            ),
+            (
+                "mtkpe:true\nmtkpe2.0:true\nmtkpe:null\nmtkpe2.0:false\nmtkpe:true\nmtkpe2.0:true",
+                DetectionState::Supported,
+                DetectionState::Supported,
+            ),
+            (
+                "mtkpe:\nmtkpe2.0:",
+                DetectionState::Failed,
+                DetectionState::Failed,
+            ),
+        ] {
+            let scan = standard_except("").replace("done", &format!("{rows}\ndone"));
+            let mut io = FakeIo::new(vec![
+                ("entry list+", scan.clone()),
+                ("entry pd", "FAIL".into()),
+            ]);
+            let mut log = Vec::new();
+            let result = run(
+                &mut io,
+                true,
+                None,
+                &StopSignal::default(),
+                &mut |_| {},
+                &mut |line| log.push(line.to_string()),
+            );
+            assert!(io.replies.is_empty());
+            for (id, state) in [("pe1", pe1), ("pe2", pe2)] {
+                let results = result
+                    .report
+                    .results
+                    .iter()
+                    .filter(|r| r.id == id)
+                    .collect::<Vec<_>>();
+                assert_eq!(results.len(), 1);
+                assert_eq!(results[0].state, state, "{rows}");
+                let field = if id == "pe1" { "mtkpe:" } else { "mtkpe2.0:" };
+                assert!(results[0].detail.starts_with(field));
+                assert!(!results[0].detail.contains(if id == "pe1" {
+                    "mtkpe2.0:"
+                } else {
+                    "mtkpe:"
+                }));
+            }
+            assert!(log.join("\n").contains(&format!("> entry list+\n{scan}")));
+        }
     }
 
     #[test]
@@ -1792,6 +2176,7 @@ mod tests {
     #[test]
     fn pd_version_inference_uses_only_distinctive_pdo_capabilities() {
         let pdo = |kind: &str, min: u32, max: u32| TriggerPdo {
+            protocol: "pd".into(),
             position: 1,
             kind: kind.into(),
             volt_min_mv: min,
@@ -1840,19 +2225,16 @@ mod tests {
     }
 
     #[test]
-    fn pd_detection_keeps_version_evidence_separate_and_queries_after_a_confirmed_five_volt_contract(
-    ) {
+    fn pd_detection_queries_revision_after_valid_capabilities_without_a_voltage_request() {
         let scan = standard_except("pd").replace("done", "PD3.1: 65W\ndone");
         let mut io = FakeIo::new(vec![
             ("entry list", scan),
             ("entry pd", "ready".into()),
             ("pd pdo", "pdo:1".into()),
-            ("pd req=1,volt=5000,cur=500", "ok".into()),
-            ("pd pdo", "ready:5000mV,0mA".into()),
             ("pd cmd=24", "Revision.major: 3".into()),
         ]);
         io.replies.get_mut(2).unwrap().1.pdos = parse_pdos("Fixed: 5.00V 3.00A");
-        io.replies.get_mut(5).unwrap().1.pd_revision = Some(PdRevision {
+        io.replies.get_mut(3).unwrap().1.pd_revision = Some(PdRevision {
             revision_major: 3,
             revision_minor: 2,
             version_major: 1,
@@ -1878,8 +2260,6 @@ mod tests {
                 "reset",
                 "entry pd",
                 "pd pdo",
-                "pd req=1,volt=5000,cur=500",
-                "pd pdo",
                 "pd cmd=24",
                 "reset"
             ]
@@ -1889,6 +2269,42 @@ mod tests {
             .iter()
             .any(|command| command.starts_with("pdm set")));
         assert_eq!(result.report.completion.as_deref(), Some("complete"));
+    }
+
+    #[test]
+    fn revision_query_does_not_require_ready_voltage_or_a_five_volt_fixed_pdo() {
+        for (pdo_text, capabilities) in [
+            ("pdo:1", "Fixed: 5.00V 3.00A"),
+            ("ready:9000mV,0mA", "Fixed: 9.00V 3.00A"),
+            ("max power 60W", "Fixed: 9.00V 3.00A"),
+        ] {
+            let mut io = FakeIo::new(vec![
+                ("entry list", standard_except("pd")),
+                ("entry pd", "ready".into()),
+                ("pd pdo", pdo_text.into()),
+                ("pd cmd=24", "Revision: 3.2, Version: 1.2".into()),
+            ]);
+            io.replies.get_mut(2).unwrap().1.pdos = parse_pdos(capabilities);
+            io.replies.get_mut(3).unwrap().1.pd_revision = Some(PdRevision {
+                revision_major: 3,
+                revision_minor: 2,
+                version_major: 1,
+                version_minor: 2,
+            });
+            let result = execute(&mut io, false, None);
+            assert_eq!(
+                result.report.results[11]
+                    .pd_revision
+                    .as_ref()
+                    .unwrap()
+                    .revision_minor,
+                2
+            );
+            assert_eq!(result.report.completion.as_deref(), Some("complete"));
+            assert_eq!(result.pdos, parse_pdos(capabilities));
+            assert!(!io.commands.iter().any(|cmd| cmd.starts_with("pd req=")));
+            assert_eq!(io.commands.last().map(String::as_str), Some("reset"));
+        }
     }
 
     #[test]
@@ -1998,17 +2414,9 @@ mod tests {
             ),
             ("entry pd", "ready".into()),
             ("pd pdo", "pdo:6".into()),
-            (
-                "pd req=1,volt=5000,cur=500",
-                "req:5000mV,500mA\nready:5029mV,0mA".into(),
-            ),
-            ("pd pdo", "max power 140W\npdo:9".into()),
             ("pd cmd=24", String::new()),
         ]);
         io.replies.get_mut(2).unwrap().1.pdos = parse_pdos(
-            "Fixed: 5.00V 3.00A\nFixed: 9.00V 3.00A\nFixed: 12.00V 3.00A\nFixed: 15.00V 3.00A\nFixed: 20.00V 5.00A\nPPS: 5.00-21.00V 5.00A",
-        );
-        io.replies.get_mut(4).unwrap().1.pdos = parse_pdos(
             "Fixed: 5.00V 3.00A\nFixed: 9.00V 3.00A\nFixed: 12.00V 3.00A\nFixed: 15.00V 3.00A\nFixed: 20.00V 5.00A\nPPS: 5.00-21.00V 5.00A\nFixed: 28.00V 5.00A\nAVS: 15.00-28.00V 140W",
         );
 
@@ -2037,7 +2445,7 @@ mod tests {
         assert_eq!(
             result.pdos.len(),
             8,
-            "the refreshed PDO snapshot replaces the earlier six"
+            "the independent PDO snapshot survives the version query"
         );
         assert_eq!(
             result
@@ -2050,10 +2458,10 @@ mod tests {
             "the final fixed/PPS/EPR objects have distinct physical positions"
         );
         assert!(io.commands.iter().any(|command| command == "pd cmd=24"));
-        assert!(io
+        assert!(!io
             .commands
             .iter()
-            .any(|command| command == "pd req=1,volt=5000,cur=500"));
+            .any(|command| command == "pd req=1,cur=500"));
         assert_eq!(
             io.commands,
             [
@@ -2061,8 +2469,6 @@ mod tests {
                 "entry list",
                 "reset",
                 "entry pd",
-                "pd pdo",
-                "pd req=1,volt=5000,cur=500",
                 "pd pdo",
                 "pd cmd=24",
                 "reset"
@@ -2077,6 +2483,70 @@ mod tests {
     }
 
     #[test]
+    fn firmware_207_spr_avs_keeps_pd32_with_absent_or_lower_revision() {
+        let spr = "PD3.2:60W PDO:7\nFixed:     5.00V 3.00A\nFixed:     9.00V 3.00A\nFixed:    12.00V 3.00A\nFixed:    15.00V 3.00A\nFixed:    20.00V 3.00A\nAVS: 9-20V3.00A,3.00A\nPPS: 5.00-21.00V 3.00A";
+        let pdo = "max power 140W\nFixed:     5.00V 3.00A\nFixed:     9.00V 3.00A\nFixed:    12.00V 3.00A\nFixed:    15.00V 3.00A\nFixed:    20.00V 5.00A\nAVS: 9-20V3.00A,5.00A\nPPS: 5.00-21.00V 5.00A\nFixed:    28.00V 5.00A\nAVS: 15.00-28.00V 140W";
+        let scan = format!("starting\nbc1.2:true 5098mV,0mA\nApple 2.4A\nufcs:null\nvfcp:null\nqc2.0:5V,9V,12V\nqc3.0:3.6-12V\nafc:5V,9V,12V\nfcp:5V,9V,12V\nscp:25.0W,5.00V-12.00V,0.03A-2.50A\nsfcp:null\ntfcp:null\nsvooc:\n{spr}\nnull\nvooc:null\nmtkpe:\nmtkpe2.0:\npd:\n{spr}\n{spr}\ndone");
+        for captured in [false, true] {
+            let mut io = FakeIo::new(vec![
+                ("entry list+", scan.clone()),
+                (
+                    "entry pd",
+                    "ok\ncc1 attach\npdo:7\nready:5095mV,0mA\npdo:9\nready:5097mV,0mA".into(),
+                ),
+                ("pd pdo", pdo.into()),
+                ("pd cmd=24", String::new()),
+            ]);
+            io.replies.get_mut(2).unwrap().1.pdos = parse_pdos(pdo);
+            if captured {
+                // Real charger sample: request 0C98, Source Revision header 17AC,
+                // RMDO 31160000 = Revision 3.1, Version 1.6, all reserved bits zero.
+                io.pd_messages = vec![
+                    captured_pd_message(&[0x98, 0x0C]),
+                    captured_pd_message(&[0xAC, 0x17, 0x00, 0x00, 0x16, 0x31]),
+                ];
+            }
+            let result = execute(&mut io, true, Some("1.0"));
+            let pd = &result.report.results[11];
+            assert_eq!(pd.state, DetectionState::Supported);
+            assert_eq!(
+                pd.pd_revision,
+                captured.then_some(PdRevision {
+                    revision_major: 3,
+                    revision_minor: 1,
+                    version_major: 1,
+                    version_minor: 6,
+                })
+            );
+            assert_eq!(
+                pd.pd_reported_version,
+                Some(PdReportedVersion { major: 3, minor: 2 })
+            );
+            assert_eq!(
+                pd.pd_version_inference,
+                Some(PdVersionInference {
+                    minimum_major: 3,
+                    minimum_minor: 2,
+                    basis: PdVersionBasis::SprAvs,
+                })
+            );
+            assert_eq!(
+                result.pdos.iter().map(|p| p.position).collect::<Vec<_>>(),
+                [1, 2, 3, 4, 5, 6, 6, 7, 8, 9]
+            );
+            assert_eq!(result.report.completion.as_deref(), Some("partial"));
+            if captured {
+                assert!(pd.detail.contains("PD 3.1, spec 1.6"));
+                assert!(result.report.diagnostics.iter().any(|line| {
+                    line.contains("version evidence conflict")
+                        && line.contains("PDO capability minimum PD 3.2")
+                        && line.contains("meter scan PD 3.2")
+                }));
+            }
+        }
+    }
+
+    #[test]
     fn mixed_firmware_formats_and_orphan_values_preserve_pd_and_private_identity() {
         let mut text = standard_except("pd").replace("done", "");
         text.push_str("svooc:PD3.2:60W PDO:1\nFixed: 5.00V 3.00A\nnull\nvooc:5.5V\nmtkpe:null\nmtkpe2.0:true\ndone");
@@ -2084,6 +2554,7 @@ mod tests {
             ("entry list+", text),
             ("entry pd", "ready".into()),
             ("pd pdo", "Fixed: 9.00V 3.00A".into()),
+            ("pd cmd=24", "Not_Supported".into()),
         ]);
         io.replies.get_mut(2).unwrap().1.pdos = parse_pdos("Fixed: 9.00V 3.00A");
         let result = execute(&mut io, true, None);
@@ -2104,6 +2575,7 @@ mod tests {
                 "reset",
                 "entry pd",
                 "pd pdo",
+                "pd cmd=24",
                 "reset"
             ]
         );

@@ -37,6 +37,44 @@ const QUEUE_START_TIMEOUT: Duration = Duration::from_millis(1500);
 const KM003C_MAX_RATE_HZ: u32 = 1000;
 // A USB response holds at most 204 queue samples (4096 / 20 bytes).
 const QUEUE_HISTORY: usize = 256;
+const MAX_TRANSCRIPT_BYTES: usize = 256 * 1024;
+
+#[derive(Default)]
+struct TriggerTranscript {
+    lines: VecDeque<String>,
+    bytes: usize,
+    truncated: bool,
+}
+
+impl TriggerTranscript {
+    fn push(&mut self, text: &str) {
+        for line in text.lines().filter(|line| !line.is_empty()) {
+            // A single oversized line is discarded whole, never inside UTF-8.
+            if line.len() + 1 > MAX_TRANSCRIPT_BYTES {
+                self.lines.clear();
+                self.bytes = 0;
+                self.truncated = true;
+                continue;
+            }
+            while self.bytes + line.len() + 1 > MAX_TRANSCRIPT_BYTES {
+                if let Some(old) = self.lines.pop_front() {
+                    self.bytes -= old.len() + 1;
+                    self.truncated = true;
+                }
+            }
+            self.bytes += line.len() + 1;
+            self.lines.push_back(line.to_string());
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct TriggerReply {
+    #[serde(flatten)]
+    outcome: TriggerOutcome,
+    transcript: String,
+    transcript_truncated: bool,
+}
 
 /// Handles the trigger commands need, kept outside the device slot so a draining stream
 /// never blocks a cancel.
@@ -51,7 +89,7 @@ enum TriggerMsg {
     Run {
         cmd: TriggerCommand,
         req_id: String,
-        reply: mpsc::Sender<TriggerOutcome>,
+        reply: mpsc::Sender<TriggerReply>,
     },
     /// The bulk handle was reopened; the CDC port and entered protocol are stale.
     DropCdc,
@@ -147,7 +185,7 @@ pub(crate) fn connect(
         .find(|device| device.path == path)
         .ok_or("找不到指定设备")?;
     let (mut task_slot, had_session) = crate::claim_device_slot(state)?;
-    let meter = match Meter::open(&bus_id, address, info.serial_number.as_deref()) {
+    let mut meter = match Meter::open(&bus_id, address, info.serial_number.as_deref()) {
         Ok(meter) => meter,
         Err(error) => {
             crate::report_open_failure(state, &app, had_session);
@@ -159,6 +197,7 @@ pub(crate) fn connect(
         .clone()
         .filter(|serial| !serial.trim().is_empty() && serial != "-");
     let pdo_cache = PdoCache::default();
+    read_firmware_metadata(&mut meter, &pdo_cache);
     let (trigger_tx, trigger_rx) = mpsc::channel();
     let busy = Arc::new(AtomicBool::new(false));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -214,10 +253,12 @@ fn trigger_loop(
     while running.load(Ordering::Acquire) {
         match rx.recv_timeout(TRIGGER_IDLE) {
             Ok(TriggerMsg::Run { cmd, req_id, reply }) => {
+                let mut transcript = TriggerTranscript::default();
                 let outcome = session.run_with_detection(
                     &cmd,
                     &pdo_cache,
                     &mut |text| {
+                        transcript.push(text);
                         let _ = app.emit(
                             "km003c-trigger-progress",
                             TriggerProgress {
@@ -240,7 +281,11 @@ fn trigger_loop(
                         );
                     },
                 );
-                let _ = reply.send(outcome);
+                let _ = reply.send(TriggerReply {
+                    outcome,
+                    transcript: transcript.lines.into_iter().collect::<Vec<_>>().join("\n"),
+                    transcript_truncated: transcript.truncated,
+                });
             }
             Ok(TriggerMsg::DropCdc) => {
                 if session.drop_cdc() {
@@ -281,7 +326,7 @@ pub(crate) async fn km003c_trigger(
     cmd: TriggerCommand,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, crate::app_error::AppError> {
-    let result: Result<TriggerOutcome, String> = async {
+    let result: Result<TriggerReply, String> = async {
         let (tx, busy, cancel) = {
             let slot = state.km003c.lock().map_err(|_| "KM003C 控制状态已损坏")?;
             let control = slot
@@ -313,8 +358,9 @@ pub(crate) async fn km003c_trigger(
     }
     .await;
     result
-        .map(|outcome| {
-            let mut value = serde_json::to_value(&outcome).expect("serializable trigger outcome");
+        .map(|reply| {
+            let mut value = serde_json::to_value(&reply).expect("serializable trigger outcome");
+            let outcome = reply.outcome;
             if !outcome.ok {
                 let code = match outcome.code.as_deref() {
                     Some("pdm_required") => "triggerNeedPdm",
@@ -499,6 +545,7 @@ impl Source for Km003cSource {
                 Ok(())
             }
             Ok(Step::Reopened) => {
+                self.refresh_metadata();
                 let _ = self.trigger_tx.send(TriggerMsg::DropCdc);
                 Ok(())
             }
@@ -543,6 +590,7 @@ impl Source for Km003cSource {
                 if queue_mode {
                     self.stop_queue();
                 }
+                self.refresh_metadata();
                 let _ = self.trigger_tx.send(TriggerMsg::DropCdc);
                 Ok(())
             }
@@ -566,7 +614,42 @@ impl Source for Km003cSource {
     }
 }
 
+fn read_firmware_metadata(meter: &mut Meter, cache: &PdoCache) {
+    let record = meter
+        .device_mut()
+        .map(|device| device.memory_read(0x0000_4420, 64));
+    let (version, diagnostic) = match record {
+        Some(Ok(bytes)) => match km003c::evidence::firmware_version(&bytes) {
+            Some(version) => (Some(version), None),
+            None => (
+                None,
+                Some(format!(
+                    "Unknown KM003C firmware record at 0x4420: {bytes:02X?}"
+                )),
+            ),
+        },
+        Some(Err(error)) => (
+            None,
+            Some(format!("KM003C firmware metadata unavailable: {error:#}")),
+        ),
+        None => (
+            None,
+            Some("Bulk device unavailable while reading firmware metadata".into()),
+        ),
+    };
+    if let Some(detail) = &diagnostic {
+        eprintln!("{detail}");
+    }
+    cache.set_firmware_version(version);
+    cache.set_firmware_diagnostic(diagnostic);
+}
+
 impl Km003cSource {
+    fn refresh_metadata(&mut self) {
+        self.pdo_cache.clear();
+        read_firmware_metadata(&mut self.meter, &self.pdo_cache);
+    }
+
     fn read_queue(&mut self, out: &mut Vec<Arrival>) -> Result<(), Stop> {
         if self.queue.is_none() {
             if self.queue_failed {
@@ -615,6 +698,7 @@ impl Km003cSource {
             }
             Ok(Step::Reopened) => {
                 self.stop_queue();
+                self.refresh_metadata();
                 let _ = self.trigger_tx.send(TriggerMsg::DropCdc);
                 Ok(())
             }
@@ -642,6 +726,7 @@ impl Km003cSource {
                 Ok(())
             }
             Ok(Step::Reopened) => {
+                self.refresh_metadata();
                 let _ = self.trigger_tx.send(TriggerMsg::DropCdc);
                 Ok(())
             }
@@ -719,6 +804,10 @@ impl Km003cSource {
     /// The sample goes first, so PD rows from the same poll carry its V/I.
     fn deliver(&self, response: DataResponse, received_us: u64, out: &mut Vec<Arrival>) {
         if let Some(adc) = response.adc {
+            self.pdo_cache.voltage_cache().record(
+                self.epoch + Duration::from_micros(received_us),
+                (adc.vbus_v() * 1000.0).round() as u32,
+            );
             out.push(Arrival {
                 received_us,
                 payload: Payload::Sample(map_adc(&adc)),
@@ -770,6 +859,7 @@ impl Km003cSource {
             mode.rate_index,
         )
         .map_err(Stop::Failed)?;
+        let voltages = self.pdo_cache.voltage_cache();
         for (sample, timestamp_us) in response.queue[skip..].iter().zip(timestamps) {
             if mode.recent.len() == QUEUE_HISTORY {
                 mode.recent.pop_front();
@@ -777,6 +867,10 @@ impl Km003cSource {
             mode.recent.push_back(*sample);
             let mut data = map_queue(sample, mode.rate_index);
             data.temperature = self.last_temperature;
+            voltages.record(
+                self.epoch + Duration::from_micros(timestamp_us),
+                (data.voltage * 1000.0).round() as u32,
+            );
             out.push(Arrival {
                 received_us: timestamp_us,
                 payload: Payload::Sample(data),
@@ -946,6 +1040,66 @@ fn witrn_pd_frame(message: &PdMessage) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trigger_transcript_keeps_order_and_evicts_only_whole_utf8_lines() {
+        let mut transcript = TriggerTranscript::default();
+        transcript.push("> pd pdo\n就绪");
+        transcript.push("ready:5100mV,0mA");
+        assert_eq!(
+            transcript.lines.iter().cloned().collect::<Vec<_>>(),
+            ["> pd pdo", "就绪", "ready:5100mV,0mA"]
+        );
+        assert!(!transcript.truncated);
+        for i in 0..4000 {
+            transcript.push(&format!("{i}: {}", "回复".repeat(20)));
+        }
+        assert!(transcript.truncated);
+        assert!(transcript.bytes <= MAX_TRANSCRIPT_BYTES);
+        assert_eq!(
+            transcript.bytes,
+            transcript
+                .lines
+                .iter()
+                .map(|line| line.len() + 1)
+                .sum::<usize>()
+        );
+        assert_eq!(
+            transcript.lines.back().unwrap(),
+            &format!("3999: {}", "回复".repeat(20))
+        );
+        transcript.push(&"文".repeat(MAX_TRANSCRIPT_BYTES));
+        transcript.push("last reply");
+        assert_eq!(
+            transcript.lines.iter().cloned().collect::<Vec<_>>(),
+            ["last reply"]
+        );
+    }
+
+    #[test]
+    fn trigger_reply_adds_transcript_without_changing_outcome_fields() {
+        let reply = TriggerReply {
+            outcome: TriggerOutcome {
+                ok: false,
+                message: "cancelled".into(),
+                pdos: Vec::new(),
+                protocols: Vec::new(),
+                detection: None,
+                code: Some("cancelled".into()),
+                pdm_open: true,
+                context: Default::default(),
+                reset_verification: None,
+            },
+            transcript: "> pd req=2\nrequest pending".into(),
+            transcript_truncated: false,
+        };
+        let value = serde_json::to_value(reply).unwrap();
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["code"], "cancelled");
+        assert_eq!(value["transcript"], "> pd req=2\nrequest pending");
+        assert_eq!(value["transcript_truncated"], false);
+        assert!(value.get("outcome").is_none());
+    }
 
     #[test]
     fn queue_diagnostics_accumulate_across_modes_and_limit_logs() {
