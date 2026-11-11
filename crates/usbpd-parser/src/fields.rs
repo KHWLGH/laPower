@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright and contribution scope: see COPYRIGHT.
 //! Field names, as one definition rather than a literal at every lookup.
 //!
 //! [`Metadata::get`](crate::Metadata::get) takes a name, so every consumer of a

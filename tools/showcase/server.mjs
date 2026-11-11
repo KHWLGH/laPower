@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, extname, resolve, sep } from 'node:path';

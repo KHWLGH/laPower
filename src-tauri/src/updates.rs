@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Manual GitHub release checks. Nothing in this module runs at startup.
 use crate::app_error::AppError;
 use reqwest::{Client, StatusCode};

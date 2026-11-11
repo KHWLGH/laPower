@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Host receive clock; never compare received_us with performance.now().
  * @typedef {import('./state.js').DeviceData & {generation:number, seq:number, segment:number, received_us:number, wall_anchor_ms:number, segment_start_us:number, rate_ms:number}} StreamSample
  * @typedef {{generation:number, last_seq:number, error?:string|null, description?:{code:string, params:Record<string,unknown>, detail?:string}}} StreamEnd

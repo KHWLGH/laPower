@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! PD 捕获日志：HID 线程写入紧凑事件，详情按索引取已解析的树。
 //!
 //! 前端列表只拿摘要 + 原始 HID 帧；解码树留在这边，点选时 `decode_pd_at` 直接
@@ -55,6 +58,15 @@ pub struct PdLoadEntry {
     pub vbus: Option<f32>,
     #[serde(default)]
     pub ibus: Option<f32>,
+}
+
+/// A bounded recovery page; dividers never consume sequence numbers.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdPage {
+    pub generation: u64,
+    pub through_seq: Option<u64>,
+    pub events: Vec<PdEvent>,
 }
 
 /// 列表行摘要，字段口径与 `src/pd-model.js` 的 `summarize` 对齐。
@@ -133,16 +145,45 @@ impl PdLog {
         self.messages.get(index).map(|m| &m.meta)
     }
 
-    /// `after_seq` 为 `None` 时返回全部；否则返回 `seq > after_seq` 的紧凑事件。
-    pub fn events_after(&self, after_seq: Option<u64>) -> Vec<PdEvent> {
-        let start = match after_seq {
-            None => 0,
-            Some(seq) => (seq + 1) as usize,
+    pub fn meta_in_generation(&self, index: u64, generation: u64) -> Option<&Metadata> {
+        if generation != self.generation {
+            return None;
+        }
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| self.meta_at(index))
+    }
+
+    /// A fixed horizon bounds a recovery pass even while capture continues.
+    pub fn page_after(
+        &self,
+        generation: Option<u64>,
+        after_seq: Option<u64>,
+        through_seq: Option<u64>,
+    ) -> Result<PdPage, String> {
+        if generation.is_some_and(|value| value != self.generation) {
+            return Err("PD 日志代次已变更".to_string());
+        }
+        let end = self.messages.len();
+        let through_seq = end
+            .checked_sub(1)
+            .map(|last| through_seq.unwrap_or(last as u64).min(last as u64));
+        let start = after_seq.map_or(0, |seq| seq.saturating_add(1).min(end as u64) as usize);
+        let stop = through_seq.map_or(0, |seq| (seq as usize + 1).min(end));
+        let page_end = start.saturating_add(512).min(stop);
+        let events = if start < page_end {
+            self.messages[start..page_end]
+                .iter()
+                .map(|m| m.event.clone())
+                .collect()
+        } else {
+            Vec::new()
         };
-        self.messages
-            .get(start..)
-            .map(|slice| slice.iter().map(|m| m.event.clone()).collect())
-            .unwrap_or_default()
+        Ok(PdPage {
+            generation: self.generation,
+            through_seq,
+            events,
+        })
     }
 
     /// 解析导入帧，不碰现有日志。调用方持锁后再 [`install`](Self::install)。
@@ -581,10 +622,58 @@ mod tests {
             "Source_Capabilities"
         );
         assert_eq!(summarize(log.meta_at(1).unwrap()).msg_type, "GoodCRC");
-        assert_eq!(log.events_after(None).len(), 2);
-        assert_eq!(log.events_after(Some(0)).len(), 1);
-        assert_eq!(log.events_after(Some(1)).len(), 0);
-        assert_eq!(log.events_after(Some(0))[0].seq, Some(1));
+        assert_eq!(log.page_after(None, None, None).unwrap().events.len(), 2);
+        assert_eq!(log.page_after(None, Some(0), None).unwrap().events.len(), 1);
+        assert_eq!(log.page_after(None, Some(1), None).unwrap().events.len(), 0);
+        assert_eq!(
+            log.page_after(None, Some(0), None).unwrap().events[0].seq,
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn recovery_pages_freeze_horizon_and_reject_replaced_generations() {
+        let frame = pd_frame(&[0x41, 0x00], 224);
+        let meta = decode_pd_report(&mut Parser::new(), &frame).unwrap();
+        let mut log = PdLog::default();
+        for t in 0..1300 {
+            log.push_message(t, frame.clone(), meta.clone(), None, None)
+                .unwrap();
+        }
+        let first = log.page_after(Some(0), None, None).unwrap();
+        assert_eq!(first.events.len(), 512);
+        assert_eq!(first.through_seq, Some(1299));
+        log.push_message(1300, frame, meta, None, None).unwrap();
+        let second = log
+            .page_after(Some(first.generation), Some(511), first.through_seq)
+            .unwrap();
+        assert_eq!(second.events.len(), 512);
+        let third = log
+            .page_after(Some(0), Some(1023), first.through_seq)
+            .unwrap();
+        assert_eq!(third.events.len(), 276);
+        assert_eq!(third.events.last().unwrap().seq, Some(1299));
+        assert_eq!(
+            log.page_after(Some(0), Some(1299), None)
+                .unwrap()
+                .events
+                .len(),
+            1
+        );
+        assert!(log
+            .page_after(Some(0), Some(u64::MAX), None)
+            .unwrap()
+            .events
+            .is_empty());
+        assert!(log.meta_in_generation(0, 0).is_some());
+        let generation = log.clear();
+        assert!(log.page_after(Some(0), None, first.through_seq).is_err());
+        assert!(log.meta_in_generation(0, 0).is_none());
+        assert!(log
+            .page_after(Some(generation), None, None)
+            .unwrap()
+            .events
+            .is_empty());
     }
 
     #[test]

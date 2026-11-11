@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! Values exchanged with callers: trigger commands, their outcome, and the parsed
 //! capability lists. JSON shapes are part of the app's IPC contract.
 
@@ -89,6 +92,9 @@ pub struct TriggerPdo {
     pub volt_max_mv: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cur_ma: Option<u32>,
+    /// Explicit Battery maximum power or EPR AVS PDP; never a V × I estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_power_mw: Option<u32>,
     pub label: String,
     pub programmable: bool,
 }
@@ -212,6 +218,9 @@ pub struct ProtocolDetection {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DetectionReport {
     pub results: Vec<ProtocolDetection>,
+    /// Independently read capabilities belonging to this detection, including AVS bands.
+    #[serde(default)]
+    pub pdos: Vec<TriggerPdo>,
     pub phase: String,
     pub active: Option<String>,
     pub completion: Option<String>,
@@ -311,6 +320,7 @@ mod tests {
                 volt_min_mv: 5000,
                 volt_max_mv: 5000,
                 cur_ma: None,
+                max_power_mw: None,
                 label: "#1 FIXED 5.00 V".into(),
                 programmable: false,
             }],
@@ -324,6 +334,9 @@ mod tests {
         let value = serde_json::to_value(outcome).unwrap();
         assert!(value.get("code").is_none());
         assert!(value["pdos"][0].get("cur_ma").is_none());
+        assert!(value["pdos"][0].get("max_power_mw").is_none());
+        let legacy: TriggerPdo = serde_json::from_value(value["pdos"][0].clone()).unwrap();
+        assert_eq!(legacy.max_power_mw, None);
         assert_eq!(value["pdm_open"], json!(true));
     }
 
@@ -360,5 +373,12 @@ mod tests {
         assert_eq!(serialized["pd_revision"]["revision_minor"], json!(2));
         assert!(serialized.get("pd_reported_version").is_none());
         assert!(serialized.get("pd_version_inference").is_none());
+        let report: DetectionReport = serde_json::from_value(json!({
+            "results": [serialized], "phase": "finished", "active": null,
+            "completion": "complete", "pdm_version": null, "fallback_used": false,
+            "elapsed_ms": 100, "diagnostics": []
+        }))
+        .unwrap();
+        assert!(report.pdos.is_empty());
     }
 }

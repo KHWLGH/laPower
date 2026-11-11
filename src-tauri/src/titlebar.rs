@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! macOS 原生标题栏的双击行为。
 //!
 //! 系统红绿灯所在的标题栏是叠在网页上的透明 Overlay，系统标题栏收不到双击。前端在

@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { summarize } from '../../src/pd-model.js';
 import fixtures from './pd-fixtures.json';
 import { DEVICES, EPOCH, meterAt, PD_HANDSHAKES, PDOS, PROTOCOLS } from './scenario.js';
@@ -302,6 +307,7 @@ async function runTrigger(args) {
             })),
           ],
           phase: 'finished',
+          pdos: PDOS.filter((pdo) => pdVersionCapabilitiesEnabled || pdo.kind === 'fixed'),
           active: null,
           completion: nextDetectionCompletion,
           pdm_version: '1.1',
@@ -467,11 +473,20 @@ async function invoke(command, args = {}, ipc = {}) {
     case 'pd_log_clear':
       pdLog.length = 0;
       return ++pdGeneration;
-    case 'pd_log_after':
-      return pdLog
-        .filter((entry) => args.afterSeq == null || entry.seq > args.afterSeq)
-        .map(({ meta: _meta, ...entry }) => entry);
+    case 'pd_log_after': {
+      if (args.generation != null && args.generation !== pdGeneration) throw new Error('Stale PD generation');
+      const throughSeq = pdLog.length ? Math.min(args.throughSeq ?? pdLog.length - 1, pdLog.length - 1) : null;
+      return {
+        generation: pdGeneration,
+        throughSeq,
+        events: pdLog
+          .slice(args.afterSeq == null ? 0 : args.afterSeq + 1, throughSeq == null ? 0 : throughSeq + 1)
+          .slice(0, 512)
+          .map(({ meta: _meta, ...entry }) => entry),
+      };
+    }
     case 'decode_pd_at': {
+      if (args.generation !== pdGeneration) throw new Error('Stale PD generation');
       const entry = pdLog[args.index];
       if (!entry) throw new Error('Unknown virtual PD index');
       return structuredClone(entry.meta);
@@ -511,6 +526,7 @@ async function invoke(command, args = {}, ipc = {}) {
       return newFile(`${args.stem}.csv`, true);
     case 'csv_export_pick':
     case 'pd_export_pick':
+    case 'png_export_pick':
       return newFile(args.defaultName);
     case 'paired_export_pick':
       return { csv: newFile(args.defaultName), pd: newFile(args.defaultName.replace(/\.csv$/i, '.pd.json')) };

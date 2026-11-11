@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 JohnScotttt
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// KHWLGH copyright applies to local modifications; see COPYRIGHT.
 //! Request Data Objects — what a Sink asks for, decoded against the PDO it names.
 
 use std::borrow::Cow;

@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 数据来源：一份数据由哪台仪表采集、每个点按什么规则从仪表帧得到，以及写文件的软件版本。
  *

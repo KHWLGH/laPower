@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * 窗口动作始终按真实 data-os 分发，data-window-style 只负责 CSS 皮肤。
  * Windows 保留 decorum 原节点、ID、class、click/hover 监听和 Snap（macOS 皮肤下由 guardDecorumSnap 常驻拦下）；

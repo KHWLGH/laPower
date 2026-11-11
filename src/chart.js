@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file uPlot 图表初始化、渲染调度、交互（tooltip / 图例 / X 轴窗口）。
  *

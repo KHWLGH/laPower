@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 菜单原语（Fluent 风格）— 统一取代各处手写的下拉菜单逻辑。
  *

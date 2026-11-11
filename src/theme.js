@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 主题桥 — 把 CSS 设计令牌暴露给 canvas 侧（uPlot 无法读 CSS 变量），
  * 并负责外观偏好（跟随系统 / 浅色 / 深色）的解析与生效。

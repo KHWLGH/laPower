@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Small error plumbing shared by the Windows backend modules.
 //!
 //! A raw HRESULT is never the whole story, so the caller supplies the operation and the message

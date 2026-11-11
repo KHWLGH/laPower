@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { t } from './i18n.js';
 /**
  * @file 界面等比缩放 — 设置项 uiScalePercent 的钳位与生效。

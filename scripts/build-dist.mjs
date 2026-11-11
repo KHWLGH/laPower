@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * Build the shipped frontend into `out/`.
  *
@@ -27,6 +32,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
+import { normalizeLicenseText, validateLegalCatalog } from './license-materials.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = resolve(ROOT, 'src');
@@ -56,6 +62,47 @@ async function totalBytes(dir) {
   return { count: all.length, bytes: stats.reduce((n, s) => n + s.size, 0) };
 }
 
+/** Check committed legal assets without Cargo, Git, the registry cache or network access. */
+async function validateBundledLegalAssets(directory, root = ROOT) {
+  const [manifest, catalog, pkg, npmLock, config] = await Promise.all(
+    [
+      join(directory, 'third-party-components.json'),
+      join(directory, 'legal-notices.json'),
+      join(root, 'package.json'),
+      join(root, 'package-lock.json'),
+      join(root, 'src-tauri/tauri.conf.json'),
+    ].map(async (path) => JSON.parse(await readFile(path, 'utf8'))),
+  );
+  validateLegalCatalog(catalog, manifest);
+  const projectPaths = [
+    ['copyright', 'COPYRIGHT'],
+    ['gpl-3.0', 'LICENSE'],
+    ['lgpl-3.0', 'LICENSE.LGPL-3.0'],
+  ];
+  for (const [id, path] of projectPaths) {
+    const document = catalog.project.documents.find((item) => item.id === id);
+    if (
+      document?.path !== path ||
+      catalog.texts[document.textId] !== normalizeLicenseText(await readFile(join(root, path), 'utf8'))
+    )
+      throw new Error(`内置项目声明缺失或已过期：${path}；请运行 npm run components:generate`);
+  }
+  const copyright = catalog.project.copyright;
+  const copyrightDocument = catalog.project.documents.find((item) => item.id === 'copyright');
+  if (
+    !catalog.texts[copyrightDocument.textId].split('\n').includes(copyright) ||
+    config.bundle.copyright !== copyright ||
+    config.bundle.publisher !== pkg.author ||
+    pkg.author !== 'KHWLGH' ||
+    pkg.license !== 'GPL-3.0-only' ||
+    config.bundle.license !== pkg.license ||
+    npmLock.packages[''].license !== pkg.license
+  ) {
+    throw new Error('COPYRIGHT、内置声明、npm 和 Tauri 的项目版权／许可元数据不一致');
+  }
+  return { copyright, components: catalog.components.length, texts: Object.keys(catalog.texts).length };
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const minify = argv.includes('--minify');
@@ -65,6 +112,7 @@ async function main() {
     throw new Error(`Unknown flag: ${flag}`);
   }
 
+  const legal = await validateBundledLegalAssets(SRC);
   const html = await readFile(join(SRC, 'index.html'), 'utf8');
   const hrefs = styleHrefs(html);
   if (!hrefs.length) throw new Error('index.html 里找不到任何样式表，合并步骤没有意义');
@@ -121,6 +169,7 @@ async function main() {
       platform: 'browser',
       target: 'es2021',
       minify,
+      legalComments: 'eof',
       allowOverwrite: true,
       metafile: true,
       logLevel: 'warning',
@@ -150,6 +199,7 @@ async function main() {
     absWorkingDir: OUT,
     bundle: true,
     minify,
+    legalComments: 'eof',
     loader: { '.svg': 'file', '.png': 'file', '.woff2': 'file', '.ttf': 'file' },
     // Emitted asset names equal to their source names, so the mirrored originals are overwritten
     // in place instead of a second copy appearing alongside them. The overwrite is a byte-identical
@@ -223,6 +273,14 @@ async function main() {
   const strays = (await allFiles(OUT)).filter((rel) => rel === 'src' || rel.startsWith('src/'));
   if (strays.length) problems.push(`esbuild 逃出了 outdir，留下 ${strays.length} 个重复文件（例如 ${strays[0]}）`);
 
+  await validateBundledLegalAssets(OUT);
+  const copyrightHeader = legal.copyright.replace(/^Copyright \(C\) /, 'SPDX-FileCopyrightText: ');
+  if (!emittedCss.includes(copyrightHeader)) problems.push('样式表压缩后缺失项目版权注释');
+  for (const output of jsReport?.outputs ?? []) {
+    if (!output.endsWith('.js')) continue;
+    if (!(await readFile(resolve(OUT, output), 'utf8')).includes(copyrightHeader))
+      problems.push(`JavaScript 打包后缺失项目版权注释：${output}`);
+  }
   const after = await totalBytes(OUT);
   const before = await totalBytes(SRC);
   const report = {
@@ -230,6 +288,7 @@ async function main() {
     minify,
     bundleJs,
     js: jsReport,
+    legal,
     stylesheetsBefore: hrefs.length,
     stylesheetsAfter: links.length,
     dataUrlsBefore: sourceDataUrls,
@@ -257,4 +316,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   });
 }
 
-export { main, styleHrefs };
+export { main, styleHrefs, validateBundledLegalAssets };

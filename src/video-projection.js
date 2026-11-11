@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 报告视频的投影：把内存里的列式记录压成一份自包含的渲染载荷（纯模块，无 DOM / Tauri）。
  *
@@ -14,7 +19,8 @@
  *   否则会出现「积分跳过空档、视频却把空档画成直线」的口径分裂。
  */
 
-import { calculateEnergy, currentMagnitude, energyMaxStepS } from './measurement.js';
+import { runCooperativeSlices } from './cooperative.js';
+import { currentMagnitude, energyMaxStepS, pointEnergyMaxStepS } from './measurement.js';
 import { VIDEO_MAX_MARKERS, VIDEO_OVERVIEW_BINS } from './video-export-options.js';
 
 /**
@@ -73,9 +79,9 @@ function nullable(value) {
  * @param {number} [input.binCount]
  * @param {boolean} [input.hasTemperature] 记录里是否出现过温度；缺省按数据推断
  * @param {number} [input.markerLimit]
- * @returns {VideoProjection}
+ * @returns {Generator<void, VideoProjection, unknown>}
  */
-export function projectVideo(input) {
+function* projectionSteps(input) {
   const { columns, length, frameCount, markers = [], intervalMs = null, binCount = VIDEO_OVERVIEW_BINS } = input;
   if (!Number.isSafeInteger(length) || length < 2) throw new RangeError('videoNoData');
   if (!Number.isSafeInteger(frameCount) || frameCount < 1) throw new RangeError('videoPayloadInvalid');
@@ -95,7 +101,10 @@ export function projectVideo(input) {
   let voltageArea = 0;
   let voltageWeighted = 0;
   let previousX = Number.NaN;
+  let wh = 0;
+  let mah = 0;
   for (let index = 0; index < length; index++) {
+    if (index > 0 && index % 4096 === 0) yield;
     const voltage = read(columns.voltage, index);
     if (voltage < minVoltageV) minVoltageV = voltage;
     if (voltage > maxVoltageV) maxVoltageV = voltage;
@@ -117,24 +126,33 @@ export function projectVideo(input) {
       voltageWeighted += dt;
     }
     previousX = x;
+    if (index > 0) {
+      const segment = read(columns.recordingSegments, index);
+      const boundary = Number.isFinite(segment) && segment !== read(columns.recordingSegments, index - 1);
+      const dt = (read(columns.timestamps, index) - read(columns.timestamps, index - 1)) / 3600000;
+      const watts = Math.abs(read(columns.power, index));
+      if (
+        !boundary &&
+        dt >= 0 &&
+        Number.isFinite(dt) &&
+        Number.isFinite(current) &&
+        Number.isFinite(watts) &&
+        dt * 3600 <= pointEnergyMaxStepS(read(columns.sampleIntervals, index), maxAgeS)
+      ) {
+        wh += watts * dt;
+        mah += current * 1000 * dt;
+      }
+    }
   }
-  const { wh, mah } = calculateEnergy(
-    columns.timestamps,
-    columns.current,
-    columns.power,
-    columns.recordingSegments,
-    intervalMs,
-    columns.sampleIntervals,
-    columns.currentMagnitudes,
-  );
 
+  yield;
   return {
     frameCount,
     elapsedS: lastX,
     points: length,
     bucketMs: Math.max(1, Math.ceil((lastX * 1000) / Math.max(1, binCount))),
-    overview: buildOverview(columns, length, lastX, binCount),
-    frames: sampleFrames(columns, length, frameCount, maxAgeS),
+    overview: yield* buildOverview(columns, length, lastX, binCount),
+    frames: yield* sampleFrames(columns, length, frameCount, maxAgeS),
     summary: {
       elapsedS: lastX,
       points: length,
@@ -148,8 +166,46 @@ export function projectVideo(input) {
       capacityMah: mah,
       hasTemperature: input.hasTemperature ?? hasTemperature,
     },
-    markers: projectMarkers(columns, length, markers, input.markerLimit ?? VIDEO_MAX_MARKERS),
+    markers: yield* projectMarkers(columns, length, markers, input.markerLimit ?? VIDEO_MAX_MARKERS),
   };
+}
+
+/** @param {Parameters<typeof projectionSteps>[0]} input @returns {VideoProjection} */
+export function projectVideo(input) {
+  const steps = projectionSteps(input);
+  let result = steps.next();
+  while (!result.done) result = steps.next();
+  return result.value;
+}
+
+/**
+ * All scans share the synchronous kernel; only the scheduling differs.
+ * The caller freezes columns and metadata before calling this function.
+ * @param {Parameters<typeof projectionSteps>[0]} input
+ * @param {Parameters<typeof runCooperativeSlices>[1] & {signal?:AbortSignal}} [options]
+ * @returns {Promise<VideoProjection>}
+ */
+export async function projectVideoAsync(input, options = {}) {
+  const steps = projectionSteps(input);
+  /** @type {{projection?:VideoProjection}} */
+  const output = {};
+  const complete = await runCooperativeSlices(
+    () => {
+      const result = steps.next();
+      if (!result.done) return false;
+      output.projection = result.value;
+      return true;
+    },
+    {
+      ...options,
+      isCancelled: () => options.signal?.aborted === true || options.isCancelled?.() === true,
+    },
+  );
+  if (!complete) {
+    steps.return(/** @type {any} */ (undefined));
+    throw new DOMException('Report preparation cancelled', 'AbortError');
+  }
+  return /** @type {VideoProjection} */ (output.projection);
 }
 
 /**
@@ -160,9 +216,9 @@ export function projectVideo(input) {
  * @param {number} length
  * @param {number} lastX
  * @param {number} binCount
- * @returns {VideoOverviewPoint[]}
+ * @returns {Generator<void, VideoOverviewPoint[], unknown>}
  */
-function buildOverview(columns, length, lastX, binCount) {
+function* buildOverview(columns, length, lastX, binCount) {
   /** @param {number} index @returns {VideoOverviewPoint} */
   const point = (index) => [
     // x 是相对秒，载荷里的时间轴是毫秒（后端 VideoOverview 的 tMs）。
@@ -175,17 +231,32 @@ function buildOverview(columns, length, lastX, binCount) {
   if (length <= binCount * 4) {
     /** @type {VideoOverviewPoint[]} */
     const raw = [];
-    for (let index = 0; index < length; index++) raw.push(point(index));
+    for (let index = 0; index < length; index++) {
+      if (index > 0 && index % 4096 === 0) yield;
+      raw.push(point(index));
+    }
+    yield;
     return raw;
   }
   /** @type {VideoOverviewPoint[]} */
   const points = [];
   let index = 0;
+  let work = 0;
   for (let bucket = 0; bucket < binCount && index < length; bucket++) {
+    if (++work === 4096) {
+      work = 0;
+      yield;
+    }
     const to = (lastX * (bucket + 1)) / binCount;
     const last = bucket === binCount - 1;
     const start = index;
-    while (index < length && (read(columns.x, index) < to || (last && index === length - 1))) index++;
+    while (index < length && (read(columns.x, index) < to || (last && index === length - 1))) {
+      index++;
+      if (++work === 4096) {
+        work = 0;
+        yield;
+      }
+    }
     const stop = Math.max(index - 1, start);
     /** @type {Set<number>} */
     const keep = new Set([start, stop]);
@@ -195,6 +266,10 @@ function buildOverview(columns, length, lastX, binCount) {
       let minValue = Number.POSITIVE_INFINITY;
       let maxValue = Number.NEGATIVE_INFINITY;
       for (let at = start; at <= stop; at++) {
+        if (++work === 4096) {
+          work = 0;
+          yield;
+        }
         const value = read(columns[channel], at);
         if (!Number.isFinite(value)) continue;
         if (value < minValue) {
@@ -211,6 +286,7 @@ function buildOverview(columns, length, lastX, binCount) {
     }
     for (const at of [...keep].sort((a, b) => a - b)) points.push(point(at));
   }
+  yield;
   return points;
 }
 
@@ -222,14 +298,25 @@ function buildOverview(columns, length, lastX, binCount) {
  * @param {number} frameCount
  * @param {number} maxAgeS
  */
-function sampleFrames(columns, length, frameCount, maxAgeS) {
+function* sampleFrames(columns, length, frameCount, maxAgeS) {
   const lastX = read(columns.x, length - 1);
   /** @type {{t:number[], voltage:(number|null)[], current:(number|null)[], power:(number|null)[], temperature:(number|null)[]}} */
   const frames = { t: [], voltage: [], current: [], power: [], temperature: [] };
   let cursor = -1;
+  let work = 0;
   for (let frame = 0; frame < frameCount; frame++) {
+    if (++work === 4096) {
+      work = 0;
+      yield;
+    }
     const t = frameCount > 1 ? (lastX * frame) / (frameCount - 1) : 0;
-    while (cursor + 1 < length && read(columns.x, cursor + 1) <= t) cursor++;
+    while (cursor + 1 < length && read(columns.x, cursor + 1) <= t) {
+      cursor++;
+      if (++work === 4096) {
+        work = 0;
+        yield;
+      }
+    }
     const fresh = cursor >= 0 && t - read(columns.x, cursor) <= maxAgeS;
     frames.t.push(t);
     frames.voltage.push(fresh ? nullable(read(columns.voltage, cursor)) : null);
@@ -237,6 +324,7 @@ function sampleFrames(columns, length, frameCount, maxAgeS) {
     frames.power.push(fresh ? nullable(read(columns.power, cursor)) : null);
     frames.temperature.push(fresh ? nullable(read(columns.temp, cursor)) : null);
   }
+  yield;
   return frames;
 }
 
@@ -248,12 +336,17 @@ function sampleFrames(columns, length, frameCount, maxAgeS) {
  * @param {readonly import('./markers.js').Marker[]} markers
  * @param {number} limit
  */
-function projectMarkers(columns, length, markers, limit) {
+function* projectMarkers(columns, length, markers, limit) {
   /** @type {{tS:number, label:string, voltage:number|null, current:number|null,
    *           power:number|null, temperature:number|null}[]} */
   const out = [];
   if (limit <= 0) return out;
+  let work = 0;
   for (const marker of markers) {
+    if (++work === 4096) {
+      work = 0;
+      yield;
+    }
     const index = Number(marker?.index);
     if (!Number.isSafeInteger(index) || index < 0 || index >= length) continue;
     const label = String(marker?.label ?? '').trim();
@@ -268,8 +361,35 @@ function projectMarkers(columns, length, markers, limit) {
     });
   }
   // 标记按行号保存、行号与时间同序；仍然排一次，防止导入数据里出现乱序 x。
-  out.sort((a, b) => a.tS - b.tS);
-  return out.slice(0, limit);
+  // Stable bottom-up merge keeps even an unlimited long-image marker list cooperative.
+  let source = out;
+  let target = [];
+  for (let width = 1; width < out.length; width *= 2) {
+    for (let start = 0; start < out.length; start += width * 2) {
+      const middle = Math.min(start + width, out.length);
+      const end = Math.min(start + width * 2, out.length);
+      let left = start;
+      let right = middle;
+      for (let at = start; at < end; at++) {
+        if (++work === 4096) {
+          work = 0;
+          yield;
+        }
+        target[at] =
+          right >= end || (left < middle && !(source[left].tS > source[right].tS)) ? source[left++] : source[right++];
+      }
+    }
+    [source, target] = [target, source];
+  }
+  const result = [];
+  for (let index = 0; index < Math.min(source.length, limit); index++) {
+    if (++work === 4096) {
+      work = 0;
+      yield;
+    }
+    result.push(source[index]);
+  }
+  return result;
 }
 /**
  * 把投影结果与界面文案组装成 `video_export_start` 的载荷。

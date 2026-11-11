@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -6,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { validateBundledLegalAssets } from '../scripts/build-dist.mjs';
 import { prepareRelease, releaseRepository } from '../scripts/changelog.mjs';
 import {
   cleanBundles,
@@ -297,6 +303,20 @@ test('release notes expand English, collapse Chinese and pin relative links to t
   assert.ok(body.includes('[官网](https://example.com)'));
   assert.ok(body.includes('## Download and installation'));
   assert.ok(body.includes('## 下载与安装'));
+  for (const format of ['zip', 'tar.gz']) {
+    const source = `https://github.com/owner/repo/archive/refs/tags/v${VERSION}.${format}`;
+    assert.equal(body.split(`](${source})`).length - 1, 2, '两种语言都应提供同版本源码');
+  }
+  for (const path of [
+    'docs/DEVELOPMENT.md',
+    'docs/en/DEVELOPMENT.md',
+    'COPYRIGHT',
+    'LICENSE',
+    'LICENSE.LGPL-3.0',
+    'licenses/',
+  ])
+    assert.ok(body.includes(`](https://github.com/owner/repo/blob/v${VERSION}/${path})`), path);
+  assert.ok(!body.includes('/blob/main/') && !body.includes('/archive/refs/heads/'), '源码与许可入口必须固定到发布Tag');
   assert.ok(!body.includes('旧版本的改动'));
 });
 
@@ -491,4 +511,45 @@ test('wrong tag, missing credentials and modified checksums fail before any GitH
   await writeFile(join(directory, 'SHA256SUMS'), 'corrupted checksums');
   await assert.rejects(publishRelease(options), /SHA256SUMS/);
   assert.equal(state.calls.length, 0);
+});
+
+// A frontend archive must carry the same legal texts and identity as its source tree.
+// Exercise failures against an isolated source archive; never mutate the working checkout.
+test('frontend builds reject missing notices, stale project texts and conflicting bundle identity', async (t) => {
+  const sourceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  for (const problem of ['missing-catalog', 'stale-copyright', 'bundle-identity']) {
+    await t.test(problem, async (sub) => {
+      const root = await mkdtemp(join(tmpdir(), 'lapower-legal-build-'));
+      sub.after(() => rm(root, { recursive: true, force: true }));
+      for (const path of [
+        'COPYRIGHT',
+        'LICENSE',
+        'LICENSE.LGPL-3.0',
+        'package.json',
+        'package-lock.json',
+        'src-tauri/tauri.conf.json',
+        'src/third-party-components.json',
+        'src/legal-notices.json',
+      ]) {
+        await mkdir(dirname(join(root, path)), { recursive: true });
+        await writeFile(join(root, path), await readFile(join(sourceRoot, path)));
+      }
+      const directory = join(root, 'src');
+      await validateBundledLegalAssets(directory, root);
+      if (problem === 'missing-catalog') {
+        await rm(join(directory, 'legal-notices.json'));
+        await assert.rejects(validateBundledLegalAssets(directory, root), /ENOENT/);
+      } else if (problem === 'stale-copyright') {
+        const path = join(root, 'COPYRIGHT');
+        await writeFile(path, `${await readFile(path, 'utf8')}\nAdditional project notice.\n`);
+        await assert.rejects(validateBundledLegalAssets(directory, root), /过期/);
+      } else {
+        const path = join(root, 'src-tauri/tauri.conf.json');
+        const config = JSON.parse(await readFile(path, 'utf8'));
+        config.bundle.copyright = 'Copyright (C) 2027 Unrelated publisher';
+        await writeFile(path, JSON.stringify(config));
+        await assert.rejects(validateBundledLegalAssets(directory, root), /不一致/);
+      }
+    });
+  }
 });

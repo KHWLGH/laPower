@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { encodePdEntries, encodePdText, pdCapturePrefix } from './pd-export-core.js';
 
 const worker = /** @type {any} */ (self);

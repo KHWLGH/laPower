@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 #[cfg(any(target_os = "linux", test))]
 fn environment_locale(mut read: impl FnMut(&str) -> Option<String>) -> String {
     ["LC_ALL", "LC_MESSAGES", "LANG"]

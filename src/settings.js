@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
@@ -14,6 +19,7 @@ import {
 import { normalizeCsvExportOptions } from './export-options.js';
 import { applyLanguage, errorText, normalizeLanguagePreference, t } from './i18n.js';
 import { clampPdm } from './km003c-model.js';
+import { normalizeProtocolReportOptions } from './protocol-report-model.js';
 import { clampLimitMb } from './recording-limit.js';
 import { normalizeShortcuts } from './shortcuts-core.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
@@ -53,6 +59,7 @@ function normalizeSettings(saved) {
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
   merged.videoExport = normalizeVideoExportOptions(source.videoExport);
+  merged.protocolReportExport = normalizeProtocolReportOptions(source.protocolReportExport);
   merged.immediateMarker =
     typeof source.immediateMarker === 'boolean' ? source.immediateMarker : defaultSettings.immediateMarker;
 

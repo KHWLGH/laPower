@@ -269,23 +269,8 @@
     },
     {
       "name": "base64",
-      "version": "0.21.7",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "base64",
       "version": "0.22.1",
       "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "bit-set",
-      "version": "0.8.0",
-      "license": "Apache-2.0 OR MIT"
-    },
-    {
-      "name": "bit-vec",
-      "version": "0.8.0",
-      "license": "Apache-2.0 OR MIT"
     },
     {
       "name": "bitflags",
@@ -301,11 +286,6 @@
       "name": "block",
       "version": "0.1.6",
       "license": "MIT"
-    },
-    {
-      "name": "block-buffer",
-      "version": "0.10.4",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "block2",
@@ -326,11 +306,6 @@
       "name": "brotli-decompressor",
       "version": "5.0.3",
       "license": "BSD-3-Clause/MIT"
-    },
-    {
-      "name": "bs58",
-      "version": "0.5.1",
-      "license": "MIT/Apache-2.0"
     },
     {
       "name": "bytemuck",
@@ -358,21 +333,6 @@
       "license": "MIT"
     },
     {
-      "name": "camino",
-      "version": "1.2.5",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "cargo-platform",
-      "version": "0.1.9",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "cargo_metadata",
-      "version": "0.19.2",
-      "license": "MIT"
-    },
-    {
       "name": "cfb",
       "version": "0.7.3",
       "license": "MIT"
@@ -380,11 +340,6 @@
     {
       "name": "cfg-if",
       "version": "1.0.4",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "chacha20",
-      "version": "0.10.2",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -463,11 +418,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "cpufeatures",
-      "version": "0.3.1",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "crc32fast",
       "version": "1.5.0",
       "license": "MIT OR Apache-2.0"
@@ -488,11 +438,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "cssparser",
-      "version": "0.36.0",
-      "license": "MPL-2.0"
-    },
-    {
       "name": "ctor",
       "version": "0.8.0",
       "license": "Apache-2.0 OR MIT"
@@ -503,23 +448,8 @@
       "license": "Apache-2.0/MIT"
     },
     {
-      "name": "defmt",
-      "version": "1.1.1",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "deranged",
       "version": "0.5.8",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "derive_more",
-      "version": "2.1.1",
-      "license": "MIT"
-    },
-    {
-      "name": "digest",
-      "version": "0.10.7",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -548,39 +478,14 @@
       "license": "MIT"
     },
     {
-      "name": "dom_query",
-      "version": "0.27.0",
-      "license": "MIT"
-    },
-    {
       "name": "dpi",
       "version": "0.1.2",
       "license": "Apache-2.0 AND MIT"
     },
     {
-      "name": "dtoa",
-      "version": "1.0.11",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "dtoa-short",
-      "version": "0.3.5",
-      "license": "MPL-2.0"
-    },
-    {
-      "name": "dtor",
-      "version": "0.3.0",
-      "license": "Apache-2.0 OR MIT"
-    },
-    {
       "name": "dunce",
       "version": "1.0.5",
       "license": "CC0-1.0 OR MIT-0 OR Apache-2.0"
-    },
-    {
-      "name": "dyn-clone",
-      "version": "1.0.20",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "embed_plist",
@@ -668,11 +573,6 @@
       "license": "Apache-2.0 / MIT"
     },
     {
-      "name": "foldhash",
-      "version": "0.2.0",
-      "license": "Zlib"
-    },
-    {
       "name": "fontconfig-parser",
       "version": "0.5.8",
       "license": "MIT"
@@ -731,11 +631,6 @@
       "name": "futures-lite",
       "version": "2.6.1",
       "license": "Apache-2.0 OR MIT"
-    },
-    {
-      "name": "futures-sink",
-      "version": "0.3.34",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "futures-task",
@@ -798,11 +693,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "getrandom",
-      "version": "0.4.3",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "gio",
       "version": "0.18.4",
       "license": "MIT"
@@ -849,11 +739,6 @@
     },
     {
       "name": "hashbrown",
-      "version": "0.12.3",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "hashbrown",
       "version": "0.17.1",
       "license": "MIT OR Apache-2.0"
     },
@@ -876,11 +761,6 @@
       "name": "hidapi",
       "version": "2.6.6",
       "license": "MIT"
-    },
-    {
-      "name": "html5ever",
-      "version": "0.38.0",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "http",
@@ -969,11 +849,6 @@
     },
     {
       "name": "indexmap",
-      "version": "1.9.3",
-      "license": "Apache-2.0 OR MIT"
-    },
-    {
-      "name": "indexmap",
       "version": "2.14.0",
       "license": "Apache-2.0 OR MIT"
     },
@@ -1028,26 +903,6 @@
       "license": "MIT"
     },
     {
-      "name": "jiff",
-      "version": "0.2.35",
-      "license": "Unlicense OR MIT"
-    },
-    {
-      "name": "jiff-core",
-      "version": "0.1.0",
-      "license": "Unlicense OR MIT"
-    },
-    {
-      "name": "jiff-tzdb",
-      "version": "0.1.8",
-      "license": "Unlicense OR MIT"
-    },
-    {
-      "name": "jiff-tzdb-platform",
-      "version": "0.1.3",
-      "license": "Unlicense OR MIT"
-    },
-    {
       "name": "json-patch",
       "version": "3.0.1",
       "license": "MIT/Apache-2.0"
@@ -1063,16 +918,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "libappindicator",
-      "version": "0.9.0",
-      "license": "Apache-2.0 OR MIT"
-    },
-    {
-      "name": "libappindicator-sys",
-      "version": "0.9.0",
-      "license": "Apache-2.0 OR MIT"
-    },
-    {
       "name": "libc",
       "version": "0.2.189",
       "license": "MIT OR Apache-2.0"
@@ -1081,16 +926,6 @@
       "name": "libdbus-sys",
       "version": "0.2.7",
       "license": "Apache-2.0/MIT"
-    },
-    {
-      "name": "libloading",
-      "version": "0.7.4",
-      "license": "ISC"
-    },
-    {
-      "name": "libloading",
-      "version": "0.8.9",
-      "license": "ISC"
     },
     {
       "name": "libudev",
@@ -1133,11 +968,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "lru-slab",
-      "version": "0.1.3",
-      "license": "MIT OR Apache-2.0 OR Zlib"
-    },
-    {
       "name": "mach2",
       "version": "0.4.3",
       "license": "BSD-2-Clause OR MIT OR Apache-2.0"
@@ -1151,11 +981,6 @@
       "name": "malloc_buf",
       "version": "0.0.6",
       "license": "MIT"
-    },
-    {
-      "name": "markup5ever",
-      "version": "0.38.0",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "memchr",
@@ -1201,11 +1026,6 @@
       "name": "muda",
       "version": "0.19.3",
       "license": "Apache-2.0 OR MIT"
-    },
-    {
-      "name": "new_debug_unreachable",
-      "version": "1.0.6",
-      "license": "MIT"
     },
     {
       "name": "nix",
@@ -1258,11 +1078,6 @@
       "license": "Zlib OR Apache-2.0 OR MIT"
     },
     {
-      "name": "objc2-core-graphics",
-      "version": "0.3.2",
-      "license": "Zlib OR Apache-2.0 OR MIT"
-    },
-    {
       "name": "objc2-encode",
       "version": "4.1.0",
       "license": "MIT"
@@ -1276,11 +1091,6 @@
       "name": "objc2-foundation",
       "version": "0.3.2",
       "license": "MIT"
-    },
-    {
-      "name": "objc2-io-surface",
-      "version": "0.3.2",
-      "license": "Zlib OR Apache-2.0 OR MIT"
     },
     {
       "name": "objc2-web-kit",
@@ -1413,11 +1223,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "precomputed-hash",
-      "version": "0.1.1",
-      "license": "MIT"
-    },
-    {
       "name": "proc-macro2",
       "version": "1.0.107",
       "license": "MIT OR Apache-2.0"
@@ -1428,28 +1233,8 @@
       "license": "MIT"
     },
     {
-      "name": "quinn",
-      "version": "0.11.12",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "quinn-proto",
-      "version": "0.11.19",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "quinn-udp",
-      "version": "0.5.16",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "quote",
       "version": "1.0.47",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "rand",
-      "version": "0.10.3",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -1464,28 +1249,13 @@
     },
     {
       "name": "rand_core",
-      "version": "0.10.1",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "rand_core",
       "version": "0.6.4",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "rand_pcg",
-      "version": "0.10.2",
       "license": "MIT OR Apache-2.0"
     },
     {
       "name": "raw-window-handle",
       "version": "0.6.2",
       "license": "MIT OR Apache-2.0 OR Zlib"
-    },
-    {
-      "name": "ref-cast",
-      "version": "1.0.26",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "regex",
@@ -1513,11 +1283,6 @@
       "license": "MIT"
     },
     {
-      "name": "ring",
-      "version": "0.17.14",
-      "license": "Apache-2.0 AND ISC"
-    },
-    {
       "name": "roxmltree",
       "version": "0.20.0",
       "license": "MIT OR Apache-2.0"
@@ -1526,11 +1291,6 @@
       "name": "rust-ini",
       "version": "0.17.0",
       "license": "MIT"
-    },
-    {
-      "name": "rustc-hash",
-      "version": "2.1.3",
-      "license": "Apache-2.0 OR MIT"
     },
     {
       "name": "rustix",
@@ -1573,21 +1333,6 @@
       "license": "Unlicense/MIT"
     },
     {
-      "name": "schemars",
-      "version": "0.8.22",
-      "license": "MIT"
-    },
-    {
-      "name": "schemars",
-      "version": "0.9.0",
-      "license": "MIT"
-    },
-    {
-      "name": "schemars",
-      "version": "1.2.2",
-      "license": "MIT"
-    },
-    {
       "name": "scopeguard",
       "version": "1.2.0",
       "license": "MIT OR Apache-2.0"
@@ -1601,11 +1346,6 @@
       "name": "security-framework-sys",
       "version": "2.17.0",
       "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "selectors",
-      "version": "0.36.1",
-      "license": "MPL-2.0"
     },
     {
       "name": "semver",
@@ -1651,16 +1391,6 @@
       "name": "serialport",
       "version": "4.10.1",
       "license": "MPL-2.0"
-    },
-    {
-      "name": "servo_arc",
-      "version": "0.4.3",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
-      "name": "sha2",
-      "version": "0.10.9",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "signal-hook-registry",
@@ -1728,19 +1458,9 @@
       "license": "MIT"
     },
     {
-      "name": "string_cache",
-      "version": "0.9.0",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "subtle",
       "version": "2.6.1",
       "license": "BSD-3-Clause"
-    },
-    {
-      "name": "swift-rs",
-      "version": "1.0.7",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "syn",
@@ -1818,11 +1538,6 @@
       "license": "Apache-2.0 OR MIT"
     },
     {
-      "name": "tendril",
-      "version": "0.5.1",
-      "license": "MIT OR Apache-2.0"
-    },
-    {
       "name": "thiserror",
       "version": "1.0.69",
       "license": "MIT OR Apache-2.0"
@@ -1878,11 +1593,6 @@
       "license": "MIT OR Apache-2.0"
     },
     {
-      "name": "tokio-util",
-      "version": "0.7.19",
-      "license": "MIT"
-    },
-    {
       "name": "toml",
       "version": "1.1.4+spec-1.1.0",
       "license": "MIT OR Apache-2.0"
@@ -1931,11 +1641,6 @@
       "name": "tracing-core",
       "version": "0.1.36",
       "license": "MIT"
-    },
-    {
-      "name": "tray-icon",
-      "version": "0.24.2",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "try-lock",
@@ -2036,11 +1741,6 @@
       "name": "want",
       "version": "0.3.1",
       "license": "MIT"
-    },
-    {
-      "name": "web_atoms",
-      "version": "0.2.6",
-      "license": "MIT OR Apache-2.0"
     },
     {
       "name": "webkit2gtk",

@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** 窗口外观偏好；只换皮肤，不改变真实平台、原生装饰或窗口动作。 */
 
 /** @typedef {'windows'|'macos'} WindowStylePreference */

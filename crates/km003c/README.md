@@ -20,3 +20,11 @@ Detection reads PD PDOs independently after the other protocols, ignoring PD res
 Detection workflow reference: [c-power POWER-Z detection](https://github.com/bruno-ntmr/c-power/blob/3cc5fc3e27bd7254be074625f82892066aefb921/c-power-cli/src/detection/device-backends.ts). The Rust implementation uses laPower's own transport, parsers and confirmed PDM settings; it does not infer proprietary certification from PD power. Tests use scripted responses, not hardware validation.
 
 Capabilities distinguish PD and UFCS and retain physical positions. PdmOpen accepts optional settings; outcomes expose confirmed configuration separately from user selections. VoltageCache accepts timestamped samples from the caller’s sole acquisition reader; acknowledgements never substitute for measurements. Completion/cancellation resets verify 5 V within a bounded recovery period while still obeying session shutdown. Raw commands invalidate mode state, and malformed hex is rejected without silently changing bytes. Firmware record parsing is based on a captured KM003C V2.0.6 memory record; unknown layouts remain unknown.
+
+## Copyright and license
+
+Copyright (C) 2026 KHWLGH
+
+This notice covers only KHWLGH's own contributions to this library, its tests, examples and documentation, under LGPL-3.0-or-later. Other authors retain their rights; Git authorship does not establish an assignment. The public protocol research and workflow reference credited above retain their own notices and rights; citing them does not claim ownership of upstream code, device data or protocol facts.
+
+See the root [`COPYRIGHT`](../../COPYRIGHT) for scope and source declarations. Read the local full [`LGPLv3`](../../LICENSE.LGPL-3.0) together with [`GPLv3`](../../LICENSE); the later-version option comes from the library declaration. The software comes without warranty and may be modified and redistributed under the applicable license conditions.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! A whole power negotiation, end to end, the way it arrives off a real link.
 //!
 //! Messages are built from header and data-object *words* rather than hex literals,

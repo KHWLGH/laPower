@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Shared crash-recovery list and actions for notifications and the settings page. */
 import { deleteSpoolRecovery, listSpoolRecoveries } from './file-io.js';
 import { errorText, onLanguageChange, t } from './i18n.js';

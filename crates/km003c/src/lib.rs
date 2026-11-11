@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! ChargerLAB POWER-Z KM003C / KM002C USB power meters.
 //!
 //! The meter exposes two independent paths, and this crate keeps them apart:

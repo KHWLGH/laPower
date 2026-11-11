@@ -1,7 +1,23 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 // Global type declarations for the Tauri v2 runtime API.
 // These APIs are injected by 'withGlobalTauri: true' in tauri.conf.json.
 
 declare namespace TauriAPI {
+  interface PdPageRequest {
+    generation: number | null;
+    afterSeq: number | null;
+    throughSeq: number | null;
+  }
+  interface PdPage {
+    generation: number;
+    throughSeq: number | null;
+    events: import('./pd-model.js').PdEntry[];
+  }
+
   interface DialogOptions {
     title?: string;
     kind?: 'info' | 'warning' | 'error';
@@ -14,6 +30,8 @@ declare namespace TauriAPI {
     defaultPath?: string;
   }
   interface Core {
+    invoke(cmd: 'pd_log_after', args: PdPageRequest): Promise<PdPage>;
+    invoke(cmd: 'decode_pd_at', args: { index: number; generation: number }): Promise<import('./pd-model.js').PdMeta>;
     invoke(cmd: string, args?: Record<string, unknown>): Promise<any>;
   }
   interface Event {

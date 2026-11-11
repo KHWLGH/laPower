@@ -1,0 +1,98 @@
+laPower copyright and licensing
+Copyright (C) 2026 KHWLGH
+
+This notice covers only KHWLGH's own contributions to laPower. It does not
+claim ownership of upstream or third-party material. Other authors retain
+their rights. Git authorship or commit metadata does not establish a copyright
+assignment, and this notice does not infer any such assignment.
+
+Project-owned contributions
+---------------------------
+Unless a more specific notice applies, KHWLGH's own contributions in the
+following paths are licensed under GNU GPL version 3 only
+(SPDX-License-Identifier: GPL-3.0-only):
+
+- src/ and src-tauri/: application code, UI, styles, assets and configuration,
+  excluding the third-party materials and generated materials described below;
+- scripts/, tools/, test/, bench/, temperature-example/ and .github/: project
+  scripts, development tools, tests, benchmarks, examples and workflow files;
+- project documentation and configuration, including the root README files,
+  docs/, changelog/, AGENTS.md, manifests, lockfile metadata and root settings,
+  only to the extent that their contents are KHWLGH's own contributions.
+
+KHWLGH's own contributions throughout crates/, including all libraries,
+tests, examples, documentation and configuration, are licensed under GNU
+LGPL version 3 or (at your option) any later version
+(SPDX-License-Identifier: LGPL-3.0-or-later). This includes usbpd-parser,
+witrn-hid and km003c. Existing upstream notices and rights remain applicable
+to the incorporated material; this statement does not relicense that material.
+
+The project-created application icon artwork in src-tauri/icons/ and
+src/assets/, and its size, format and platform derivatives, are covered by
+the application grant above. This does not cover third-party UI icons,
+logos or trademarks. Project-created text, layout and screenshot composition
+in docs/screenshots/ are also covered by that grant, subject to the rights
+in any depicted third-party material. It does not claim rights in users'
+measurement data, device names, standards, protocol facts or third-party marks.
+
+Generated materials retain the applicable notices and licensing of their
+inputs. Project-owned code or creative content in frontend bundles,
+generated icon derivatives, screenshot fixtures and generated reports falls
+within the corresponding scope above; generation does not make bundled
+third-party code, license texts, source data or factual measurements original
+to this project. Generated component and legal catalogs aggregate notices
+and do not replace the underlying copyright or license terms.
+
+Upstream protocol ports and source evidence
+------------------------------------------
+usbpd-parser is a Rust port of usbpdparser 1.1.6:
+https://github.com/JohnScotttt/USB_PD_Parser_API_Py
+Original Python implementation: Copyright (c) 2025 JohnScotttt
+Upstream license declaration: LGPL-3.0-or-later.
+
+witrn-hid is a Rust port of witrnhid 1.1.5:
+https://github.com/JohnScotttt/WITRN_HID_API
+Original Python implementation: Copyright (c) 2025 JohnScotttt
+Upstream license declaration: LGPL-3.0-or-later.
+
+The current Rust port sources came through the retired WITRN-API-RS project;
+the last recorded import is 30c4bdb. That Git object and a public copy of the
+retired repository are not available for inspection. The Python declarations
+above are established upstream notices, not proof of the retired Rust
+repository's complete notice history. No additional author, assignment or
+license is inferred for that unavailable material.
+
+crates/usbpd-parser/src/vendor_ids/table.rs identifies its source as upstream
+usbpdparser/tools/vendor_ids_dict.py. No separate notice for that source table
+has been established. Its earlier data provenance and any independent data
+license remain an evidence gap; do not treat the table as wholly original
+KHWLGH material or infer a separate source-data license from this notice.
+
+Third-party materials and notices
+--------------------------------
+Third-party code and assets, including src/vendor/, Fluent System Icons,
+GitHub Octicons, dependencies and embedded native code, retain their own
+copyright and license notices. They are excluded from the project-owned
+copyright grant above. Relevant notices accompany those materials and the
+collected legal materials in licenses/; the generated runtime component and
+legal catalogs provide an offline reading index in Settings > About.
+
+License documents, third-party NOTICE files and copied upstream declarations
+retain their respective authors' notices and terms. In particular, LICENSE
+and LICENSE.LGPL-3.0 are verbatim GNU license documents, not original laPower
+license text. Source-data declarations, protocol references and captured or
+sample data must retain their applicable source information; inclusion in
+this repository alone does not establish ownership or a new license grant.
+
+License texts and redistribution
+-------------------------------
+LICENSE contains the complete GNU GPL version 3 text.
+LICENSE.LGPL-3.0 contains the complete GNU LGPL version 3 text, which
+incorporates GNU GPL version 3. Read both for the libraries. The option to
+use a later LGPL version is granted by the scope declaration above, not by a
+different edition of the LGPL version 3 text.
+
+The software is distributed without warranty, to the extent permitted by
+applicable law. Modification and redistribution are permitted under the
+applicable licenses and their conditions, including notice and corresponding
+source requirements. This summary does not replace the license texts.

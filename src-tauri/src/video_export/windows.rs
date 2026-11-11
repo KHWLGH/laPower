@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Direct2D drawing target and Media Foundation encoding for the video report.
 //!
 //! Windows draws the shared layout from [`super::scene`] with Direct2D / DirectWrite onto a WIC

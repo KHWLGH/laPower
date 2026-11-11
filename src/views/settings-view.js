@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 设置视图 — 单页目录导航 / 关于信息 / 临时恢复文件。
  * 首次打开时由 shell 的 init 钩子调用。

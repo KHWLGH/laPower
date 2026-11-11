@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! Protocol trigger over the CDC virtual serial port: a PDM session, the protocol the
 //! meter has entered, and the command set the firmware understands.
 //!
@@ -70,6 +73,7 @@ fn wire_one(pos: u8, p: &WirePdo) -> Vec<TriggerPdo> {
                 let pdp = (*pdp_w > 0).then_some(*pdp_w);
                 let cur = avs_current_ma(None, None, pdp, *max_voltage_mv);
                 let mut rec = make_pdo(pos, "epr_avs", *min_voltage_mv, *max_voltage_mv, cur, true);
+                rec.max_power_mw = pdp.map(|w| w * 1000);
                 rec.label = format_avs_label(
                     pos,
                     "epr_avs",
@@ -92,15 +96,12 @@ fn wire_one(pos: u8, p: &WirePdo) -> Vec<TriggerPdo> {
         WirePdo::Battery {
             min_voltage_mv,
             max_voltage_mv,
-            ..
-        } => vec![make_pdo(
-            pos,
-            "battery",
-            *min_voltage_mv,
-            *max_voltage_mv,
-            None,
-            true,
-        )],
+            max_power_mw,
+        } => {
+            let mut rec = make_pdo(pos, "battery", *min_voltage_mv, *max_voltage_mv, None, true);
+            rec.max_power_mw = (*max_power_mw > 0).then_some(*max_power_mw);
+            vec![rec]
+        }
         WirePdo::Variable {
             min_voltage_mv,
             max_voltage_mv,
@@ -2432,8 +2433,18 @@ mod tests {
         assert_eq!(epr_avs.volt_min_mv, 15_000);
         assert_eq!(epr_avs.volt_max_mv, 48_000);
         assert_eq!(epr_avs.cur_ma, Some(5000));
+        assert_eq!(epr_avs.max_power_mw, Some(240_000));
         assert!(epr_avs.label.contains("240 W"), "{}", epr_avs.label);
         assert!(epr_avs.position > epr_fixed.position);
+        let battery = wire_pdos(&[WirePdo::Battery {
+            min_voltage_mv: 5000,
+            max_voltage_mv: 12_000,
+            max_power_mw: 36_250,
+        }]);
+        assert_eq!(battery[0].max_power_mw, Some(36_250));
+        assert_eq!(battery[0].cur_ma, None);
+        let text = parse_pdos("Battery: 5-12V 36.25W");
+        assert_eq!(text[0].max_power_mw, Some(36_250));
     }
 
     #[test]

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 JohnScotttt
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// KHWLGH copyright applies to local modifications; see COPYRIGHT.
 //! Turn a [`Metadata`] tree into styled text for a terminal or a UI.
 
 use crate::bits::bits_to_hex;

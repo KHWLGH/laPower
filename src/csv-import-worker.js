@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * CSV import Worker. The main thread streams the file in byte slices:
  * `begin` → `chunk`* → `end`; every chunk is acknowledged before the next is read, so

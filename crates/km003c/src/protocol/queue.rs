@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! AdcQueue's fixed-width 20-byte samples.
 
 use super::{read_i32, read_u16, ProtocolError, Result};

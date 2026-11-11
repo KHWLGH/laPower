@@ -1,4 +1,6 @@
 <!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 KHWLGH
+     SPDX-License-Identifier: GPL-3.0-only -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -453,6 +455,7 @@
                   <div class="trigger-actions">
                     <button type="button" class="btn" id="btn-km-scan" data-i18n-title="scanHint"><span data-i18n="scan">Auto detect</span></button>
                     <button type="button" class="btn" id="btn-km-scan-full" data-i18n-title="fullScanHint"><span data-i18n="fullScan">Full scan</span></button>
+                    <button type="button" class="btn" id="btn-km-export-report" disabled><i class="fi fi-report" aria-hidden="true"></i><span data-i18n="protocolReportExport">Export image report</span></button>
                   </div>
                 </div>
                 <div id="km-detection-results" class="trigger-detection-results"></div>
@@ -846,9 +849,16 @@
                         </div>
                       </div>
                       <div class="about-actions">
+                        <button type="button" class="btn" id="btn-legal-notices" aria-haspopup="dialog" aria-controls="about-legal-dialog" data-i18n="openSourceLicenses">Open-source licenses</button>
                         <button type="button" class="btn" id="btn-project-github" title="Open GitHub in your browser" data-i18n-title="openGitHub"><i class="fi fi-github" aria-hidden="true"></i><span>GitHub</span></button>
                         <button type="button" class="btn" id="btn-check-updates"><i class="fi fi-refresh" aria-hidden="true"></i><span data-i18n="checkUpdates">Check for updates</span></button>
                       </div>
+                    </div>
+                    <div class="about-legal-summary selectable">
+                      <p class="about-copyright">Copyright (C) 2026 KHWLGH</p>
+                      <p class="settings-row-desc" data-i18n="aboutOwnership">This copyright covers KHWLGH’s own contributions to laPower. Other authors retain the rights to their work.</p>
+                      <p class="settings-row-desc" data-i18n="aboutProtocolLicenses">laPower uses usbpd-parser, witrn-hid and km003c under LGPL-3.0-or-later. Both usbpd-parser and witrn-hid include upstream work: Copyright (c) 2025 JohnScotttt. Upstream notices and other authors’ rights are preserved.</p>
+                      <p class="settings-row-desc" data-i18n="aboutGplNotice">laPower is free software: you may redistribute and modify it under GNU GPL version 3. It comes WITHOUT ANY WARRANTY, including merchantability or fitness for a particular purpose. Use Open-source licenses to read the full license.</p>
                     </div>
                     <div class="about-update" id="about-update" hidden>
                       <p class="about-update-status" id="about-update-status" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -861,7 +871,7 @@
                     <ul class="about-components" id="about-components" aria-label="Main runtime components" data-i18n-aria-label="mainComponents"></ul>
                     <details class="about-all-components" id="about-all-components">
                       <summary id="about-components-summary" data-i18n="allRuntimeComponents">All runtime components ({count})</summary>
-                      <p class="settings-row-desc" data-i18n="runtimeComponentsHint">Includes direct and indirect runtime dependencies across supported desktop platforms. Development and build tools are excluded.</p>
+                      <p class="settings-row-desc" data-i18n="runtimeComponentsHint">A conservative set of direct and indirect runtime dependencies across supported desktop platforms, rather than an exact binary linkage list. Development and build tools are excluded.</p>
                       <ul class="about-dependency-list selectable" id="about-dependency-list"></ul>
                     </details>
                     <p class="settings-row-desc" id="about-components-error" role="status" hidden></p>
@@ -1051,6 +1061,55 @@
       <ol class="marker-list"></ol>
       <div class="card-hint"><span data-i18n="markerListHint">Click a label to rename it. Exported CSV files keep markers in the Marker column.</span></div>
     </div>
+
+    <dialog id="about-legal-dialog" class="fluent-dialog about-legal-dialog" aria-labelledby="about-legal-title">
+      <div class="fluent-dialog-header about-legal-header">
+        <h2 id="about-legal-title" class="fluent-dialog-title" data-i18n="openSourceLicenses">Open-source licenses</h2>
+        <button type="button" class="btn about-legal-close" id="btn-close-legal" aria-label="Close" data-i18n-aria-label="close" title="Close" data-i18n-title="close"><i class="fi fi-dismiss" aria-hidden="true"></i></button>
+      </div>
+      <div class="about-legal-body">
+        <div class="about-legal-reader" id="about-legal-reader" aria-busy="false" hidden>
+          <div class="about-legal-controls" id="about-legal-controls" hidden>
+            <label for="about-legal-document" data-i18n="legalDocument">Document</label>
+            <select id="about-legal-document" class="ribbon-select" aria-label="Document" data-i18n-aria-label="legalDocument"></select>
+          </div>
+          <div class="about-legal-feedback">
+            <p class="settings-row-desc" id="about-legal-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <button type="button" class="btn" id="btn-retry-legal" data-i18n="retryLegalLoad" hidden>Retry loading</button>
+          </div>
+          <p class="about-legal-source selectable" id="about-legal-source" hidden></p>
+          <pre class="about-legal-text selectable" id="about-legal-text" tabindex="0" role="region" aria-label="License text" data-i18n-aria-label="legalText" hidden></pre>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="protocol-report-dialog" class="fluent-dialog video-dialog" aria-labelledby="protocol-report-title" aria-describedby="protocol-report-description">
+      <div class="fluent-dialog-header">
+        <i class="fluent-dialog-icon fi fi-report" data-kind="info" aria-hidden="true"></i>
+        <h2 id="protocol-report-title" class="fluent-dialog-title" data-i18n="protocolReportTitle">Protocol detection report</h2>
+      </div>
+      <p id="protocol-report-description" class="video-dialog-note" data-i18n="protocolReportDescription">Export this detection and its complete PDO parameters as a 16:9 PNG image.</p>
+      <div class="video-grid">
+        <label class="video-field"><span class="video-label" data-i18n="videoResolution">Resolution</span>
+          <select id="protocol-report-resolution" class="ribbon-select" data-i18n-aria-label="videoResolution" aria-label="Resolution">
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="2560x1440">2560 × 1440</option>
+            <option value="3840x2160">3840 × 2160</option>
+          </select>
+        </label>
+        <label class="video-field"><span class="video-label" data-i18n="videoTheme">Theme</span>
+          <select id="protocol-report-theme" class="ribbon-select" data-i18n-aria-label="videoTheme" aria-label="Theme">
+            <option value="light" data-i18n="light">Light</option>
+            <option value="dark" data-i18n="dark">Dark</option>
+          </select>
+        </label>
+      </div>
+      <p id="protocol-report-status" class="video-dialog-note" role="status" aria-live="polite"></p>
+      <div class="fluent-dialog-actions">
+        <button type="button" id="protocol-report-generate" class="btn btn-accent" data-i18n="protocolReportSave">Export PNG</button>
+        <button type="button" id="protocol-report-close" class="btn" data-i18n="cancel">Cancel</button>
+      </div>
+    </dialog>
 
     <dialog id="video-export-dialog" class="fluent-dialog video-dialog" aria-labelledby="video-export-title">
       <div class="fluent-dialog-header">

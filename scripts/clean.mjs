@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Remove only explicitly selected, untracked development outputs inside this checkout. */
 import { execFile } from 'node:child_process';
 import { lstat, readdir, realpath, rm } from 'node:fs/promises';

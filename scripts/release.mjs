@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Collect native installers, require the complete release set, and publish only verified assets. */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';

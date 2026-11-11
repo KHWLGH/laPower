@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 浮出面板（Fluent Flyout）— 命令栏"显示 / 自动暂停 / 温度服务"等设置面板的容器。
  *

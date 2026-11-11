@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 图片与视频报告导出：对话框、冻结快照、进度轮询与错误呈现。
  *
@@ -32,7 +37,7 @@ import {
   videoFrameCount,
 } from './video-export-options.js';
 import { videoPalette } from './video-palette.js';
-import { buildVideoPayload, projectVideo } from './video-projection.js';
+import { buildVideoPayload, projectVideoAsync } from './video-projection.js';
 
 /** 后端状态轮询间隔：与源项目的 500 ms 一致，够快但不制造 IPC 压力。 */
 const POLL_INTERVAL_MS = 500;
@@ -64,6 +69,17 @@ const capabilities = new Map();
 const capabilityProbes = new Map();
 /** 保存对话框与投影期间避免重复提交。 */
 let busy = false;
+/** @type {{controller:AbortController, projection:Promise<any>|null}|null} */
+let preparation = null;
+
+/** Stop CPU preparation before acquisition shutdown; a late picker cannot submit this report. */
+export async function cancelReportPreparation() {
+  const pending = preparation;
+  if (!pending) return;
+  pending.controller.abort();
+  await pending.projection?.catch(() => {});
+}
+
 let adopting = false;
 let jobRevision = 0;
 let currentQuery = 0;
@@ -108,11 +124,15 @@ function activeJob() {
   return job && (job.state === 'queued' || job.state === 'encoding');
 }
 
-/** 把冻结的列投影成后端能直接渲染的载荷。 */
-function captureReport(options) {
+/** 把冻结的列投影成后端能直接渲染的载荷。
+ * @param {import('./video-export-options.js').VideoExportOptions} options
+ * @param {AbortSignal} signal
+ */
+export async function captureReport(options, signal) {
+  options = { ...options, visibleSeries: [...options.visibleSeries] };
   const columns = state.chartSeries;
   const length = columns.x.length;
-  const projection = projectVideo({
+  const input = {
     columns: {
       x: columns.x.snapshot(),
       timestamps: columns.timestamps.snapshot(),
@@ -125,7 +145,7 @@ function captureReport(options) {
       sampleIntervals: columns.sampleIntervals.snapshot(),
     },
     length,
-    markers: markersOf(columns),
+    markers: markersOf(columns).map((marker) => ({ ...marker })),
     intervalMs: state.dataIntervalMs ?? state.settings.sampleRate,
     frameCount: videoFrameCount(options),
     markerLimit:
@@ -135,11 +155,10 @@ function captureReport(options) {
           ? Number.POSITIVE_INFINITY
           : 8,
     hasTemperature: state.hasTempData,
-  });
+  };
   const devices = provenanceOf(columns).devices;
-  return buildVideoPayload({
+  const context = {
     options,
-    projection,
     header: {
       // 记录没有名字，数据来源是它能给出的最有用的抬头。
       title: devices.length ? devices.join(' / ') : 'laPower',
@@ -169,7 +188,9 @@ function captureReport(options) {
       energy: t('videoEnergy'),
     },
     palette: videoPalette(options.theme),
-  });
+  };
+  const projection = await projectVideoAsync(input, { signal });
+  return buildVideoPayload({ ...context, projection });
 }
 
 function refreshForm() {
@@ -278,7 +299,7 @@ function refreshStatus() {
     durationError.hidden = image || duration.valid;
     durationError.textContent = image || duration.valid ? '' : t('videoDurationInvalid');
   }
-  if (cancel) cancel.hidden = !active;
+  if (cancel) cancel.hidden = !active && !preparation;
   if (progress) {
     progress.hidden = !job;
     progress.value = job ? Math.min(1, Math.max(0, job.progress || 0)) : 0;
@@ -447,29 +468,40 @@ async function generate() {
   job = null;
   submissionError = pollError = null;
   busy = true;
+  const pending = { controller: new AbortController(), projection: /** @type {Promise<any>|null} */ (null) };
+  preparation = pending;
   refreshStatus();
   try {
     const report = await runExportSession(async () => {
       toast.info(() => t('videoProcessing'));
-      const payload = captureReport(options);
+      pending.projection = captureReport(options, pending.controller.signal);
+      const payload = await pending.projection;
+      if (pending.controller.signal.aborted) return null;
       const picked = await pickVideoExportFile(
         `lapower_report_${new Date().toISOString().replace(/[:.]/g, '-')}.${options.reportType === 'image' ? 'png' : options.format}`,
       );
-      if (!picked) return null;
+      if (!picked || pending.controller.signal.aborted) return null;
       return startVideoExport({ ticket: picked.ticket, payload });
     });
     if (!report) return;
     acceptJob(/** @type {VideoStatus} */ (report));
   } catch (error) {
+    if (pending.controller.signal.aborted) return;
     submissionError = error;
     toast.error(() => t('videoExportFailed', { detail: videoErrorText(error) }));
   } finally {
+    if (preparation === pending) preparation = null;
     busy = false;
     refreshStatus();
   }
 }
 
 async function cancel() {
+  if (preparation) {
+    await cancelReportPreparation();
+    refreshStatus();
+    return;
+  }
   if (!activeJob() || !job) return;
   const id = job.id;
   const revision = ++jobRevision;

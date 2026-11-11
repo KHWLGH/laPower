@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! Probe authenticated AdcQueue streaming for one POWER-Z device.
 //!
 //! Usage: cargo run -p km003c --example probe_queue -- <bus-id> <address>

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Cold-start / first-frame instrumentation.
 //!
 //! t0 is the first statement of `main()`, captured in a `OnceLock`, and bridged to the webview

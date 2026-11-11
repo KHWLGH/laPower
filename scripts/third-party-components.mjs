@@ -1,8 +1,12 @@
-/** Generate the offline runtime component list. Ordinary frontend builds only copy its output. */
+/*! SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+/** Generate the offline component and legal catalogs. This is a conservative license coverage set, not a release unit graph. */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { declaredLicense, generateLegalCatalog } from './license-materials.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTPUT = resolve(ROOT, 'src/third-party-components.json');
@@ -34,34 +38,40 @@ const MAIN = {
   thiserror: 'componentErrors',
 };
 
-/** Follow only normal dependency edges from the application, including local protocol libraries. */
-export function runtimePackages(metadata) {
-  const packages = new Map(metadata.packages.map((item) => [item.id, item]));
-  const nodes = new Map(metadata.resolve.nodes.map((item) => [item.id, item]));
+/**
+ * Cargo tree applies target and edge-kind selection together. Metadata dep_kinds alone can merge a
+ * target-specific normal edge with an active dev edge and incorrectly include the package.
+ * Cargo's feature-unified tree remains a conservative set, not the exact release compilation graph.
+ */
+export function runtimePackages(metadata, tree) {
+  if (typeof tree !== 'string') throw new Error('Runtime selection requires target-filtered cargo tree output');
   const workspace = new Set(metadata.workspace_members);
   const application = metadata.packages.find((item) => item.name === 'lapower' && workspace.has(item.id));
   if (!application) throw new Error('Cannot find the laPower application in Cargo metadata');
-  const visited = new Set();
-  const runtime = [];
-  function visit(id) {
-    if (visited.has(id)) return;
-    visited.add(id);
-    const pkg = packages.get(id);
-    if (!pkg) throw new Error(`Missing Cargo metadata for ${id}`);
-    if (pkg.targets.some((target) => target.kind.includes('proc-macro'))) return;
-    if (!workspace.has(id)) {
-      if (!pkg.license) throw new Error(`Missing declared license: ${pkg.name} ${pkg.version}`);
-      runtime.push({ name: pkg.name, version: pkg.version, license: pkg.license });
+  const nodes = new Map(metadata.resolve.nodes.map((item) => [item.id, item]));
+  const selected = new Map();
+  for (const line of tree.split(/\r?\n/)) {
+    if (!line) continue;
+    const match = line.match(/^([^\s]+) v([^\s]+)(?: \(([^)]+)\))?(?: \(\*\))?$/);
+    if (!match) throw new Error(`Unrecognized cargo tree package: ${line}`);
+    const [, name, version, qualifier] = match;
+    let candidates = metadata.packages.filter((item) => item.name === name && item.version === version);
+    if (candidates.length > 1 && qualifier && qualifier !== '*') {
+      candidates = candidates.filter((item) =>
+        item.source
+          ? item.source.includes(qualifier) || qualifier.includes(item.source.replace(/^(?:git|registry)\+/, ''))
+          : resolve(dirname(item.manifest_path)) === resolve(qualifier),
+      );
     }
-    for (const dependency of nodes.get(id)?.deps ?? []) {
-      if (dependency.dep_kinds.some((kind) => kind.kind === null)) visit(dependency.pkg);
-    }
+    if (candidates.length !== 1) throw new Error(`Ambiguous or missing Cargo source identity: ${line}`);
+    const pkg = candidates[0];
+    if (workspace.has(pkg.id) || pkg.targets.some((target) => target.kind.includes('proc-macro'))) continue;
+    selected.set(pkg.id, { ...pkg, license: declaredLicense(pkg), runtimeFeatures: nodes.get(pkg.id)?.features ?? [] });
   }
-  visit(application.id);
-  return runtime;
+  return [...selected.values()];
 }
 
-export function generateManifest(metadatas, uplotSource, storeSource, githubSource) {
+export function generateManifest(metadatas, uplotSource, storeSource, githubSource, trees) {
   const version = uplotSource.match(/uPlot \(v([\d.]+)\)/)?.[1];
   if (!version) throw new Error('The bundled uPlot header must declare its version');
   const storeVersion = storeSource.match(/@tauri-apps\/plugin-store v([\d.]+)/)?.[1];
@@ -80,10 +90,13 @@ export function generateManifest(metadatas, uplotSource, storeSource, githubSour
     },
   ];
   const unique = new Map();
-  for (const metadata of metadatas) {
-    for (const pkg of runtimePackages(metadata)) {
+  for (const [index, metadata] of metadatas.entries()) {
+    for (const pkg of runtimePackages(metadata, trees[index])) {
       const key = `${pkg.name}@${pkg.version}`;
-      if (unique.has(key) && unique.get(key).license !== pkg.license) throw new Error(`Conflicting license: ${key}`);
+      const previous = unique.get(key);
+      if (previous && (previous.license !== pkg.license || previous.source !== pkg.source)) {
+        throw new Error(`Conflicting license or Cargo source cannot fit the public component schema: ${key}`);
+      }
       unique.set(key, pkg);
     }
   }
@@ -113,22 +126,52 @@ export function generateManifest(metadatas, uplotSource, storeSource, githubSour
     schemaVersion: 1,
     targets: TARGETS,
     main,
-    components: [...runtime, ...vendored.map(({ purpose: _purpose, ...item }) => item)].sort(compare),
+    components: [
+      ...runtime.map(({ name, version, license }) => ({ name, version, license })),
+      ...vendored.map(({ purpose: _purpose, ...item }) => item),
+    ].sort(compare),
   };
 }
 
 export function main(args = process.argv.slice(2)) {
   if (args.some((arg) => arg !== '--check'))
     throw new Error('Usage: node scripts/third-party-components.mjs [--check]');
+  const options = {
+    cwd: ROOT,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'inherit'],
+  };
+  const trees = [];
   const metadata = TARGETS.map((target) => {
-    console.log(`Reading runtime dependencies: ${target}`);
+    console.log(`Reading offline conservative runtime set: ${target}`);
+    trees.push(
+      execFileSync(
+        'cargo',
+        [
+          'tree',
+          '-p',
+          'lapower',
+          '--locked',
+          '--offline',
+          '--target',
+          target,
+          '--edges',
+          'normal,no-proc-macro',
+          '--prefix',
+          'none',
+          '--format',
+          '{p}',
+        ],
+        options,
+      ),
+    );
     return JSON.parse(
-      execFileSync('cargo', ['metadata', '--locked', '--format-version', '1', '--filter-platform', target], {
-        cwd: ROOT,
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'inherit'],
-      }),
+      execFileSync(
+        'cargo',
+        ['metadata', '--locked', '--offline', '--format-version', '1', '--filter-platform', target],
+        options,
+      ),
     );
   });
   const manifest = generateManifest(
@@ -136,27 +179,54 @@ export function main(args = process.argv.slice(2)) {
     readFileSync(resolve(ROOT, 'src/vendor/uPlot.iife.min.js'), 'utf8'),
     readFileSync(resolve(ROOT, 'src/vendor/plugin-store.js'), 'utf8'),
     readFileSync(resolve(ROOT, 'src/assets/github-mark.svg'), 'utf8'),
+    trees,
   );
+  const packages = new Map();
+  for (const [index, item] of metadata.entries()) {
+    for (const pkg of runtimePackages(item, trees[index])) {
+      const previous = packages.get(pkg.id);
+      packages.set(pkg.id, {
+        ...pkg,
+        runtimeFeatures: [...new Set([...(previous?.runtimeFeatures ?? []), ...pkg.runtimeFeatures])].sort(),
+      });
+    }
+  }
+  const materials = JSON.parse(readFileSync(resolve(ROOT, 'licenses/materials.json'), 'utf8'));
+  const catalog = generateLegalCatalog(ROOT, manifest, [...packages.values()], materials);
+  for (const entry of materials.packages.filter((item) => item.review)) {
+    console.log(`REVIEW ${entry.name} ${entry.version}: ${entry.review.kind}: ${entry.review.reason}`);
+  }
+  // Complete collection and validation before touching either generated output.
   const output = `${JSON.stringify(manifest, null, 2)}\n`;
+  const legalOutput = `${JSON.stringify(catalog, null, 2)}\n`;
+  const legalPath = resolve(ROOT, 'src/legal-notices.json');
   if (args.includes('--check')) {
     if (JSON.stringify(JSON.parse(readFileSync(OUTPUT, 'utf8'))) !== JSON.stringify(manifest)) {
       throw new Error('Runtime component list is stale. Run npm run components:generate and commit the result.');
     }
-    console.log(`PASS: ${manifest.components.length} runtime components match all four release targets`);
+    if (JSON.stringify(JSON.parse(readFileSync(legalPath, 'utf8'))) !== JSON.stringify(catalog)) {
+      throw new Error('Legal notices are stale. Run npm run components:generate and commit both catalogs.');
+    }
+    console.log(
+      `PASS: ${manifest.components.length} components and reviewed legal material match the conservative target set`,
+    );
   } else {
     writeFileSync(OUTPUT, output);
+    writeFileSync(legalPath, legalOutput);
     // JSON.stringify always breaks arrays, Biome keeps short ones on one line. Formatting the
     // file here means a regeneration cannot leave the repository failing npm run lint.
     try {
       execFileSync(
         process.execPath,
-        [resolve(ROOT, 'node_modules/@biomejs/biome/bin/biome'), 'format', '--write', OUTPUT],
+        [resolve(ROOT, 'node_modules/@biomejs/biome/bin/biome'), 'format', '--write', OUTPUT, legalPath],
         { stdio: 'ignore' },
       );
     } catch {
       // Without a local formatter the manifest is still valid; only its layout differs.
     }
-    console.log(`Generated ${manifest.components.length} runtime components`);
+    console.log(
+      `Generated ${manifest.components.length} components and ${Object.keys(catalog.texts).length} legal texts`,
+    );
   }
 }
 

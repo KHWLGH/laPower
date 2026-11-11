@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { errorText, t } from './i18n.js';
 /**
  * @file 记录实时写入临时恢复文件：每份单次记录（清空或导入之间的全部数据）对应一个缓存文件。

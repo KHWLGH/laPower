@@ -1,7 +1,13 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addMarker, markersOf } from '../src/markers.js';
+import { calculateEnergy } from '../src/measurement.js';
 import { F64Col } from '../src/state.js';
 import {
   defaultVideoExportOptions,
@@ -11,7 +17,7 @@ import {
   videoFrameCount,
 } from '../src/video-export-options.js';
 import { VIDEO_PALETTE_DARK, VIDEO_PALETTE_LIGHT, videoPalette } from '../src/video-palette.js';
-import { buildVideoPayload, projectVideo } from '../src/video-projection.js';
+import { buildVideoPayload, projectVideo, projectVideoAsync } from '../src/video-projection.js';
 
 /** Build one immutable recording; `rows` is [seconds, voltage, current, power, temp]. */
 function columns(rows, options = {}) {
@@ -392,4 +398,100 @@ test('payload keys match the IPC contract the backend deserialises', () => {
   assert.deepEqual(Object.keys(payload.overview).sort(), ['bucketMs', 'points']);
   assert.equal(payload.frames.t.length, 5);
   assert.equal(payload.overview.points.length, projection.overview.length);
+});
+
+test('cooperative report matches synchronous output with gaps, mixed rates, segments and missing values', async () => {
+  const cols = columns(record(12001, 0.01), { currentMagnitudes: true });
+  for (let i = 0; i < cols.x.length; i++) {
+    cols.sampleIntervals.setAt(i, i < 4096 ? 10 : 1000);
+    cols.recordingSegments.setAt(i, i < 7000 ? 1 : 2);
+    if (i % 19 === 0) cols.temp.setAt(i, Number.NaN);
+    if (i % 23 === 0) cols.power.setAt(i, Number.NaN);
+  }
+  cols.timestamps.setAt(4096, cols.timestamps.valueAt(4095) + 3000);
+  const input = {
+    columns: snapshots(cols),
+    length: cols.x.length,
+    frameCount: 2,
+    binCount: 1,
+    markers: Array.from({ length: 9000 }, (_, i) => ({ index: 8999 - i, label: String(i) })),
+    markerLimit: Number.POSITIVE_INFINITY,
+  };
+  const expected = projectVideo(input);
+  const energy = calculateEnergy(
+    input.columns.timestamps,
+    input.columns.current,
+    input.columns.power,
+    input.columns.recordingSegments,
+    null,
+    input.columns.sampleIntervals,
+    input.columns.currentMagnitudes,
+  );
+  assert.equal(expected.summary.energyWh, energy.wh);
+  assert.equal(expected.summary.capacityMah, energy.mah);
+  let yields = 0;
+  let reads = 0;
+  let lastReads = 0;
+  const x = input.columns.x;
+  input.columns.x = {
+    valueAt(i) {
+      reads++;
+      return x.valueAt(i);
+    },
+  };
+  const actual = await projectVideoAsync(input, {
+    sliceMs: 0,
+    yieldTask: async () => {
+      yields++;
+      assert.ok(reads - lastReads <= 8200, 'even a single bucket or frame cursor is split into bounded steps');
+      lastReads = reads;
+    },
+  });
+  assert.deepEqual(actual, expected);
+  assert.ok(yields > 20);
+});
+
+test('async report uses fixed column and marker snapshots while the live recording is replaced', async () => {
+  const cols = columns(record(8200, 0.01));
+  const markers = [{ index: 12, label: 'captured' }];
+  const input = {
+    columns: snapshots(cols),
+    length: cols.x.length,
+    frameCount: 11,
+    markers: markers.map((marker) => ({ ...marker })),
+  };
+  const expected = projectVideo(input);
+  let changed = false;
+  const actual = await projectVideoAsync(input, {
+    yieldTask: async () => {
+      if (changed) return;
+      changed = true;
+      for (const col of Object.values(cols)) col.push(999);
+      cols.voltage.setAt(12, 999);
+      markers[0].label = 'edited';
+      for (const key of Object.keys(cols)) cols[key] = new F64Col();
+    },
+  });
+  assert.deepEqual(actual, expected);
+});
+
+test('report cancellation abandons preparation before publishing a payload', async () => {
+  const cols = columns(record(20000));
+  const input = { columns: snapshots(cols), length: cols.x.length, frameCount: 2, binCount: 1 };
+  const controller = new AbortController();
+  let yields = 0;
+  await assert.rejects(
+    projectVideoAsync(input, {
+      signal: controller.signal,
+      sliceMs: 0,
+      yieldTask: async () => {
+        if (++yields === 3) controller.abort();
+      },
+    }),
+    { name: 'AbortError' },
+  );
+  assert.equal(yields, 3);
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await assert.rejects(projectVideoAsync(input, { signal: cancelled.signal }), { name: 'AbortError' });
 });

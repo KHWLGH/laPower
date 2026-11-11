@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Bounded CSV formatting bridge. The main thread copies one range, then waits for the Worker. */
 
 import { formatCsvRange } from './csv-codec.js';

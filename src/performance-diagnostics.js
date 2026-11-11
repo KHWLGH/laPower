@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * Bounded, read-only performance telemetry for real-device acceptance runs.
  * The acquisition path only appends small numeric records at batch boundaries;

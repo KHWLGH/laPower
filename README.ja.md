@@ -10,7 +10,7 @@
 
 [![Release](https://img.shields.io/github/v/release/KHWLGH/laPower?style=flat-square&label=release&color=blue)](https://github.com/KHWLGH/laPower/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/KHWLGH/laPower/ci.yml?style=flat-square&label=CI)](https://github.com/KHWLGH/laPower/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/KHWLGH/laPower/total?style=flat-square)](https://github.com/KHWLGH/laPower/releases)
 [![Last commit](https://img.shields.io/github/last-commit/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/commits/main)
@@ -167,16 +167,20 @@ Linux パッケージはデバイス権限を自動設定しません。接続�
 
 ## 📄 ライセンス
 
-コンポーネントごとにライセンスを分けています。
+Copyright (C) 2026 KHWLGH
 
-| コンポーネント | ライセンス |
+この著作権表示は KHWLGH 自身の貢献のみを対象とします。他の著作者の権利は保持され、Git の著作者情報から著作権譲渡を推定しません。まとめた表示と具体的なパスの範囲は [`COPYRIGHT`](COPYRIGHT) を参照してください。
+
+| 自作の貢献の範囲（第三者の素材を除く） | ライセンス |
 | --- | --- |
-| アプリ本体（`src-tauri`、`src`） | [GPL-3.0-only](LICENSE) |
-| プロトコルライブラリ `crates/usbpd-parser`、`crates/witrn-hid`、`crates/km003c` | LGPL-3.0-or-later |
+| アプリ `src/`、`src-tauri/`、`scripts/`、`tools/`、`test/`、`bench/`、`temperature-example/`、`.github/`、プロジェクト文書・設定の自作部分 | [GPL-3.0-only](LICENSE) |
+| `crates/` 内のすべてのライブラリ、テスト、サンプル、自作の文書・設定 | [LGPL-3.0-or-later](LICENSE.LGPL-3.0) |
 
-プロトコル crate は他プロジェクトで再利用しやすい LGPL を採用しています。ルートの [`LICENSE`](LICENSE) は GPLv3 全文です。LGPL-3.0 全文は [GNU 公式サイト](https://www.gnu.org/licenses/lgpl-3.0)を参照してください。
+自作のアプリアイコンとサイズ派生物、スクリーンショットの自作部分も上記の範囲に含まれます。生成物は入力のライセンスを保持し、第三者の素材、ライセンス文書、元データが本プロジェクトの創作物になるわけではありません。`usbpd-parser` と `witrn-hid` は、それぞれ JohnScotttt の Python パッケージ usbpdparser 1.1.6 と witrnhid 1.1.5 の移植です。両原版の表示は `Copyright (c) 2025 JohnScotttt`、LGPL-3.0-or-later です。出典と未解決の証拠不足は [`COPYRIGHT`](COPYRIGHT) に記載しています。
 
-主なサードパーティーコンポーネントは uPlot、Fluent System Icons、GitHub Octicons、Tauri とそのプラグインなどです。バージョン・用途・ライセンスは `設定 → このアプリについて → サードパーティーコンポーネント` で確認でき、`すべての実行時コンポーネント` に完全な一覧をオフラインで表示します。
+全文はローカルの [`LICENSE`](LICENSE)（GPLv3）と [`LICENSE.LGPL-3.0`](LICENSE.LGPL-3.0)（LGPLv3 原文全文、GPLv3 と併読）で確認できます。ライブラリの「以降のバージョン」の選択肢は適用範囲の宣言によるものです。ソフトウェアは無保証で提供され、変更・再頒布には適用ライセンスの条件が適用されます。
+
+`設定 → このアプリについて` でプロジェクトの著作権、GPL/LGPL 全文、第三者のライセンス資料をオフラインで読めます。`サードパーティーコンポーネント` には主要項目と `すべての実行時コンポーネント` の一覧があり、各項目からライセンスを開けます。uPlot、Fluent System Icons、GitHub Octicons、Tauri とそのプラグインなどは、それぞれの著作権とライセンスを保持します。
 
 ## 🔗 関連リンク
 

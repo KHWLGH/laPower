@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! VideoToolbox hardware encoding for macOS.
 //!
 //! VideoToolbox is the platform H.264/HEVC encoder and always runs on the media engine when the

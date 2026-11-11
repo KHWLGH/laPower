@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 JohnScotttt
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// KHWLGH copyright applies to local modifications; see COPYRIGHT.
 //! Bit-string, slicing and number-formatting primitives.
 //!
 //! The parser represents every field's `raw` as a string of `'0'`/`'1'` characters,

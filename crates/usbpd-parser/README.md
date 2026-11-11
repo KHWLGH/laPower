@@ -46,5 +46,12 @@ $ cargo run --example decode -- A1612C91010E4121A4C1
 See the [workspace README](../../README.md) for the full picture, including how this
 differs from the Python original.
 
-Original Python implementation by [JohnScotttt](https://github.com/JohnScotttt).
-LGPL-3.0-or-later.
+## Copyright and license
+
+Copyright (C) 2026 KHWLGH
+
+This notice covers only KHWLGH's own contributions to this library, its tests, examples and documentation, under LGPL-3.0-or-later. Other authors retain their rights; Git authorship does not establish an assignment.
+
+The original Python package [usbpdparser 1.1.6](https://github.com/JohnScotttt/USB_PD_Parser_API_Py) declares `Copyright (c) 2025 JohnScotttt` and LGPL-3.0-or-later. The Rust sources came through the retired WITRN-API-RS project (last recorded import `30c4bdb`); that object and a public repository copy are unavailable, so its complete notice history remains unverified. The vendor ID table cites upstream `tools/vendor_ids_dict.py`; no separate table notice or independent source-data license has been established. These gaps do not establish KHWLGH ownership or an additional license grant.
+
+See the root [`COPYRIGHT`](../../COPYRIGHT) for scope and source evidence. Read the local full [`LGPLv3`](../../LICENSE.LGPL-3.0) together with [`GPLv3`](../../LICENSE); the later-version option comes from the library declaration. The software comes without warranty and may be modified and redistributed under the applicable license conditions.

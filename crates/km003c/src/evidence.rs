@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! Bounded fresh measurement evidence. The caller's existing Bulk reader is the sole producer.
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};

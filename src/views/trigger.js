@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 协议控制工作区（POWER-Z KM003C / KM002C）：PDM 会话、电压触发、PDO 列表与返回日志。
  *
@@ -35,6 +40,7 @@ import {
   trimTriggerHistory,
   validatePdData,
 } from '../km003c-model.js';
+import { openProtocolReport } from '../protocol-report-ui.js';
 import { debouncedSaveSettings } from '../settings.js';
 import { state } from '../state.js';
 import { toast } from '../ui/toast.js';
@@ -67,6 +73,8 @@ let pdos = [];
 let detection = null;
 /** @type {string|null} */
 let detectionHistoryId = null;
+/** @type {import('../protocol-report-model.js').DetectionMetadata|null} */
+let detectionMetadata = null;
 let scanning = false;
 /** @type {ReturnType<typeof setTimeout>|null} */
 let watchdog = null;
@@ -411,6 +419,8 @@ function renderPdos() {
 }
 
 function renderDetection() {
+  const exportButton = /** @type {HTMLButtonElement|null} */ (el('btn-km-export-report'));
+  if (exportButton) exportButton.disabled = busy || scanning || !detection?.completion || !detection?.results.length;
   const summary = el('km-detection-summary');
   const box = el('km-detection-results');
   if (!summary || !box) return;
@@ -857,6 +867,11 @@ async function run(cmd) {
     setTriggerMode('detection');
     detection = null;
     detectionHistoryId = reqId;
+    detectionMetadata = {
+      device: state.connectedDevice?.display_name ?? state.connectedDevice?.model_name ?? t('unknown'),
+      startedAt,
+      full: cmd.plus === true,
+    };
     pdos = [];
     renderPdos();
   }
@@ -890,7 +905,9 @@ async function run(cmd) {
       return;
     }
     applyOutcome(outcome);
-    if (scanning && !outcome.detection && detection) detection.completion = outcome.ok ? 'partial' : 'failed';
+    if (scanning && !outcome.detection && detection) {
+      detection.completion = timedOut ? 'timeout' : cancelRequested ? 'cancelled' : outcome.ok ? 'partial' : 'failed';
+    }
   } catch (error) {
     if (pendingReqId !== reqId) return;
     if (generation !== deviceStream.generation) {
@@ -898,7 +915,7 @@ async function run(cmd) {
       return;
     }
     completeHistoryEntry(cancelRequested && !timedOut ? 'cancelled' : 'failure', errorText(error));
-    if (scanning && detection) detection.completion = 'failed';
+    if (scanning && detection) detection.completion = timedOut ? 'timeout' : cancelRequested ? 'cancelled' : 'failed';
   }
   finish();
 }
@@ -1075,6 +1092,11 @@ export function initTriggerView() {
   click('btn-km-read-pdo', () => void run({ type: 'pd_pdo' }));
   click('btn-km-scan', () => void run({ type: 'list', plus: false }));
   click('btn-km-scan-full', () => void run({ type: 'list', plus: true }));
+  click('btn-km-export-report', () => {
+    if (!busy && !scanning && detection?.completion && detection.results.length && detectionMetadata) {
+      openProtocolReport(detection, detectionMetadata);
+    }
+  });
   click('btn-km-reset', () => void run({ type: 'reset' }));
   click('btn-km-trigger', triggerFromForm);
   click('btn-km-qc3-up', () => void run({ type: 'qc3_adjust', steps: 1 }));

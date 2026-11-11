@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright and contribution scope: see COPYRIGHT.
 //! USB-IF vendor-ID lookup, used by the renderer to name a `VID` field's owner.
 
 #[cfg(feature = "vendor-ids")]

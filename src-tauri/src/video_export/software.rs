@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Bundled H.264 encoder for hosts without a platform video encoder.
 //!
 //! Linux uses this path at run time; the Windows test build compiles it so the same code is type

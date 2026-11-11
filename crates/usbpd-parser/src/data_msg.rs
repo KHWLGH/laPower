@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 JohnScotttt
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// KHWLGH copyright applies to local modifications; see COPYRIGHT.
 //! Data Message bodies — the `Data Objects` block of a non-extended PD message.
 
 use crate::bits::{bits, bsl, flag, hex_rev_upper, num, sl, Order};

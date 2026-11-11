@@ -1,0 +1,850 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "name": "alloc-stdlib",
+      "version": "0.2.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-alloc-no-stdlib/ae42d22078b98549e987d2f03d12df7b984fde47/LICENSE",
+          "origin": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/ae42d22078b98549e987d2f03d12df7b984fde47/LICENSE",
+          "revision": "ae42d22078b98549e987d2f03d12df7b984fde47",
+          "upstreamPath": "LICENSE",
+          "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae"
+        }
+      ]
+    },
+    {
+      "name": "block",
+      "version": "0.1.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-block/47178790cfc9d4a8b092051d8b413b78bd31254a/Cargo.toml",
+          "origin": "https://raw.githubusercontent.com/SSheldon/rust-block/47178790cfc9d4a8b092051d8b413b78bd31254a/Cargo.toml",
+          "revision": "47178790cfc9d4a8b092051d8b413b78bd31254a",
+          "upstreamPath": "Cargo.toml",
+          "sha256": "24df2f33b48c9e756a4f864f882c1ab07a159b6c2b790f45af2e8162499b6719"
+        }
+      ],
+      "review": {
+        "kind": "upstream-missing-license-text",
+        "reason": "Version 0.1.6 and current upstream contain only license = MIT in Cargo.toml; no independent license or copyright notice exists in the package. Upstream PR14 proposing a license remains unmerged and is not treated as a grant.",
+        "evidence": [
+          "https://github.com/SSheldon/rust-block/tree/47178790cfc9d4a8b092051d8b413b78bd31254a",
+          "https://github.com/SSheldon/rust-block/pull/14"
+        ]
+      }
+    },
+    {
+      "name": "block2",
+      "version": "0.6.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+          "revision": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "brotli-decompressor",
+      "version": "5.0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-brotli-decompressor/b56177b8eb3d2440536281397e5ffe06eedf1a5c/context-notice.txt",
+          "origin": "https://raw.githubusercontent.com/dropbox/rust-brotli-decompressor/b56177b8eb3d2440536281397e5ffe06eedf1a5c/src/context.rs",
+          "revision": "b56177b8eb3d2440536281397e5ffe06eedf1a5c",
+          "upstreamPath": "src/context.rs lines 5-9 (complete copyright/license notice)",
+          "sha256": "5395155e88c8736f4ea46123bf481894fae46665e740e73571055e36bb95da94"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "MIT terms explicitly referenced by context.rs, retaining Google copyright in adjacent notice.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dispatch2",
+      "version": "0.3.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "revision": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        },
+        {
+          "path": "licenses/authorities/Apache-2.0.txt",
+          "origin": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "revision": "snapshot-sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstreamPath": "LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; appendix placeholders remain unfilled."
+        },
+        {
+          "path": "licenses/authorities/Zlib.txt",
+          "origin": "https://zlib.net/zlib_license.html",
+          "revision": "snapshot-sha256:cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd",
+          "upstreamPath": "PRE license block",
+          "sha256": "ef6c0da271fdc74603264907c463e4c979db7a93256ee5e1ba54ad5bc46b7e2a",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; zlib authors are not represented as objc2 authors.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/Zlib.html",
+            "sha256": "cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "dlopen2",
+      "version": "0.8.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE",
+          "origin": "https://raw.githubusercontent.com/OpenByteDev/dlopen2/cc80e4a0a90d499b677fdf7743699b4b3a43a989/LICENSE",
+          "revision": "cc80e4a0a90d499b677fdf7743699b4b3a43a989",
+          "upstreamPath": "LICENSE",
+          "sha256": "39fa265207450e77c62e90c5594a06c085b655d8374c7ced4bf7894b6bd95dd2"
+        }
+      ]
+    },
+    {
+      "name": "dunce",
+      "version": "1.0.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/dunce/1ee29a83526c9f4c3618e1335f0454c878a54dcf/Cargo.toml",
+          "origin": "https://gitlab.com/kornelski/dunce/-/raw/1ee29a83526c9f4c3618e1335f0454c878a54dcf/Cargo.toml",
+          "revision": "1ee29a83526c9f4c3618e1335f0454c878a54dcf",
+          "upstreamPath": "Cargo.toml",
+          "sha256": "14e322002ad961edfdd3494b2094b379de39ee9efbc196dbafc1e0606bdb0e36"
+        }
+      ],
+      "review": {
+        "kind": "selected-upstream-alternative",
+        "selectedLicense": "CC0-1.0",
+        "reason": "Upstream declares CC0-1.0 OR MIT-0 OR Apache-2.0, but the fixed 1.0.5 source tree provides only the complete CC0 LICENSE. This catalog selects the supplied CC0 alternative; MIT-0 and Apache alternatives have no separate supplied text. Original expression remains unchanged.",
+        "evidence": ["https://gitlab.com/kornelski/dunce/-/tree/1ee29a83526c9f4c3618e1335f0454c878a54dcf"]
+      }
+    },
+    {
+      "name": "malloc_buf",
+      "version": "0.0.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/malloc_buf/d9a3e539642bd90e07df458d226b19cdfa606863/LICENSE",
+          "origin": "https://raw.githubusercontent.com/SSheldon/malloc_buf/d9a3e539642bd90e07df458d226b19cdfa606863/LICENSE",
+          "revision": "d9a3e539642bd90e07df458d226b19cdfa606863",
+          "upstreamPath": "LICENSE",
+          "sha256": "aced7b57e474a63edb5a724954222bf7659c01ceef0e648a03af799582991db7"
+        }
+      ],
+      "note": "Upstream added this genuine license in 2020 after the 0.0.6 release; tag a7811e5f4c6f9685dd57ad9bfe34e9bf6b0ba4f9 has no license file."
+    },
+    {
+      "name": "objc2",
+      "version": "0.6.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "revision": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "objc2-app-kit",
+      "version": "0.3.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        },
+        {
+          "path": "licenses/authorities/Apache-2.0.txt",
+          "origin": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "revision": "snapshot-sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstreamPath": "LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; appendix placeholders remain unfilled."
+        },
+        {
+          "path": "licenses/authorities/Zlib.txt",
+          "origin": "https://zlib.net/zlib_license.html",
+          "revision": "snapshot-sha256:cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd",
+          "upstreamPath": "PRE license block",
+          "sha256": "ef6c0da271fdc74603264907c463e4c979db7a93256ee5e1ba54ad5bc46b7e2a",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; zlib authors are not represented as objc2 authors.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/Zlib.html",
+            "sha256": "cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "objc2-core-foundation",
+      "version": "0.3.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        },
+        {
+          "path": "licenses/authorities/Apache-2.0.txt",
+          "origin": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "revision": "snapshot-sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstreamPath": "LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; appendix placeholders remain unfilled."
+        },
+        {
+          "path": "licenses/authorities/Zlib.txt",
+          "origin": "https://zlib.net/zlib_license.html",
+          "revision": "snapshot-sha256:cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd",
+          "upstreamPath": "PRE license block",
+          "sha256": "ef6c0da271fdc74603264907c463e4c979db7a93256ee5e1ba54ad5bc46b7e2a",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; zlib authors are not represented as objc2 authors.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/Zlib.html",
+            "sha256": "cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "objc2-encode",
+      "version": "4.1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "revision": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "objc2-exception-helper",
+      "version": "0.1.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "revision": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        },
+        {
+          "path": "licenses/authorities/Apache-2.0.txt",
+          "origin": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "revision": "snapshot-sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstreamPath": "LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; appendix placeholders remain unfilled."
+        },
+        {
+          "path": "licenses/authorities/Zlib.txt",
+          "origin": "https://zlib.net/zlib_license.html",
+          "revision": "snapshot-sha256:cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd",
+          "upstreamPath": "PRE license block",
+          "sha256": "ef6c0da271fdc74603264907c463e4c979db7a93256ee5e1ba54ad5bc46b7e2a",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; zlib authors are not represented as objc2 authors.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/Zlib.html",
+            "sha256": "cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "objc2-foundation",
+      "version": "0.3.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "objc2-web-kit",
+      "version": "0.3.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "origin": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "revision": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "upstreamPath": "LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+        },
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; copyright placeholders are the authority original, left unfilled. Upstream supplies no independent copyright line.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        },
+        {
+          "path": "licenses/authorities/Apache-2.0.txt",
+          "origin": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "revision": "snapshot-sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstreamPath": "LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; appendix placeholders remain unfilled."
+        },
+        {
+          "path": "licenses/authorities/Zlib.txt",
+          "origin": "https://zlib.net/zlib_license.html",
+          "revision": "snapshot-sha256:cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd",
+          "upstreamPath": "PRE license block",
+          "sha256": "ef6c0da271fdc74603264907c463e4c979db7a93256ee5e1ba54ad5bc46b7e2a",
+          "note": "Terms explicitly referenced by objc2 LICENSE.md; zlib authors are not represented as objc2 authors.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/Zlib.html",
+            "sha256": "cf933153e9a60533c56fd1dcd555b15bff9a81c3468b5df1dc99aa7866c8b5fd"
+          }
+        }
+      ],
+      "note": "Original upstream licensing declaration, including Apple SDK caveat, plus exactly referenced authoritative terms. No independent upstream copyright line supplied."
+    },
+    {
+      "name": "openh264",
+      "version": "0.9.9",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/openh264-rs/68f56e8443f1d619a9d96af79dd7f836442b6d76/README.md",
+          "origin": "https://raw.githubusercontent.com/ralfbiedert/openh264-rs/68f56e8443f1d619a9d96af79dd7f836442b6d76/README.md",
+          "revision": "68f56e8443f1d619a9d96af79dd7f836442b6d76",
+          "upstreamPath": "README.md",
+          "sha256": "501c89aab6f09b9b12a9cd653dde2894a3a848db5f8cf534dbe03b502565aa54"
+        },
+        {
+          "path": "licenses/authorities/BSD-2-Clause.txt",
+          "origin": "https://opensource.org/licenses/BSD-2-Clause",
+          "revision": "snapshot-sha256:ab99c82915009719b137c99c87f7cfe7ec2699976cad29f152ba34564ed4ffab",
+          "upstreamPath": "LicenseText element",
+          "sha256": "0a745cc7b59fc32affb41117c20e1ddcca591c8fe9eb2a5b0852d9a48fc6f91b",
+          "note": "Terms explicitly referenced by OpenH264 Rust README; no copyright placeholders are filled.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/BSD-2-Clause.html",
+            "sha256": "ab99c82915009719b137c99c87f7cfe7ec2699976cad29f152ba34564ed4ffab"
+          }
+        }
+      ],
+      "note": "README expressly licenses wrapper code as BSD-2, Ralf Biedert; Cisco source license is separate. tests/reference/BINARY_LICENSE is excluded because source feature compiles upstream source."
+    },
+    {
+      "name": "openh264-sys2",
+      "version": "0.9.9",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/openh264-rs/68f56e8443f1d619a9d96af79dd7f836442b6d76/README.md",
+          "origin": "https://raw.githubusercontent.com/ralfbiedert/openh264-rs/68f56e8443f1d619a9d96af79dd7f836442b6d76/README.md",
+          "revision": "68f56e8443f1d619a9d96af79dd7f836442b6d76",
+          "upstreamPath": "README.md",
+          "sha256": "501c89aab6f09b9b12a9cd653dde2894a3a848db5f8cf534dbe03b502565aa54"
+        },
+        {
+          "path": "licenses/authorities/BSD-2-Clause.txt",
+          "origin": "https://opensource.org/licenses/BSD-2-Clause",
+          "revision": "snapshot-sha256:ab99c82915009719b137c99c87f7cfe7ec2699976cad29f152ba34564ed4ffab",
+          "upstreamPath": "LicenseText element",
+          "sha256": "0a745cc7b59fc32affb41117c20e1ddcca591c8fe9eb2a5b0852d9a48fc6f91b",
+          "note": "Terms explicitly referenced by OpenH264 Rust README; no copyright placeholders are filled.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/BSD-2-Clause.html",
+            "sha256": "ab99c82915009719b137c99c87f7cfe7ec2699976cad29f152ba34564ed4ffab"
+          }
+        }
+      ],
+      "note": "README expressly licenses wrapper code as BSD-2, Ralf Biedert; Cisco source license is separate. tests/reference/BINARY_LICENSE is excluded because source feature compiles upstream source."
+    },
+    {
+      "name": "serialport",
+      "version": "4.10.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/authorities/MPL-2.0.txt",
+          "origin": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+          "revision": "snapshot-sha256:3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+          "upstreamPath": "MPL/2.0/index.txt",
+          "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+          "note": "Full terms referenced by serialport LICENSE.txt."
+        }
+      ]
+    },
+    {
+      "name": "siphasher",
+      "version": "1.0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/authorities/MIT.txt",
+          "origin": "https://opensource.org/license/MIT",
+          "revision": "snapshot-sha256:61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf",
+          "upstreamPath": "separator + LicenseText paragraphs",
+          "sha256": "21785883212d06d2c262b7e9f73f92ae7a03a7f2fe86809d7c7ad9bd6961d265",
+          "note": "MIT terms explicitly referenced by upstream COPYING.",
+          "sourceSnapshot": {
+            "path": "licenses/authorities/sources/MIT.html",
+            "sha256": "61b2c711d6aff8c02dc12123e1137ff9d04e5e9720f6d2a7a1a904406cd3bbdf"
+          }
+        },
+        {
+          "path": "licenses/authorities/Apache-2.0.txt",
+          "origin": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+          "revision": "snapshot-sha256:cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstreamPath": "LICENSE-2.0.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "note": "Apache terms explicitly referenced by upstream COPYING."
+        }
+      ]
+    },
+    {
+      "name": "unic-char-property",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "COPYRIGHT.md",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "unic-char-range",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "COPYRIGHT.md",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "unic-common",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "COPYRIGHT.md",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "unic-ucd-ident",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/COPYRIGHT.md",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/COPYRIGHT.md",
+          "revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+          "upstreamPath": "COPYRIGHT.md",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-MIT",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-MIT",
+          "revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+          "upstreamPath": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-APACHE",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-APACHE",
+          "revision": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+          "upstreamPath": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "unic-ucd-version",
+      "version": "0.9.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "COPYRIGHT.md",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        },
+        {
+          "path": "licenses/upstream/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "origin": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "revision": "5878605364af97a3358368a6eaef02104af2e016",
+          "upstreamPath": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
+      "name": "webview2-com",
+      "version": "0.38.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "origin": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "revision": "b74dc5e2b394044bea5191052868ce7a106c202c",
+          "upstreamPath": "LICENSE",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+        }
+      ]
+    },
+    {
+      "name": "webview2-com-sys",
+      "version": "0.38.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "documents": [
+        {
+          "path": "licenses/upstream/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "origin": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "revision": "b74dc5e2b394044bea5191052868ce7a106c202c",
+          "upstreamPath": "LICENSE",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73"
+        },
+        {
+          "path": "licenses/upstream/Microsoft.Web.WebView2/1.0.3650.58/LICENSE.txt",
+          "origin": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3650.58/microsoft.web.webview2.1.0.3650.58.nupkg",
+          "revision": "1.0.3650.58",
+          "upstreamPath": "LICENSE.txt",
+          "sha256": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55",
+          "archiveSha256": "911a472128c82ac8baa0c486c23342cc9dd6e7dc50d754e676726642ca065c60"
+        },
+        {
+          "path": "licenses/upstream/Microsoft.Web.WebView2/1.0.3650.58/NOTICE.txt",
+          "origin": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3650.58/microsoft.web.webview2.1.0.3650.58.nupkg",
+          "revision": "1.0.3650.58",
+          "upstreamPath": "NOTICE.txt",
+          "sha256": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90",
+          "archiveSha256": "911a472128c82ac8baa0c486c23342cc9dd6e7dc50d754e676726642ca065c60"
+        }
+      ],
+      "nativeEvidence": {
+        "sdkVersion": "1.0.3650.58",
+        "origin": "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.3650.58/microsoft.web.webview2.1.0.3650.58.nupkg",
+        "archiveSha256": "911a472128c82ac8baa0c486c23342cc9dd6e7dc50d754e676726642ca065c60",
+        "files": [
+          {
+            "path": "x64/WebView2Loader.dll",
+            "sha256": "8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c"
+          },
+          {
+            "path": "x64/WebView2Loader.dll.lib",
+            "sha256": "bfc8ccaaa056be95243a5b66a827e5849d2bb39676fca4dcc2053796d8e15c6d"
+          },
+          {
+            "path": "x64/WebView2LoaderStatic.lib",
+            "sha256": "0659b741bde6348d4c4a6ec4ceb9af50e3d0048ed9cd3c8659bccbb61fde55ee"
+          },
+          {
+            "path": "x86/WebView2Loader.dll",
+            "sha256": "44ab92c2246ebfb5f98aa5726626fb44beb61543f2ef1803338af9fd295e63f0"
+          },
+          {
+            "path": "x86/WebView2Loader.dll.lib",
+            "sha256": "a3ec0ee539d58fe72391f2e89cb814f96fab721c6d8d30953d152ea95dffad49"
+          },
+          {
+            "path": "x86/WebView2LoaderStatic.lib",
+            "sha256": "6649ce9ca24e7a5693ee54178f42e0378004ce537d82d15354e6c9adb467bc16"
+          },
+          {
+            "path": "arm64/WebView2Loader.dll",
+            "sha256": "df5816669f5123595c475d97929240d7d0e04f0bdc7dbe18af1dda42348b73a6"
+          },
+          {
+            "path": "arm64/WebView2Loader.dll.lib",
+            "sha256": "d70271daa44507865ca0696cd1c1ede5e58e694eec74cb2d06e17dbbe205e9a2"
+          },
+          {
+            "path": "arm64/WebView2LoaderStatic.lib",
+            "sha256": "506ffde430bee7f91f2ce1a078effb5289b7cec3b0c7283647f0842def524ab4"
+          }
+        ]
+      }
+    }
+  ],
+  "frontend": [
+    {
+      "name": "uPlot",
+      "version": "1.6.32",
+      "documents": [
+        {
+          "path": "licenses/upstream/uPlot/e995b061e9fc5476a6d862cd2fb2ebc7452ca012/LICENSE",
+          "origin": "https://raw.githubusercontent.com/leeoniya/uPlot/e995b061e9fc5476a6d862cd2fb2ebc7452ca012/LICENSE",
+          "revision": "e995b061e9fc5476a6d862cd2fb2ebc7452ca012",
+          "upstreamPath": "LICENSE",
+          "sha256": "8f989229699b4fe2f1a0432d0e9edc338a8a911e250e2d1b01ecd770a5f5b1bd"
+        }
+      ]
+    },
+    {
+      "name": "Fluent System Icons",
+      "version": null,
+      "documents": [
+        {
+          "path": "licenses/upstream/fluentui-system-icons/e15fc0de25fab983e3e42bac8798be69a85c23bf/LICENSE",
+          "origin": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/e15fc0de25fab983e3e42bac8798be69a85c23bf/LICENSE",
+          "revision": "e15fc0de25fab983e3e42bac8798be69a85c23bf",
+          "upstreamPath": "LICENSE",
+          "sha256": "69bc45dc42b9acb96a69823adbc6ae538374e3c0bde169b855b32c48eaaef52f"
+        },
+        {
+          "path": "licenses/upstream/fluentui-system-icons/e15fc0de25fab983e3e42bac8798be69a85c23bf/NOTICE",
+          "origin": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/e15fc0de25fab983e3e42bac8798be69a85c23bf/NOTICE",
+          "revision": "e15fc0de25fab983e3e42bac8798be69a85c23bf",
+          "upstreamPath": "NOTICE",
+          "sha256": "2fb367a84df52c8b6f8401119708014b327f595554d41712d7407151c9ce73ef"
+        }
+      ]
+    },
+    {
+      "name": "GitHub Octicons",
+      "version": "19.40.0",
+      "documents": [
+        {
+          "path": "licenses/upstream/octicons/6dbe38e4e9b4987b2c9332d719c57fbbdd083e2d/LICENSE",
+          "origin": "https://raw.githubusercontent.com/primer/octicons/6dbe38e4e9b4987b2c9332d719c57fbbdd083e2d/LICENSE",
+          "revision": "6dbe38e4e9b4987b2c9332d719c57fbbdd083e2d",
+          "upstreamPath": "LICENSE",
+          "sha256": "da259c8bd0de62713ccdcf88910aebca810644f98c2c912bad814fc79ea778df"
+        }
+      ]
+    },
+    {
+      "name": "@tauri-apps/plugin-store",
+      "version": "2.4.1",
+      "documents": [
+        {
+          "path": "licenses/upstream/plugins-workspace/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/store/LICENSE_MIT",
+          "origin": "https://raw.githubusercontent.com/tauri-apps/plugins-workspace/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/store/LICENSE_MIT",
+          "revision": "e7a68fa63755603b9fa12d28e077eea645551d24",
+          "upstreamPath": "plugins/store/LICENSE_MIT",
+          "sha256": "89ff9689dcf9dd53968785d05a26f7898bb169dbfcada8d032b3e68cf0d55607"
+        },
+        {
+          "path": "licenses/upstream/plugins-workspace/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/store/LICENSE_APACHE-2.0",
+          "origin": "https://raw.githubusercontent.com/tauri-apps/plugins-workspace/e7a68fa63755603b9fa12d28e077eea645551d24/plugins/store/LICENSE_APACHE-2.0",
+          "revision": "e7a68fa63755603b9fa12d28e077eea645551d24",
+          "upstreamPath": "plugins/store/LICENSE_APACHE-2.0",
+          "sha256": "0cec06e0e55fbc3dc5cee4fca9b607f66cb8f4e4dbcf3b3c013594dd156732e9"
+        }
+      ]
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! The bulk path with the reconnect budget a long recording needs: a few transient
 //! failures are ridden out by reopening the handle, an unplug ends the session at once.
 

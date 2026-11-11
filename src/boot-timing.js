@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 // Reports the webview half of cold start to Rust, which owns the process-start half.
 //
 // The bridge is `performance.timeOrigin`: it is epoch-based, so subtracting the Rust-side

@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Run the actual browser module Worker in Node, including real structured-clone transfers. */
 import { Worker } from 'node:worker_threads';
 

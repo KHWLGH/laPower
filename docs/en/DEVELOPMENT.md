@@ -81,6 +81,14 @@ The `beforeDevCommand` already builds the frontend, so a separate `npm run build
 
 Without an explicit target, local release output is in `target/release/bundle/`; CI specifies targets and uses `target/<target>/release/bundle/`. Tauri CLI runs `beforeBuildCommand` automatically to generate the minified frontend, so a separate `npm run build:dist` is unnecessary before packaging. Direct Cargo checks still require `out/` first.
 
+### Antivirus blocking Windows build scripts
+
+If Cargo reports access denied (`os error 5`) or a sharing violation (`os error 32`) before running libc's `build-script-build`, and the antivirus reports blocking the same path, the affected program runs during compilation. It is not the application runtime. On the local Windows/MSVC and Kaspersky setup, libc 0.2.189's build script was blocked at optimization level 2 and ran successfully at level 0.
+
+The root `Cargo.toml` sets `[profile.dev.package.libc] opt-level = 0` specifically for libc. Other dependencies retain level 2 and release settings remain unchanged. This also applies to the dev profile inherited by test and leaves libc's development library unoptimized. A `profile.dev.build-override` alone cannot override the existing `package."*"` setting. Rerun the original build command after updating the configuration; Cargo rebuilds the affected artifacts without clearing the entire `target/` directory.
+
+This compatibility adjustment covers the verified compiler combination, without guaranteeing that other versions or files will avoid false positives. If blocking continues, keep the antivirus detection name, path and file hash for investigation and vendor feedback. `os error 5` alone does not establish a false positive.
+
 ### Cleanup levels
 
 Each level includes the previous one and waits for deletion to finish. The default preserves Rust compilation caches, dependencies and installers:
@@ -104,7 +112,13 @@ Cleanup also removes verification screenshots in `output/` and raw results and l
 
 ### Runtime component list
 
-About reads the bundled `src/third-party-components.json`. After changing Cargo runtime dependencies or vendored frontend components, run `npm run components:generate`, commit the result, then run `npm run components:check`. The script merges locked runtime graphs for Windows x64, Linux x64, macOS Intel and Apple Silicon, excluding workspace packages and development/build/procedural-macro dependencies. Vendored script and icon versions come from their resource declarations; unknown versions are marked as bundled. Generation and checking require Cargo and may fetch uncached dependencies. Ordinary frontend builds only copy the list and require neither Cargo nor network access for it. CI already checks the list in `validate`.
+About uses the bundled `src/third-party-components.json` component list; its license reader loads the full-text `src/legal-notices.json` catalog on demand. After changing Cargo runtime dependencies, bundled resources or license inputs, run `npm run components:generate`, commit both generated files and any required materials, then run `npm run components:check`. Do not edit the generated catalogs manually. Locked, offline Cargo metadata/tree conservatively merges normal dependencies for Windows x64, Linux x64, macOS Intel and Apple Silicon, excluding workspace, development/build-only and procedural-macro packages; it is not an exact release compilation-unit graph. Bundled resource versions come from their declarations and are marked as bundled when unknown.
+
+Legal materials come from root [`COPYRIGHT`](../../COPYRIGHT), [`LICENSE`](../../LICENSE), [`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0), actual files in the local Cargo cache and stored supplements registered in `licenses/materials.json`. Supplements record fixed versions, sources, revisions, upstream paths and SHA-256; text normalization only converts CRLF to LF. By default, missing materials, changed content or invalid catalogs fail generation/checking. Exceptions for missing upstream materials or license-branch selection require explicit review, a fixed version, and recorded reasons and evidence; they appear offline with the catalog and are reported by generation/checking, without restoring any missing upstream text. Preparing dependency caches or supplements may require a separate network step; generation/checking does not download them on demand. Ordinary frontend builds only validate and copy generated materials, without Cargo or network access; CI's `validate` continues checking the catalogs.
+
+Own contributions to the application, scripts, tools, tests, benchmarks, temperature examples, workflows and project documentation/configuration use GPL-3.0-only. Libraries, tests, examples and project-owned documentation/configuration under `crates/` use LGPL-3.0-or-later; see [`COPYRIGHT`](../../COPYRIGHT) for asset and generated-material scope. Keep upstream and other authors' notices, do not infer assignments from Git authorship, and do not label third-party material as KHWLGH's original work. The fixed project notice `Copyright (C) 2026 KHWLGH` applies only to KHWLGH's own contributions. Keep the GNU license texts verbatim.
+
+A release Tag's ZIP/tar.gz archives contain this repository's sources, without local dependency caches or system SDKs. To build from an archive, use `cargo fetch --locked` to obtain locked Cargo dependency sources and `npm ci` to obtain locked npm build tools; `Cargo.lock` and `package-lock.json` determine their versions and available integrity checks. Use the [`src/third-party-components.json`](../../src/third-party-components.json) component list to help locate dependency sources. Current toolchain, platform SDK/system requirements and build commands are documented in this guide's environment and platform sections; a Tag archive alone does not include all dependency sources.
 
 ## Release process
 

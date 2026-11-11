@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 JohnScotttt
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// KHWLGH copyright applies to local modifications; see COPYRIGHT.
 //! Start-of-packet ordered sets, the Message Header and the Extended Message Header.
 
 use crate::bits::{flag, num, sl};

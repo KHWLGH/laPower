@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Portable rasteriser for the video report.
 //!
 //! The shared layout in [super::scene] is drawn with tiny-skia (geometry) and system fonts

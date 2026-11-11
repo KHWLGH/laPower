@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! ISO base media file writer for the portable encoders.
 //!
 //! Media Foundation writes its own container, so this module only serves the macOS and Linux

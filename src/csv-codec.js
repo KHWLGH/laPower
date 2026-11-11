@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 无 DOM / Tauri / 全局 state 读写的 CSV codec。
  * 复用列容器和 measurement 的旧格式规则，不创建 Worker 或转移 ArrayBuffer。

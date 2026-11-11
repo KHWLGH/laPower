@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { F64_CHUNK_SIZE } from './state.js';
 /**
  * 主图显示用 min/max 桶。全量数据仍在 F64Col；这里只为 uPlot 准备 O(宽度) 顶点。

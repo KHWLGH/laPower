@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { t as translate } from './i18n.js';
 /**
  * @file PD 报文纯逻辑 — 摘要提取、过滤、视口切片、捕获文件。无 DOM / Tauri 依赖。

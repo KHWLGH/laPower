@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 后端文件句柄的前端封装：CSV 导出 / 导入 / 临时恢复文件。
  *
@@ -29,6 +34,17 @@ export function pickExportFile(defaultName) {
 /** @param {string} defaultName @returns {Promise<OpenedFile|null>} */
 export function pickPdExportFile(defaultName) {
   return invoke('pd_export_pick', { defaultName, title: t('pdExportTitle'), filterName: t('pdFile') });
+}
+
+/** @param {string} defaultName @returns {Promise<OpenedFile|null>} */
+export function pickPngExportFile(defaultName) {
+  return invoke('png_export_pick', {
+    defaultName,
+    title: t('protocolReportTitle'),
+    filterName: t('reportPngFile'),
+    overwriteTitle: t('exportOverwriteTitle'),
+    overwriteMessage: t('exportOverwriteMessage'),
+  });
 }
 
 /** @param {string} defaultName

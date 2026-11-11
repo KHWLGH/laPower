@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Direct3D 11 zero copy path for the Windows encoder.
 //!
 //! Direct2D draws straight onto a D3D11 texture, the video processor converts it to BT.709 NV12

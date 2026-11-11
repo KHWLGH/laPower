@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 use super::{DeviceData, PdEvent};
 use serde::Serialize;
 use std::collections::VecDeque;

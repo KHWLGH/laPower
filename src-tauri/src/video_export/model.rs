@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Frozen video-report payload and its validation.
 //!
 //! The frontend owns the sample columns, so it projects the recording into this

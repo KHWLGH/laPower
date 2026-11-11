@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! Bounded KM protocol detection: firmware scan, standard fallback, missing checks.
 //! The workflow is inspired by c-power's POWER-Z detection (see crate README); implemented here using
 //! laPower's CDC transport, cancellation and confirmed PDM settings. No PD-derived
@@ -630,6 +633,7 @@ pub(crate) fn run(
                 STANDARD_BUDGET
             },
         report: DetectionReport {
+            pdos: Vec::new(),
             results: PROTOCOLS
                 .iter()
                 .map(|(id, label)| ProtocolDetection {
@@ -717,6 +721,7 @@ pub(crate) fn run(
 
 impl<I: DetectionIo> Runner<'_, I> {
     fn emit(&mut self) {
+        self.report.pdos.clone_from(&self.pdos);
         self.report.elapsed_ms = self.started.elapsed().as_millis() as u64;
         (self.progress)(&self.report);
     }
@@ -1394,6 +1399,7 @@ mod tests {
                 started: now,
                 deadline: now + STANDARD_BUDGET,
                 report: DetectionReport {
+                    pdos: Vec::new(),
                     results: vec![ProtocolDetection {
                         id: "qc".into(),
                         label: "QC".into(),
@@ -1494,6 +1500,7 @@ mod tests {
             started: now,
             deadline: now + PD_REVISION_QUERY_WAIT + Duration::from_secs(6),
             report: DetectionReport {
+                pdos: Vec::new(),
                 results: Vec::new(),
                 phase: "pd_pdo".into(),
                 active: Some("pd".into()),
@@ -2182,6 +2189,7 @@ mod tests {
             volt_min_mv: min,
             volt_max_mv: max,
             cur_ma: Some(3000),
+            max_power_mw: None,
             label: kind.into(),
             programmable: min != max,
         };
@@ -2302,6 +2310,7 @@ mod tests {
             );
             assert_eq!(result.report.completion.as_deref(), Some("complete"));
             assert_eq!(result.pdos, parse_pdos(capabilities));
+            assert_eq!(result.report.pdos, result.pdos);
             assert!(!io.commands.iter().any(|cmd| cmd.starts_with("pd req=")));
             assert_eq!(io.commands.last().map(String::as_str), Some("reset"));
         }

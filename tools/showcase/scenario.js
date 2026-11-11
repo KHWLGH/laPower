@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 // Development fixtures only. Sample values depend on virtual time and a fixed seed.
 //
 // v2/v3 (promo): the session is a 20-minute charge profile instead of a 2-minute loop.

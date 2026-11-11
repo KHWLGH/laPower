@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Host-owned video report encoder.
 //!
 //! The job deliberately belongs to the process, not to the window: closing the dialog or

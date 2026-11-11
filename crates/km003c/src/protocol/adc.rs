@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! ADC 44/40 字节载荷解析。单位：电压 µV，电流 µA，CC/D+/D- 为 0.1 mV。
 
 use super::{read_i16, read_i32, read_u16, ProtocolError, Result};

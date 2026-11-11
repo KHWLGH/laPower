@@ -85,9 +85,9 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 | `set_sample_rate` | 设置采样间隔，接受 1 – 60000 ms；按设备下限钳制 |
 | `set_pd_capture_enabled` | 开关 PD 报文采集 |
 | `pd_log_clear` | 清空 PD 日志，返回新的 generation |
-| `pd_log_after` | 增量拉取 `seq` 大于给定值的报文 |
+| `pd_log_after` | 后台分页补洞，每页最多 512 条，携带 generation 和固定 `throughSeq` 终点 |
 | `pd_log_replace` | 用导入的报文替换日志，并盖上新 generation |
-| `decode_pd_at` | 按 `seq` 单帧解码，O(1)，用于点击某行时才展开详情 |
+| `decode_pd_at` | 按 `seq` 和匹配的 generation 取捕获时的解码树，O(1) |
 | `drain_device_stream` | 停止该连接的后台线程并取回末包回执（幂等，可重复调用） |
 | `ack_device_stream` | 确认同 generation 中已消费的样本序号 |
 | `set_recording_segment` | 在采集源建立录制段边界，同步 PD 跟随状态 |
@@ -106,11 +106,16 @@ HID 读线程 ──── channel ────> IPC 发射线程 ──── e
 
 ### `src-tauri/src/pd_capture.rs`
 
-PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_pd_at` 是 O(1) 查找而不是线性扫描。原始帧被保留下来，详情面板要看哪一帧才解码哪一帧，避免为所有报文预先构建解码树。
+PD 日志是一个只追加的 `Vec`，**`seq` 就是报文下标**。原始帧与包含会话上下文的解码树在捕获时保留；`decode_pd_at` 校验 generation 后执行 O(1) 查找。前端按需取得的树只进入最多 8 条的缓存，旧版导入文件自带的 `meta` 继续保留。迟到详情还须核对数据代次、条目身份和选择代次。
 
-- `generation` —— 每次清空或导入替换都递增。前端拿到的事件带着 generation，因此**导入的历史捕获不会和实时流串号**。
-- 断开连接产生的分隔行只出现在返回的事件流里，不占用 `seq`。
+- `generation` —— 每次清空或导入替换都递增；补洞分页与详情请求都校验它。
+- 前端只推进连续消费游标。跳号后由单个后台分页任务顺序追赶，实时事件只更新待追赶终点；每页持锁克隆最多 512 条。首个响应固定 `throughSeq`，后续页沿用；仍有新事件时再开始下一轮。
+- 断开分隔行保留前端顺序，不占 `seq`；清空或导入使旧补洞与详情任务失效。
 - `PD_LOG_HARD_CAP = 1_000_000` 是硬上限；前端 `PD_SOFT_CAP = 500_000` 时弹出提示。
+
+### `src-tauri/src/temperature_reader.rs`
+
+TCP 温度线程每次读取固定 1024 字节，增量解析器最多保存 256 字节的行缓冲（包含 CRLF）。超长后一直丢弃至下一换行，不把尾部误认为新读数；半行跨读取超时续接。有界读取之间检查停止标志，空闲超时不关闭连接，EOF 和读取错误仍触发断线通知。
 
 ### `src-tauri/src/usb_port.rs`
 
@@ -123,6 +128,10 @@ PD 日志是一个只追加的 `Vec`，**`seq` 就是下标**，因此 `decode_p
 其他平台返回 `None`，设备名退化为不带端口后缀的形式。
 
 > 维简硬件的 USB 序列号是**生产批次日期**而非单机编号，同批次的两台仪表序列号相同。枚举时先按 USB 端口分组，再叠加序列号，以便标题栏区分插在不同口上的同型号仪表。
+
+### `src/protocol-report*.js`
+
+协议检测图片由独立的 `protocol-report` 前端模块生成，Canvas 使用 1920×1080 逻辑画布，并从随包 CSS 设计令牌解析所选浅深主题，不切换应用主题或截取工作区。检测开始时保留仪表、时间与方式，打开导出对话框时深拷贝本轮报告；`DetectionReport.pdos` 默认空数组并仅携带本轮独立读取的 PDO，保留 AVS 分段。`TriggerPdo.max_power_mw` 可选，保留 Battery／EPR AVS 明确功率；报告将它与 Vmax×I 参考计算分开标注。PNG 经 `png_export_pick` 原生选择目标，复用受控文件句柄与最多 4 MiB 的字节写入，以及暂存、同步、成功提交／失败清理机制，不增加文件系统 capability。选项独立存于 `protocolReportExport`，与监控报告分开；共用文件导出互斥。
 
 ### `src-tauri/src/video_export.rs`
 
@@ -150,7 +159,7 @@ Windows 编码有两档：`gpu.rs` 把同一套排版直接画进 D3D11 纹理�
 
 `usbpd-parser` 与 `witrn-hid` 源于已停止维护的独立 `WITRN-API-RS` 仓库，最后导入提交为 `30c4bdb`。现在三个协议库统一在本仓库维护，通过 `workspace.package.version` 与应用共同版本管理，不单独发布。集成增加数值 `GeneralSample` 与由调用者维护上下文的 `decode_pd_report`；HID 设备封装保留兼容性，而 `src-tauri` 自行拥有设备句柄与后台线程。各库的 API 与示例见对应目录下的中英文 README。
 
-三个 crate 都不依赖 Tauri，可被其他 Rust 项目直接引用；均为 `publish = false`，仅在本工作区内使用。工作区公共许可证为 LGPL-3.0-or-later。
+三个 crate 都不依赖 Tauri，可被其他 Rust 项目直接引用；均为 `publish = false`，仅在本工作区内使用。协议库及 `crates/` 下自有测试、例子等采用 LGPL-3.0-or-later，应用采用 GPL-3.0-only；版权范围、原始 Python 署名和退役仓库／厂商表的证据缺口见 [`COPYRIGHT`](../COPYRIGHT)。
 
 ### `crates/usbpd-parser`
 
@@ -212,7 +221,7 @@ PD 版本显示同时校验 `pd_version_inference` 和本项独立 PDO 读取得
 
 关于页图标在构建时从 `src-tauri/icons/128x128@2x.png` 复制到 `out/assets/app-icon.png`，与桌面图标使用同一份资源；开发展示服务器也直接读取该文件。
 
-关于页组件清单来自随包复制的 `src/third-party-components.json`。`scripts/third-party-components.mjs` 根据四个发布目标的锁定运行依赖图及内置资源元数据生成，普通前端构建只复制文件；维护方法见 [运行组件清单](DEVELOPMENT.md#运行组件清单)。
+关于页组件清单来自 `src/third-party-components.json`；共享许可阅读器在首次点击时按需读取本地 `src/legal-notices.json`，成功后在会话中缓存，失败可重试。生成脚本保守合并四个发布目标的锁定 normal 依赖与内置资源，并从根许可声明、依赖真实文件和预存补件收集全文；普通前端构建只校验并复制材料，不使用 Cargo 或网络。阅读器用文本呈现原文，支持文档切换、选择和复制；维护方法见 [运行组件清单](DEVELOPMENT.md#运行组件清单)。
 
 按职责分组：
 
@@ -225,7 +234,7 @@ PD 版本显示同时校验 `pd_version_inference` 和本项独立 PDO 读取得
 | PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
 | 设备 | `device.js`、`temperature.js` | 连接管理、标题栏设备信息浮层（VID/PID/SN）、TCP 温度源 |
 | 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、单页设置目录与会话滚动位置、50–200% 缩放、默认跟随系统并同步首帧主题 |
-| 关于 | `views/about-view.js`、`third-party-components.json` | 应用信息、离线组件清单、手动更新检查与 GitHub 跳转；检查结果仅保留于会话内 |
+| 关于 | `views/about-view.js`、`third-party-components.json`、`legal-notices.json` | 应用版权、离线组件与许可阅读器、手动更新检查和 GitHub 跳转；检查结果仅保留于会话内 |
 | 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `windowcontrols` |
 | 样式 | `styles/` | `tokens`（三层设计令牌）→ `base` → `components` → `app` → `views` → `compact`（窄窗分级布局） |
 | 依赖 | `vendor/` | uPlot 与 Store 插件 shim，运行时无 CDN 请求 |
@@ -249,6 +258,10 @@ PD 版本显示同时校验 `pd_version_inference` 和本项独立 PDO 读取得
 像素列位图和独立条带填充只作用于主图。导航缩略图保持 uPlot 描边，按自己的全历史点数和固定桶预算选择原始点或线性分桶路径；主图放大到原始点窗口不会改变导航投影。导航路径构建不读写主图的填充几何缓存，避免导入后描边被清空，以及导航重绘后主图填充消失。
 
 压力反馈只测量实际 JS 绘制及绘制后的帧延迟，不计准备或导入耗时。阴影由持久化设置 `chartFillEnabled` 和各通道透明度控制，不再随压力、暂停、拖动或窗口密度自动变化。连续交互每帧合并最新窗口，松手立即提交最终投影；密度调节和节流不影响采集、保存、统计或积分。测量与边界见[性能文档](PERFORMANCE.md#测量与硬件边界)。
+
+### 报告协作准备
+
+图片与视频报告共用 `video-projection.js` 的增量内核，同步入口 `projectVideo` 和异步入口 `projectVideoAsync` 只在调度上不同。界面在首次让出线程前冻结列、标记值、来源、文案、选项和录制状态。统计与积分、分桶扫描、逐帧游标推进和标记排序按最多 4096 个样本或操作分步，复用约 1.5 ms 的协作预算；预算在步间检查，不是任务耗时的硬保证。取消时丢弃尚未发布的载荷，退出前等待准备取消，迟到的保存对话框结果也不能提交已取消的报告。原始样本、积分顺序和载荷字段保持不变。
 
 ## 数据流
 

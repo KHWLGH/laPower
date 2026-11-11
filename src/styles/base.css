@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /*
  * 基础层：焦点环 / 滚动条 / 选区 / 动效偏好。
  * 只放与具体组件无关的全局配方；组件样式在 styles.css（后续拆分至 styles/components.css）。

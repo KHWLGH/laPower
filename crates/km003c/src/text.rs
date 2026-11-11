@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! Parse KM003C CDC text: `pd pdo` rows and `entry list` protocol lines.
 
 use crate::types::{DetectedProtocol, TriggerPdo};
@@ -288,6 +291,9 @@ pub fn parse_pdos(text: &str) -> Vec<TriggerPdo> {
                 }
                 let programmable = is_programmable_kind(&kind);
                 let mut rec = make_pdo(position, &kind, it.vmin, it.vmax, cur, programmable);
+                if matches!(kind.as_str(), "battery" | "epr_avs") {
+                    rec.max_power_mw = extract_power_mw(chunk);
+                }
                 if it.epr_label {
                     rec.cur_ma = rec
                         .cur_ma
@@ -650,6 +656,7 @@ pub fn make_pdo(
         volt_min_mv,
         volt_max_mv,
         cur_ma,
+        max_power_mw: None,
         label: format_label(position, kind, volt_min_mv, volt_max_mv, cur_ma),
         programmable,
     }
@@ -1177,6 +1184,10 @@ fn classify_pdo(lower: &str, raw: &str) -> String {
 }
 
 fn extract_pdp_w(raw: &str) -> Option<u32> {
+    extract_power_mw(raw).map(|mw| (f64::from(mw) / 1000.0).round() as u32)
+}
+
+fn extract_power_mw(raw: &str) -> Option<u32> {
     let lower = raw.to_ascii_lowercase();
     let mut i = 0;
     while i < lower.len() {
@@ -1189,7 +1200,7 @@ fn extract_pdp_w(raw: &str) -> Option<u32> {
         let unit_at = after + skipped;
         if rest.starts_with('w') && unit_boundary(&lower[unit_at..], "w") && n > 0.0 && n <= 1000.0
         {
-            return Some(n.round() as u32);
+            return Some((n * 1000.0).round() as u32);
         }
         i = after.max(i + 1);
     }

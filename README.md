@@ -10,7 +10,7 @@
 
 [![Release](https://img.shields.io/github/v/release/KHWLGH/laPower?style=flat-square&label=release&color=blue)](https://github.com/KHWLGH/laPower/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/KHWLGH/laPower/ci.yml?style=flat-square&label=CI)](https://github.com/KHWLGH/laPower/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/KHWLGH/laPower/total?style=flat-square)](https://github.com/KHWLGH/laPower/releases)
 [![Last commit](https://img.shields.io/github/last-commit/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/commits/main)
@@ -167,16 +167,20 @@ The workspace protocol crates are standalone Rust libraries (`publish = false`) 
 
 ## 📄 License
 
-The project uses separate licenses for its components:
+Copyright (C) 2026 KHWLGH
 
-| Component | License |
+This copyright line covers only KHWLGH's own contributions. Other authors retain their rights; Git authorship does not imply a copyright assignment. See [`COPYRIGHT`](COPYRIGHT) for the collected notices and exact path scope.
+
+| Project-owned contributions (excluding third-party materials) | License |
 | --- | --- |
-| Application (`src-tauri`, `src`) | [GPL-3.0-only](LICENSE) |
-| Protocol libraries `crates/usbpd-parser`, `crates/witrn-hid`, `crates/km003c` | LGPL-3.0-or-later |
+| Application `src/`, `src-tauri/`; `scripts/`, `tools/`, `test/`, `bench/`, `temperature-example/`, `.github/`; project-owned documentation and configuration | [GPL-3.0-only](LICENSE) |
+| All libraries, tests, examples and project-owned documentation and configuration under `crates/` | [LGPL-3.0-or-later](LICENSE.LGPL-3.0) |
 
-The protocol crates use LGPL to facilitate reuse in other projects. The root [`LICENSE`](LICENSE) contains the full GPLv3 text; the full LGPL-3.0 text is on the [GNU website](https://www.gnu.org/licenses/lgpl-3.0).
+The project-created application icon and size derivatives, and original screenshot content, fall within these scopes. Generated materials retain the licenses of their inputs; third-party assets, license documents and source data do not become original project material. `usbpd-parser` and `witrn-hid` port JohnScotttt's Python packages usbpdparser 1.1.6 and witrnhid 1.1.5 respectively. Both originals declare `Copyright (c) 2025 JohnScotttt` and LGPL-3.0-or-later; sources and unresolved evidence gaps are recorded in [`COPYRIGHT`](COPYRIGHT).
 
-Main third-party components include uPlot, Fluent System Icons, GitHub Octicons, Tauri and its plugins. See `Settings → About → Third-party components` for versions, purposes and licenses; expand `All runtime components` for the complete offline list.
+Local full texts: [`LICENSE`](LICENSE) (GPLv3) and [`LICENSE.LGPL-3.0`](LICENSE.LGPL-3.0) (complete LGPLv3 text, to be read with GPLv3). The scope declaration grants the libraries' later-version option. The software comes without warranty; modification and redistribution are subject to the applicable licenses.
+
+Open `Settings → About` to read project copyright, the full GPL/LGPL texts and third-party legal materials offline. `Third-party components` retains the main components and `All runtime components` list, with license reading links for individual components. uPlot, Fluent System Icons, GitHub Octicons, Tauri and its plugins retain their own copyrights and licenses.
 
 ## 🔗 Related links
 

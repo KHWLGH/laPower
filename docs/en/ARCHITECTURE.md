@@ -85,9 +85,9 @@ Shutdown requires consumption and ACK of the final batch; this check applies to 
 | `set_sample_rate` | Set interval, accepting 1–60000 ms and clamping to device limits |
 | `set_pd_capture_enabled` | Toggle PD capture |
 | `pd_log_clear` | Clear the PD log and return a new generation |
-| `pd_log_after` | Incrementally fetch messages with a higher `seq` |
+| `pd_log_after` | Background recovery pages (up to 512 messages) with generation and a fixed `throughSeq` horizon |
 | `pd_log_replace` | Replace the log with imported messages and a new generation |
-| `decode_pd_at` | Decode one frame by `seq` in O(1), on detail selection |
+| `decode_pd_at` | Fetch the captured decode tree by `seq` and matching generation in O(1) |
 | `drain_device_stream` | Stop workers and return the final receipt; idempotent |
 | `ack_device_stream` | Acknowledge consumed sequence numbers within a generation |
 | `set_recording_segment` | Establish acquisition segment boundaries and synchronize PD follow mode |
@@ -106,11 +106,16 @@ Shutdown requires consumption and ACK of the final batch; this check applies to 
 
 ### `src-tauri/src/pd_capture.rs`
 
-The PD log is an append-only `Vec`; **`seq` is the index**, so `decode_pd_at` is O(1), not a linear search. Raw frames remain intact. Details are decoded only when requested, avoiding eager trees for every message.
+The PD log is an append-only `Vec`; **`seq` is the message index**. Raw frames and conversation-aware decode trees are retained at capture time. `decode_pd_at` validates the generation and performs an O(1) lookup. The frontend keeps fetched trees only in an eight-entry cache; legacy imported metadata stays attached to its original entries. Late responses also check the data revision, entry identity and selection revision.
 
-- `generation` increments on clearing or replacing an imported log. Events carry it, preventing imported history from sharing live-stream sequence identities.
-- Disconnect separators exist only in the returned event stream and do not consume `seq`.
+- `generation` increments on clearing or replacing a log. Both recovery pages and detail requests validate it.
+- The frontend advances only a contiguous consumed cursor. After a gap, a single background paging loop recovers ordered messages; live events only update the catch-up target. Each page clones at most 512 messages under the mutex. The first reply freezes `throughSeq`, reused on subsequent pages; later arrivals start another pass if needed.
+- Disconnect separators remain in frontend order and do not consume `seq`; clearing or importing invalidates pending recovery and detail work.
 - `PD_LOG_HARD_CAP = 1_000_000` is the hard limit; frontend `PD_SOFT_CAP = 500_000` triggers a notification.
+
+### `src-tauri/src/temperature_reader.rs`
+
+The TCP temperature worker reads fixed 1024-byte chunks into an incremental parser with a 256-byte line buffer (including CRLF). Oversized lines are discarded through the next newline, so their tails cannot become new readings. Partial lines survive read timeouts. The stop flag is checked between bounded reads; idle timeouts keep the connection open, while EOF and read errors retain disconnect notification behavior.
 
 ### `src-tauri/src/usb_port.rs`
 
@@ -123,6 +128,10 @@ Resolves a HID path to a USB topology port (for example `4-4`) to distinguish id
 Other platforms return `None`, omitting the port suffix.
 
 > WITRN USB serial numbers are **production-batch dates**, not unique device identifiers. Two meters from the same batch can share a serial number. Enumeration groups by USB port before adding the serial to distinguish identical devices in the title bar.
+
+### `src/protocol-report*.js`
+
+Protocol detection images use separate frontend `protocol-report` modules. Canvas draws a 1920×1080 logical layout and resolves the selected theme from bundled CSS tokens without changing the application theme or capturing the workspace. Meter identity, start time and scan mode are recorded at detection start; opening the dialog deep-copies that detection. `DetectionReport.pdos` defaults to an empty array and contains only independently read capabilities from that scan, preserving AVS bands. Optional `TriggerPdo.max_power_mw` retains explicitly reported Battery/EPR AVS power, distinguished from Vmax×I reference calculations. `png_export_pick` selects a host-owned target and reuses file handles, chunks of at most 4 MiB, staging, sync and commit/abort cleanup without expanding filesystem capabilities. Options live separately in `protocolReportExport`; exports share the file-export mutex.
 
 ### `src-tauri/src/video_export.rs`
 
@@ -150,7 +159,7 @@ Video options now include `acceleration` (auto / hardware / software, default au
 
 `usbpd-parser` and `witrn-hid` originated in the retired standalone `WITRN-API-RS` repository, last imported at commit `30c4bdb`. All three crates are now maintained here, share application versions through `workspace.package.version`, and are not published independently. Integration adds numeric `GeneralSample` decoding and caller-owned context via `decode_pd_report`. The HID wrapper remains for compatibility, but `src-tauri` owns the device handle and workers. Each crate directory contains English and Simplified Chinese API/example READMEs.
 
-The three crates do not depend on Tauri and can be referenced by other Rust projects. Each has `publish = false` and is used within this workspace. The common workspace license is LGPL-3.0-or-later.
+The three crates do not depend on Tauri and can be referenced by other Rust projects. Each has `publish = false` and is used within this workspace. The protocol libraries and project-owned tests, examples and other content under `crates/` use LGPL-3.0-or-later; the application uses GPL-3.0-only. See [`COPYRIGHT`](../../COPYRIGHT) for scope, original Python notices and the retired-repository/vendor-table evidence gaps.
 
 ### `crates/usbpd-parser`
 
@@ -207,7 +216,7 @@ Transcripts do not deduplicate text: identical replies at different times or in 
 
 The About icon is copied at build time from `src-tauri/icons/128x128@2x.png` to `out/assets/app-icon.png`, sharing the desktop asset. The showcase also reads that file directly.
 
-The About component list is copied from `src/third-party-components.json`. `scripts/third-party-components.mjs` generates it from locked runtime graphs for the four release targets and vendored resource metadata; ordinary frontend builds only copy it. See [Runtime component list](DEVELOPMENT.md#runtime-component-list).
+About uses `src/third-party-components.json`; the shared license reader loads local `src/legal-notices.json` on the first reading action, caches successful results for the session and allows retrying failures. Generation conservatively merges locked normal dependencies for four release targets and bundled resources, collecting full texts from root notices, actual dependency files and stored supplements. Ordinary frontend builds only validate and copy materials, without Cargo or network access. The reader renders plain text and supports document switching, selection and copying. See [Runtime component list](DEVELOPMENT.md#runtime-component-list).
 
 | Group | Modules | Responsibility |
 | --- | --- | --- |
@@ -218,7 +227,7 @@ The About component list is copied from `src/third-party-components.json`. `scri
 | PD | `pd-model.js`, `views/pd.js` | Pure summaries/filtering and workspace view |
 | Devices | `device.js`, `temperature.js` | Connections, title-bar device-information flyout (VID/PID/SN) and TCP temperature |
 | Settings | `settings.js`, `views/settings-view.js`, `ui-scale.js`, `theme-boot.js` | Debounced persistence, single-page navigation and session scroll position, 50–200% scaling, system-default/first-frame theme |
-| About | `views/about-view.js`, `third-party-components.json` | Application information, offline component list, manual update checks and GitHub links; check results stay within the session |
+| About | `views/about-view.js`, `third-party-components.json`, `legal-notices.json` | Application copyright, offline component/license reader, manual update checks and GitHub links; check results stay within the session |
 | UI primitives | `ui/` | `dialog`, `toast`, `menu`, `flyout`, `tabbar`, `controlbar`, `windowcontrols` |
 | Styles | `styles/` | Three-layer `tokens` → `base` → `components` → `app` → `views` → `compact` narrow-window layout |
 | Dependencies | `vendor/` | uPlot and Store-plugin shim; no runtime CDN requests |
@@ -242,6 +251,10 @@ Recording and playback maintain independent density strategies. Playback always 
 Pixel-column bitmaps and independent strip fill apply only to the main chart. The navigator retains uPlot strokes and independently chooses raw/linear bucket paths from full-history point counts and a fixed budget. Zooming the main chart to raw points does not change navigator projection. Navigator path construction does not touch main-chart fill caches, avoiding missing strokes after imports and disappearing main fill after navigator redraws.
 
 Pressure feedback measures actual JS drawing and post-draw frame delay, excluding preparation/import time. The persisted `chartFillEnabled` setting and per-channel opacities control shading; pressure, pausing, dragging and window density never change it automatically. Continuous input coalesces the latest window each frame and release immediately submits the final projection. Density adaptation and pacing do not affect acquisition, saving, statistics or integration. See [Performance benchmarks and limits](PERFORMANCE.md#measurement-and-hardware-limits).
+
+### Cooperative report preparation
+
+Image and video reports share the incremental `video-projection.js` kernel through synchronous `projectVideo` and asynchronous `projectVideoAsync`. The UI freezes columns, marker values, provenance, labels, options and recording state before the first yield. Statistics and energy integration, bucket scans, frame-cursor traversal and marker sorting are split into steps of at most 4096 samples or operations, using the existing approximately 1.5 ms cooperative budget. Budget checks occur between steps, so this is not a hard task-duration guarantee. Cancellation abandons the unpublished payload; shutdown awaits preparation cancellation, and a late save-dialog result cannot submit a cancelled report. Raw samples, integration order and payload fields stay unchanged.
 
 ## Data flow
 

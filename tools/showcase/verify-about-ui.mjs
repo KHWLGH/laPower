@@ -1,3 +1,5 @@
+/*! SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only */
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -7,6 +9,13 @@ import { startServer } from './server.mjs';
 const output = resolve('output/about-verification');
 await mkdir(output, { recursive: true });
 const manifest = JSON.parse(await readFile('src/third-party-components.json', 'utf8'));
+const readerCatalog = JSON.parse(await readFile('src/legal-notices.json', 'utf8'));
+const gplDocument = readerCatalog.project.documents.find((entry) => entry.id === 'gpl-3.0');
+const gplText = readerCatalog.texts[gplDocument.textId];
+const readerDocuments = [
+  ...readerCatalog.project.documents.filter((entry) => entry.id !== 'copyright'),
+  ...readerCatalog.components.flatMap((entry) => entry.documents),
+];
 const server = await startServer();
 const browser = await chromium.launch({ headless: true });
 const errors = [];
@@ -59,14 +68,28 @@ async function assertLayout(page) {
     const summary = document.querySelector('.about-summary');
     const card = document.querySelector('.about-card');
     const main = document.querySelector('.settings-main');
+    const dialog = document.getElementById('about-legal-dialog');
+    const dialogRect = dialog.getBoundingClientRect();
+    const body = dialog.querySelector('.about-legal-body');
     const elements = [...summary.children];
     const bounds = elements.map((element) => {
       const { x, y, width, height, right, bottom } = element.getBoundingClientRect();
       return { x, y, width, height, right, bottom };
     });
     return {
+      dialogFits:
+        !dialog.open ||
+        (dialogRect.left >= 0 &&
+          dialogRect.top >= 0 &&
+          dialogRect.right <= innerWidth + 1 &&
+          dialogRect.bottom <= innerHeight + 1 &&
+          body.scrollWidth <= body.clientWidth + 1),
       overflow: document.documentElement.scrollWidth > innerWidth + 1 || page.scrollWidth > page.clientWidth + 1,
-      clipped: [...page.querySelectorAll('.about-actions .btn, .about-component, #about-update-status')]
+      clipped: [
+        ...page.querySelectorAll(
+          '.about-actions .btn, .about-component, #about-update-status, .about-legal-controls, .about-legal-controls > .cs, .about-legal-controls .cs-button, .about-legal-actions .btn, .about-legal-text',
+        ),
+      ]
         .filter((element) => element.getClientRects().length)
         .some((element) => {
           const rect = element.getBoundingClientRect();
@@ -85,12 +108,223 @@ async function assertLayout(page) {
     };
   });
   assert.equal(metrics.overflow, false, 'No horizontal overflow');
+  assert.equal(metrics.dialogFits, true, 'The reading dialog fits the viewport without horizontal scrolling');
   assert.equal(metrics.clipped, false, 'About content fits the settings column');
   const wide = metrics.contentWidth >= 720;
   assert.equal(metrics.summaryColumns, wide ? 3 : 2);
   assert.equal(metrics.componentColumns, wide ? 2 : 1);
   if (!wide) assert.ok(metrics.bounds[2].y >= metrics.bounds[1].bottom - 1, 'Narrow actions wrap below identity');
   return metrics;
+}
+
+async function verifyLegalReader(page, requestCount) {
+  const dialog = page.locator('#about-legal-dialog');
+  const open = page.locator('#btn-legal-notices');
+  const close = page.locator('#btn-close-legal');
+  const text = page.locator('#about-legal-text');
+  const select = page.locator('#about-legal-document');
+  const combobox = page.locator('#about-legal-controls > .cs > .cs-button');
+  assert.equal(requestCount(), 0, 'Startup and opening About do not fetch legal texts');
+  assert.equal(await dialog.isVisible(), false, 'Legal content stays hidden until requested');
+  assert.equal(
+    await page.locator('#settings-about .about-legal-reader, #about-legal-dialog .about-legal-summary').count(),
+    0,
+  );
+  assert.match(await page.locator('.about-legal-summary').innerText(), /Copyright \(C\) 2026 KHWLGH/);
+  assert.match(await page.locator('.about-legal-summary').innerText(), /Copyright \(c\) 2025 JohnScotttt/);
+  assert.equal(await close.locator('.fi-dismiss').count(), 1);
+  assert.equal(await close.innerText(), '', 'Closing uses an icon instead of a text button');
+  assert.equal(await page.locator('#btn-select-legal-text').count(), 0);
+  await open.press('Enter');
+  assert.equal(await dialog.isVisible(), true);
+  assert.equal(await dialog.evaluate((element) => element.matches(':modal')), true);
+  await page.waitForFunction(() => document.getElementById('about-legal-reader').dataset.state === 'error');
+  assert.equal(requestCount(), 1);
+  for (const language of ['zh-CN', 'zh-TW', 'en', 'ja']) {
+    await page.evaluate(async (value) => (await import('/i18n.js')).applyLanguage(value), language);
+    const expected = await page.evaluate(async () => (await import('/i18n.js')).t('legalLoadFailed'));
+    assert.equal(await page.locator('#about-legal-status').innerText(), expected, language);
+    assert.equal(await page.locator('#btn-retry-legal').isVisible(), true);
+    assert.equal(await text.isVisible(), false, 'A failed load has no stale or partial license body');
+    assert.equal(requestCount(), 1, 'Language switches do not retry loading');
+  }
+  await page.locator('#btn-retry-legal').press('Enter');
+  await page.waitForFunction(() => document.getElementById('about-legal-reader').dataset.state === 'ready');
+  assert.equal(requestCount(), 2, 'The explicit retry fetches again');
+  assert.equal(await select.getAttribute('aria-hidden'), 'true', 'The real application enhances the document select');
+  assert.equal(await select.getAttribute('tabindex'), '-1');
+  assert.equal(await combobox.isVisible(), true);
+  assert.equal(
+    await combobox.evaluate((element) => element === document.activeElement),
+    true,
+    'Reading focuses the visible combobox after revealing the reader controls',
+  );
+  assert.equal(
+    await combobox.getAttribute('aria-label'),
+    await page.evaluate(async () => (await import('/i18n.js')).t('legalDocument')),
+  );
+  assert.equal(await text.textContent(), gplText);
+  assert.equal(await text.locator('*').count(), 0, 'License content is plain text');
+  assert.equal(await select.locator('option').count(), readerDocuments.length);
+  assert.equal(await page.locator('.about-legal-text').count(), 1, 'Only one document body is rendered');
+  await text.evaluate((element) => {
+    element.scrollTop = 160;
+  });
+  const contextMenu = await text.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+    element.dispatchEvent(event);
+    return { prevented: event.defaultPrevented, userSelect: getComputedStyle(element).userSelect };
+  });
+  assert.deepEqual(
+    contextMenu,
+    { prevented: false, userSelect: 'text' },
+    'License text allows native right-click copying',
+  );
+  assert.equal(
+    await open.evaluate((element) => {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+    true,
+    'Other application controls retain the existing context-menu behavior',
+  );
+  const retained = await page.evaluate(() => {
+    const text = document.getElementById('about-legal-text');
+    window.__LEGAL_READER_NODES__ = {
+      reader: document.getElementById('about-legal-reader'),
+      text: text.firstChild,
+      select: document.getElementById('about-legal-document'),
+    };
+    return {
+      value: window.__LEGAL_READER_NODES__.select.value,
+      scrollTop: text.scrollTop,
+      selection: getSelection().toString(),
+    };
+  });
+  assert.equal(retained.selection, gplText, 'Keyboard selection enables system copy without a clipboard capability');
+  assert.ok(retained.scrollTop > 0, 'The long license body has independent scroll state');
+  for (const language of ['zh-CN', 'zh-TW', 'en', 'ja']) {
+    await page.evaluate(async (value) => (await import('/i18n.js')).applyLanguage(value), language);
+    const current = await page.evaluate(() => ({
+      sameReader: window.__LEGAL_READER_NODES__.reader === document.getElementById('about-legal-reader'),
+      sameText: window.__LEGAL_READER_NODES__.text === document.getElementById('about-legal-text').firstChild,
+      sameSelect: window.__LEGAL_READER_NODES__.select === document.getElementById('about-legal-document'),
+      value: document.getElementById('about-legal-document').value,
+      scrollTop: document.getElementById('about-legal-text').scrollTop,
+      selection: getSelection().toString(),
+    }));
+    assert.deepEqual(current, { sameReader: true, sameText: true, sameSelect: true, ...retained }, language);
+    assert.equal(requestCount(), 2, 'Successful legal content is cached for the session');
+  }
+  for (const id of ['lgpl-3.0']) {
+    await select.evaluate(
+      (element, value) => {
+        element.value = String(value);
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+      },
+      readerDocuments.findIndex((entry) => entry.id === id),
+    );
+    const document = readerCatalog.project.documents.find((entry) => entry.id === id);
+    assert.equal(await text.textContent(), readerCatalog.texts[document.textId]);
+  }
+  await close.press('Enter');
+  assert.equal(await dialog.isVisible(), false);
+  assert.equal(await open.evaluate((element) => element === document.activeElement), true);
+  // Prefer a real combined-version main card; single-version catalogs still exercise the same lookup.
+  const component = manifest.main.find((entry) => entry.version?.includes(' / ')) || manifest.main[0];
+  const versions = component.version?.split(' / ') || [null];
+  const entry = versions
+    .map((version) =>
+      readerCatalog.components.find((entry) => entry.name === component.name && entry.version === version),
+    )
+    .find((entry) => entry?.documents.length);
+  assert.ok(entry, `The catalog contains a document for main component ${component.name}`);
+  await page.locator('#about-components .about-component-read').nth(manifest.main.indexOf(component)).press('Enter');
+  assert.equal(await text.textContent(), readerCatalog.texts[entry.documents[0].textId]);
+  assert.equal(await select.inputValue(), String(readerDocuments.indexOf(entry.documents[0])));
+  assert.ok((await select.locator('option:checked').textContent()).startsWith(`${entry.name} ${entry.version || ''}`));
+  await close.press('Enter');
+  assert.equal(
+    await page
+      .locator('#about-components .about-component-read')
+      .nth(manifest.main.indexOf(component))
+      .evaluate((element) => element === document.activeElement),
+    true,
+    'A component reading action restores focus to its own opening button',
+  );
+  // The full dependency list must continue to distinguish individual versions, even with identical license text.
+  const dependencies = manifest.components.filter((entry) => entry.name === component.name);
+  const details = page.locator('#about-all-components');
+  await details.locator('summary').press('Enter');
+  for (const dependency of dependencies) {
+    const exact = readerCatalog.components.find(
+      (entry) => entry.name === dependency.name && entry.version === dependency.version,
+    );
+    assert.ok(exact, `The catalog contains exact version ${dependency.name} ${dependency.version}`);
+    await page
+      .locator('#about-dependency-list .about-component-read')
+      .nth(manifest.components.indexOf(dependency))
+      .press('Enter');
+    assert.equal(await select.inputValue(), String(readerDocuments.indexOf(exact.documents[0])));
+    assert.equal(await text.textContent(), readerCatalog.texts[exact.documents[0].textId]);
+    await close.press('Enter');
+  }
+  await details.locator('summary').press('Enter');
+  await open.press('Enter');
+  // Collapsing the long list and focusing the control may scroll the settings page.
+  // Finish that layout work before opening a menu that intentionally closes on external scroll.
+  await combobox.focus();
+  await settle(page);
+  await combobox.press('Enter');
+  assert.equal(await combobox.getAttribute('aria-expanded'), 'true');
+  const menu = page.locator(`[id="${await combobox.getAttribute('aria-controls')}"]`);
+  assert.equal(
+    await menu.locator('[role="option"]').count(),
+    readerDocuments.length,
+    'The enhanced dropdown observes the lazily inserted document options',
+  );
+  const menuBounds = await menu.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      fits: rect.left >= 0 && rect.right <= innerWidth + 1,
+      overflow: element.scrollWidth > element.clientWidth + 1,
+    };
+  });
+  assert.deepEqual(
+    menuBounds,
+    { fits: true, overflow: false },
+    'The real document menu fits narrow and scaled windows',
+  );
+  await page.keyboard.press('Escape');
+  assert.equal(await combobox.getAttribute('aria-expanded'), 'false');
+  assert.equal(await dialog.isVisible(), true, 'Escape first closes the document dropdown');
+  await combobox.press('Enter');
+  await combobox.press('Home');
+  await combobox.press('ArrowDown');
+  await combobox.press('Enter');
+  assert.equal(await combobox.getAttribute('aria-expanded'), 'false');
+  assert.equal(await combobox.evaluate((element) => element === document.activeElement), true);
+  const index = Number(await select.inputValue());
+  assert.equal(index, 1, 'Home and ArrowDown select the second actual document through the enhanced control');
+  assert.equal(
+    await text.textContent(),
+    readerCatalog.texts[readerDocuments[index].textId],
+    'Keyboard document choice works',
+  );
+  assert.equal(requestCount(), 2, 'Project, component and select entry points share the cached catalog');
+  await page.keyboard.press('Escape');
+  assert.equal(await dialog.isVisible(), false);
+  assert.equal(await open.evaluate((element) => element === document.activeElement), true);
+  await open.press('Enter');
+  assert.equal(await select.inputValue(), String(index), 'Reopening preserves the selected document');
+  assert.equal(requestCount(), 2, 'Reopening reuses the loaded catalog');
+  await close.press('Enter');
+  assert.equal(await page.locator('.fluent-dialog[open]').count(), 0);
 }
 
 try {
@@ -103,6 +337,19 @@ try {
     for (const theme of ['light', 'dark']) {
       const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1.5 });
       const page = await context.newPage();
+      let legalRequests = 0;
+      const externalRequests = [];
+      await page.route('**/*', async (route) => {
+        if (new URL(route.request().url()).origin === server.url) return route.fallback();
+        externalRequests.push(route.request().url());
+        return route.abort('internetdisconnected');
+      });
+      await page.route('**/legal-notices.json', async (route) => {
+        legalRequests++;
+        return legalRequests === 1
+          ? route.fulfill({ status: 503, body: 'Offline load failure' })
+          : route.fulfill({ json: readerCatalog });
+      });
       page.on('pageerror', (error) => errors.push(String(error)));
       await page.route('**/__showcase__/bridge.js', async (route) => {
         const response = await route.fetch();
@@ -149,6 +396,7 @@ try {
       assert.equal(stableWidth.before, stableWidth.withoutContent, 'Overflow changes retain gutter width');
       await openAbout(page);
 
+      await verifyLegalReader(page, () => legalRequests);
       for (const language of ['zh-CN', 'zh-TW', 'en', 'ja']) {
         await page.evaluate(async (value) => (await import('/i18n.js')).applyLanguage(value), language);
         await openAbout(page);
@@ -180,6 +428,19 @@ try {
         await openAbout(page);
         await page.locator('.about-name').click();
         await page.screenshot({ path: resolve(output, `${language}-${theme}-${width}-${scale}-about.png`) });
+        await page.locator('#btn-legal-notices').click();
+        await settle(page);
+        assert.equal(
+          await page.locator('#about-legal-controls .cs-label').innerText(),
+          await page.locator('#about-legal-document option:checked').textContent(),
+          'The displayed document name matches the retained selection',
+        );
+        await assertLayout(page);
+        await page.screenshot({
+          path: resolve(output, `${language}-${theme}-${width}-${scale}-legal-reader.png`),
+          animations: 'disabled',
+        });
+        await page.locator('#btn-close-legal').click();
         results.push({ language, theme, width, height, scale, columns: layout.componentColumns });
       }
 
@@ -315,7 +576,10 @@ try {
         );
       });
       assert.equal(aligned, true, 'PD headers remain aligned with data columns');
-      console.log(`PASS: About, updates and scrollbars, ${theme}, ${width}×${height}, ${scale}%, four languages`);
+      assert.deepEqual(externalRequests, [], 'About and license reading require no external requests');
+      console.log(
+        `PASS: About, offline licenses, updates and scrollbars, ${theme}, ${width}×${height}, ${scale}%, four languages`,
+      );
       await context.close();
     }
   }
@@ -324,10 +588,39 @@ try {
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     page.on('pageerror', (error) => errors.push(String(error)));
+    const externalRequests = [];
+    let legalRequests = 0;
+    await page.route('**/*', async (route) => {
+      if (new URL(route.request().url()).origin === distribution.url) return route.fallback();
+      externalRequests.push(route.request().url());
+      return route.abort('internetdisconnected');
+    });
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.endsWith('/legal-notices.json')) legalRequests++;
+    });
     await page.goto(`${distribution.url}/app/?capture=1&theme=light&language=zh-CN&update=available`);
     await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
     await openAbout(page);
     assert.equal(await page.locator('#about-dependency-list > li').count(), manifest.components.length);
+    assert.equal(legalRequests, 0, 'The shipping bundle also loads texts only after a reading action');
+    const bundledCatalog = JSON.parse(await readFile('out/legal-notices.json', 'utf8'));
+    await page.locator('#btn-legal-notices').press('Enter');
+    await page.waitForFunction(() => document.getElementById('about-legal-reader').dataset.state === 'ready');
+    for (const id of ['gpl-3.0', 'lgpl-3.0']) {
+      await page.locator('#about-legal-document').evaluate(
+        (element, value) => {
+          element.value = String(value);
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        readerDocuments.findIndex((entry) => entry.id === id),
+      );
+      await page.waitForFunction(() => document.getElementById('about-legal-reader').dataset.state === 'ready');
+      const entry = bundledCatalog.project.documents.find((entry) => entry.id === id);
+      assert.equal(await page.locator('#about-legal-text').textContent(), bundledCatalog.texts[entry.textId]);
+    }
+    assert.equal(legalRequests, 1, 'The minified bundle caches real bundled texts');
+    assert.deepEqual(externalRequests, [], 'Bundled license reading works without remote requests');
+    await page.locator('#btn-close-legal').press('Enter');
     await page.evaluate(() => {
       window.__PRODUCTION_PAGES__ = [];
       window.__TAURI__.event.listen('showcase:project-page', ({ payload }) =>

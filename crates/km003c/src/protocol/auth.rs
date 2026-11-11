@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! AES helpers and packet builders for the authenticated queue stream.
 
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};

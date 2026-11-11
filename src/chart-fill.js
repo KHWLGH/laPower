@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Rasterize the area between monotone ordered line segments and their baseline.
  * Each pixel receives its analytic coverage once, including baseline crossings.
  * Scratch storage is three row arrays, independent of the number of samples.

@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { t } from '../i18n.js';
 /**
  * @file 顶栏 Tab 条（Fluent TabView 习惯用法，参考 Windows Terminal）。

@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 export const VERSION = 'witrn-f64-v1';
 export const SEED = 0x6d2b79f5;
 export const SIZES = [10_000, 100_000, 1_000_000];

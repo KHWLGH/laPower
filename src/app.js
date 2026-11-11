@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file 应用入口 — Tauri API 导入、窗口关闭、UI 事件绑定、DOMContentLoaded 初始化。
  */
@@ -1025,8 +1030,11 @@ async function probePlatform() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  // 禁用右键菜单
-  document.addEventListener('contextmenu', (e) => e.preventDefault());
+  // 许可正文保留系统右键菜单，以便直接复制选中文字。
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target instanceof Element && e.target.closest('#about-legal-text')) return;
+    e.preventDefault();
+  });
 
   setConnectionReady(false);
   const platformReady = probePlatform();

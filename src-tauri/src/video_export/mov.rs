@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! In-place QuickTime conversion for the MOV container.
 //!
 //! Media Foundation only writes the MP4 brand, so a "MOV" export is the same movie with a

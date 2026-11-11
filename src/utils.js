@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { t } from './i18n.js';
 /**
  * @file 纯工具函数 — 无外部依赖，可被任意模块安全引用。

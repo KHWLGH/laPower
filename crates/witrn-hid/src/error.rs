@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright and contribution scope: see COPYRIGHT.
 //! Errors from talking to a WITRN meter.
 
 use std::fmt;

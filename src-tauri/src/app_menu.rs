@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! macOS 应用菜单：在 Tauri 默认菜单的「About」之后加「Settings…」（⌘,）。
 //!
 //! macOS 应用的设置统一放在应用菜单、快捷键 ⌘,。默认菜单没有这一项，⌘, 也就

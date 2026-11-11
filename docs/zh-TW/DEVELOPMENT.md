@@ -82,6 +82,14 @@ npm run dev
 
 本機未指定 target 時，發佈產物位於 `target/release/bundle/`；CI 顯式指定 target，產物位於 `target/<target>/release/bundle/`。Tauri CLI 會自動運行 `beforeBuildCommand` 產生壓縮前端，打包前無需再手動執行 `npm run build:dist`。直接運行 Cargo 檢查時仍須先產生 `out/`。
 
+### Windows 建置指令碼遭防毒軟體攔截
+
+若 Cargo 在執行 `libc` 的 `build-script-build` 前回報「拒絕存取（os error 5）」或檔案占用（os error 32），且防毒軟體回報攔截了相同路徑，受影響的是編譯時程式，不屬於應用程式執行階段。已在本機 Windows/MSVC 與 Kaspersky 環境重現 `libc 0.2.189` 的二級最佳化建置指令碼遭攔截，而零最佳化版本可正常執行。
+
+根目錄 `Cargo.toml` 為 `libc` 單獨設定 `[profile.dev.package.libc] opt-level = 0`，其他相依套件仍使用二級最佳化，release 設定不變。此設定也適用於 test 繼承的 dev profile，同時影響 `libc` 的開發用程式庫。只加入 `profile.dev.build-override` 無法覆蓋既有的 `package."*"` 設定。更新設定後直接重新執行原建置命令即可，Cargo 會重建相關產物，無須清空整個 `target/`。
+
+這是針對已驗證編譯組合的相容性調整，無法保證其他版本或檔案不會被誤報。若仍遭攔截，保留防毒軟體的偵測名稱、路徑與檔案雜湊，以便查核並向廠商回報；僅憑 `os error 5` 本身無法確定是誤報。
+
 ### 分級清理
 
 各級累計包含前一級，等待刪除完成後返回；預設保留 Rust 編譯快取、相依套件和安裝包：
@@ -105,7 +113,13 @@ npm run clean:build -- --dry-run
 
 ### 執行元件清單
 
-關於頁讀取隨應用程式打包的 `src/third-party-components.json`。修改 Cargo 執行相依套件或內建前端元件後，執行 `npm run components:generate` 並提交產生結果，再用 `npm run components:check` 核對。腳本合併鎖定的 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 四個目標的執行相依圖，排除工作區套件、純開發、建置及程序巨集依賴；內建腳本與圖示版本來自資源聲明，無法確認時標示為隨應用程式內建。產生與核對需要 Cargo，缺少快取時可能連網；一般前端建置只複製清單。CI 的 `validate` 已執行清單核對。
+關於頁使用隨附的 `src/third-party-components.json` 元件清單，授權閱讀器按需載入 `src/legal-notices.json` 全文目錄。修改 Cargo 執行相依套件、內建資源或授權輸入後，執行 `npm run components:generate` 並提交兩份產生結果與必要材料，再用 `npm run components:check` 核對；不要手改產生的目錄。腳本以鎖定、離線的 Cargo metadata/tree 保守合併 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 的 normal 相依套件，排除工作區套件、純開發／建置與程序巨集套件；這不是精確的發佈編譯單元圖。內建資源版本來自其聲明，不明時標為隨應用程式內建。
+
+授權材料來自根目錄 [`COPYRIGHT`](../../COPYRIGHT)、[`LICENSE`](../../LICENSE)、[`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0)、本機 Cargo 快取中的實際檔案及 `licenses/materials.json` 登記的預存補件。補件記錄固定版本、來源、revision、上游路徑與 SHA-256，正文僅統一 CRLF 為 LF；預設情況下，缺件、內容變動或目錄校驗失敗會中止產生／核對。僅接受經明確審核、綁定固定版本且附理由與證據的上游缺件或授權分支選擇例外；例外會隨目錄離線呈現並由產生／檢查報告，不代表恢復了缺失的上游正文。首次準備相依快取或補件可能需要另行連網，產生／核對本身不臨時下載。一般前端建置只校驗並複製已產生材料，不依賴 Cargo 或網路；CI 的 `validate` 繼續核對清單。
+
+自有貢獻的應用程式、腳本、工具、測試、基準、溫度範例、工作流程與專案文件／設定採用 GPL-3.0-only，`crates/` 下函式庫、測試、範例及自有文件／設定採用 LGPL-3.0-or-later；具體資源與產生物範圍見 [`COPYRIGHT`](../../COPYRIGHT)。保留上游與其他作者的聲明，不從 Git 作者記錄推定轉讓，不把第三方材料標成 KHWLGH 原創。專案著作權行固定為 `Copyright (C) 2026 KHWLGH`，僅用於其自有貢獻；GNU 授權全文保持原文。
+
+發佈對應 Tag 的 ZIP／tar.gz 是本儲存庫原始碼封存，不含本機相依快取或系統 SDK。從封存建置時，以 `cargo fetch --locked` 取得鎖定的 Cargo 相依原始碼，以 `npm ci` 取得鎖定的 npm 建置工具；`Cargo.lock` 與 `package-lock.json` 確定相應版本及可用的完整性校驗資訊。相依來源可配合 [`src/third-party-components.json`](../../src/third-party-components.json) 元件清單定位。目前工具鏈、平台 SDK／系統相依與建置命令見本指南的環境要求及各平台段落；單獨的 Tag 封存不代表已內含全部相依原始碼。
 
 ## 發佈流程
 

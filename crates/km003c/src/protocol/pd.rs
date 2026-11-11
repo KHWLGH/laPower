@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! PD status block and event stream (attribute 0x0010), plus the numeric PDO decode the
 //! trigger needs. Full message decoding for display is left to `usbpd-parser`.
 

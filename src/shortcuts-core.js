@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Portable bindings use Mod for Ctrl on Windows/Linux and Command on macOS. */
 export const shortcutActions = [
   { id: 'record', label: 'shortcutRecord', binding: 'P', views: ['monitor'] },

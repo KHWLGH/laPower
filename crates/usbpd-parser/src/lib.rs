@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright and contribution scope: see COPYRIGHT.
 //! Parse USB Power Delivery messages into an inspectable field tree.
 //!
 //! A Rust port of the [`usbpdparser`](https://pypi.org/project/usbpdparser/) Python

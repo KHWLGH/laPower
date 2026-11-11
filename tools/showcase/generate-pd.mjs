@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 // Optional fixture maintenance. Capturing screenshots uses the committed JSON, without Rust.
 import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 mod acquire;
 mod app_error;
 #[cfg(target_os = "macos")]
@@ -11,6 +14,7 @@ mod km003c_session;
 mod pd_capture;
 // Public only so `cargo bench` can drive the emit path; the app itself never re-exports it.
 pub mod stream;
+mod temperature_reader;
 mod titlebar;
 mod updates;
 mod usb_port;
@@ -21,7 +25,6 @@ mod windows_icon;
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -32,7 +35,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 use witrn_hid::{decode_general_sample, ReportKind};
 
-use pd_capture::{now_ms, PdEvent, PdLoadEntry, PdLog};
+use pd_capture::{now_ms, PdEvent, PdLoadEntry, PdLog, PdPage};
 
 /// 已知的维简设备型号
 #[derive(Clone)]
@@ -804,6 +807,7 @@ fn pd_log_clear(state: State<'_, AppState>) -> Result<u64, crate::app_error::App
 #[tauri::command]
 fn decode_pd_at(
     index: u64,
+    generation: u64,
     state: State<'_, AppState>,
 ) -> Result<witrn_hid::Metadata, crate::app_error::AppError> {
     let result: Result<witrn_hid::Metadata, String> = (|| {
@@ -811,7 +815,7 @@ fn decode_pd_at(
             .pd_log
             .lock()
             .map_err(|_| "PD 日志状态已损坏".to_string())?;
-        log.meta_at(index as usize)
+        log.meta_in_generation(index, generation)
             .cloned()
             .ok_or_else(|| "没有这条报文的解码树".to_string())
     })();
@@ -889,16 +893,18 @@ fn set_sample_rate(
     result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pd_log_after(
+    generation: Option<u64>,
     after_seq: Option<u64>,
+    through_seq: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<Vec<PdEvent>, crate::app_error::AppError> {
-    let result: Result<Vec<PdEvent>, String> = state
+) -> Result<PdPage, crate::app_error::AppError> {
+    let result = state
         .pd_log
         .lock()
         .map_err(|_| "PD 日志状态已损坏".to_string())
-        .map(|log| log.events_after(after_seq));
+        .and_then(|log| log.page_after(generation, after_seq, through_seq));
     result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
@@ -1022,53 +1028,14 @@ fn connect_temp_service(
         let running_for_thread = Arc::clone(&running);
 
         let join = thread::spawn(move || {
-            let mut reader = BufReader::new(stream);
-            let mut line = String::new();
-            loop {
-                if !running_for_thread.load(Ordering::Relaxed) {
-                    break;
+            let result = temperature_reader::receive(stream, &running_for_thread, |temp| {
+                let _ = app.emit("temp-data", temp);
+            });
+            if running_for_thread.load(Ordering::Relaxed) {
+                if let Err(error) = result {
+                    eprintln!("温度读取错误: {error}");
                 }
-                // 读超时会带着已读到的半行数据返回 Err，因此只在整行处理完之后才清空缓冲，
-                // 让下一轮把剩余部分续上——每轮开头就清会把半行丢掉，剩下的半行成为坏数据。
-                match reader.read_line(&mut line) {
-                    Ok(0) => {
-                        if running_for_thread.load(Ordering::Relaxed) {
-                            let _ = app.emit("temp-disconnected", ());
-                        }
-                        break;
-                    }
-                    Ok(_) => {
-                        if line.len() > 256 {
-                            line.clear();
-                        } else {
-                            let trimmed = line.trim();
-                            if let Ok(temp) = trimmed.parse::<f32>() {
-                                if temp.is_finite() {
-                                    let _ = app.emit("temp-data", temp);
-                                }
-                            }
-                            line.clear();
-                        }
-                    }
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-                        ) =>
-                    {
-                        if line.len() > 256 {
-                            line.clear();
-                        }
-                        continue;
-                    }
-                    Err(e) => {
-                        if running_for_thread.load(Ordering::Relaxed) {
-                            eprintln!("温度读取错误: {}", e);
-                            let _ = app.emit("temp-disconnected", ());
-                        }
-                        break;
-                    }
-                }
+                let _ = app.emit("temp-disconnected", ());
             }
             running_for_thread.store(false, Ordering::Relaxed);
         });
@@ -1345,6 +1312,7 @@ pub fn run() {
             km003c_session::km003c_cancel_trigger,
             file_io::csv_export_pick,
             file_io::pd_export_pick,
+            file_io::png_export_pick,
             file_io::paired_export_pick,
             file_io::csv_import_pick,
             file_io::csv_read_chunk,

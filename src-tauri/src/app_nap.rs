@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! 采集期间让 macOS 不对本进程启用 App Nap，录制期间再阻止系统空闲睡眠。
 //!
 //! 窗口全部隐藏、最小化或被完全遮挡时，macOS 可能对整个进程启用 App Nap：

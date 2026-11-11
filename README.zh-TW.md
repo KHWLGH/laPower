@@ -10,7 +10,7 @@
 
 [![Release](https://img.shields.io/github/v/release/KHWLGH/laPower?style=flat-square&label=release&color=blue)](https://github.com/KHWLGH/laPower/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/KHWLGH/laPower/ci.yml?style=flat-square&label=CI)](https://github.com/KHWLGH/laPower/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0--only-blue?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/KHWLGH/laPower/total?style=flat-square)](https://github.com/KHWLGH/laPower/releases)
 [![Last commit](https://img.shields.io/github/last-commit/KHWLGH/laPower?style=flat-square)](https://github.com/KHWLGH/laPower/commits/main)
@@ -167,16 +167,20 @@ Linux 安裝包不會自動修改裝置權限。連線儀表前必須設定 [ude
 
 ## 📄 授權條款
 
-本專案採用分層許可：
+Copyright (C) 2026 KHWLGH
 
-| 組件 | 授權條款 |
+上述著作權行僅涵蓋 KHWLGH 自有的貢獻；其他作者保留其權利，不因 Git 作者記錄推定著作權轉讓。集中聲明與具體路徑範圍見 [`COPYRIGHT`](COPYRIGHT)。
+
+| 自有貢獻範圍（排除第三方材料） | 授權條款 |
 | --- | --- |
-| 應用本體（`src-tauri`、`src`） | [GPL-3.0-only](LICENSE) |
-| 協定庫 `crates/usbpd-parser`、`crates/witrn-hid`、`crates/km003c` | LGPL-3.0-or-later |
+| 應用程式 `src/`、`src-tauri/`；`scripts/`、`tools/`、`test/`、`bench/`、`temperature-example/`、`.github/`；專案文件與設定的自有部分 | [GPL-3.0-only](LICENSE) |
+| `crates/` 下所有函式庫、測試、範例及其自有文件與設定 | [LGPL-3.0-or-later](LICENSE.LGPL-3.0) |
 
-協定 crate 採用 LGPL 便於被其他專案共用。儲存庫根目錄的 [`LICENSE`](LICENSE) 是 GPLv3 全文；LGPL-3.0 的完整文字請參閱 [GNU 官方頁面](https://www.gnu.org/licenses/lgpl-3.0)。
+自製應用程式圖示及尺寸衍生版本、螢幕擷取的自有內容適用上述範圍；產生的材料保留輸入的授權，第三方素材、授權文件與來源資料不因此成為本專案原創。`usbpd-parser` 與 `witrn-hid` 分別移植自 JohnScotttt 的 Python 套件 usbpdparser 1.1.6 與 witrnhid 1.1.5，原始聲明均為 `Copyright (c) 2025 JohnScotttt`、LGPL-3.0-or-later；來源及尚未解決的證據缺口見 [`COPYRIGHT`](COPYRIGHT)。
 
-主要第三方元件包括 uPlot、Fluent System Icons、GitHub Octicons、Tauri 及其外掛程式等。版本、用途及授權條款見應用程式內 `設定 → 關於 → 第三方元件`；展開 `全部執行元件` 可離線查看完整清單。
+本機全文：[`LICENSE`](LICENSE)（GPLv3）與 [`LICENSE.LGPL-3.0`](LICENSE.LGPL-3.0)（完整 LGPLv3 原文，需與 GPLv3 一起閱讀）。函式庫的「或更新版本」選項由範圍聲明授予。軟體不提供擔保，修改與再散布須遵守適用授權。
+
+在應用程式內 `設定 → 關於` 可離線閱讀專案著作權、GPL/LGPL 全文及第三方授權材料；`第三方元件` 保留主要元件與 `全部執行元件` 清單，並提供各元件的授權閱讀入口。uPlot、Fluent System Icons、GitHub Octicons、Tauri 及其外掛程式等保留各自的著作權與授權。
 
 ## 🔗 相關鏈接
 

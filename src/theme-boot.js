@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * 首屏引导：在样式表之前同步写入 <html data-theme> 与 <html data-os>。
  * data-theme 避免 LazyStore 异步读完之前闪错主题（键名须与 src/theme.js 的 THEME_STORAGE_KEY 一致）。

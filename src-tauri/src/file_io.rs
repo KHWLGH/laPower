@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! File handles for CSV export, CSV import and the live recording spool.
 //!
 //! The frontend never names a path. Export and import paths come from native dialogs
@@ -316,6 +319,71 @@ fn commit_export(staged: &Path, target: &Path, overwrite: bool) -> Result<(), St
         return Err(format!("Cannot commit export: {error}"));
     }
     Ok(())
+}
+
+/// PNG targets stay host-owned; an existing file is replaced only after a successful close.
+#[tauri::command]
+pub(crate) async fn png_export_pick(
+    default_name: String,
+    title: String,
+    filter_name: String,
+    overwrite_title: String,
+    overwrite_message: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<Opened>, crate::app_error::AppError> {
+    let result: Result<Option<Opened>, String> = async {
+        let selection = tauri::async_runtime::spawn_blocking(move || {
+            let mut builder = app
+                .dialog()
+                .file()
+                .set_title(title)
+                .add_filter(filter_name, &["png"])
+                .set_file_name(default_name);
+            if let Some(window) = app.get_webview_window("main") {
+                builder = builder.set_parent(&window);
+            }
+            let Some(path) = builder.blocking_save_file() else {
+                return Ok(None);
+            };
+            let mut path = path.into_path().map_err(|error| error.to_string())?;
+            if !path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+            {
+                path.set_extension("png");
+            }
+            let overwrite = path.exists();
+            if overwrite {
+                let mut dialog = app
+                    .dialog()
+                    .message(format!("{overwrite_message}\n\n{}", path.display()))
+                    .title(overwrite_title)
+                    .buttons(MessageDialogButtons::OkCancel);
+                if let Some(window) = app.get_webview_window("main") {
+                    dialog = dialog.parent(&window);
+                }
+                if !dialog.blocking_show() {
+                    return Ok(None);
+                }
+            }
+            Ok::<_, String>(Some((path, overwrite)))
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        let Some((path, overwrite)) = selection else {
+            return Ok(None);
+        };
+        let mut files = registry(&state)?;
+        if files.writers.len() >= MAX_OPEN {
+            return Err("Too many export files".into());
+        }
+        let writer = stage_export(&path, overwrite)?;
+        let handle = files.add_writer(writer)?;
+        Ok(Some(opened(handle, &path, 0)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
 #[tauri::command]

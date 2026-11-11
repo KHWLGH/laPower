@@ -57,6 +57,21 @@ Dense follow projections can complete fixed snapshots during natural appends, co
 
 CSV, acquisition, recording and protocol optimization should reuse existing core tests/benchmarks. Add targeted tests or benchmarks only for corruption, protocol incompatibility, crashes/deadlocks or confirmed high-impact regressions.
 
+## Report preparation and bounded recovery
+
+Image and video reports share an incremental projection kernel. Each step processes at most 4096 samples or marker operations and yields using an approximately 1.5 ms cooperative budget. Statistics, energy, even a single huge bucket, frame-cursor traversal and marker sorting are sliced; the synchronous entry uses the same kernel. Columns, markers, provenance and recording state are frozen before the first yield, with cancellation and shutdown cleanup. Budget checks occur between steps, not as a hard task-duration limit.
+
+On 2026-11-10, the previous source and the asynchronous entry were compared in one Windows / Node 24.18.0 process: 1 ms intervals, no temperature, one recording segment, voltage/current/power `1 + (i % 100) / 100`, one frame and the default 256 buckets. Three measured runs followed warmup; all output fields matched exactly. A 1 ms timer simulated pending events while compute slices and callback gaps were recorded.
+
+| Samples | Previous synchronous block | Longest async compute slice | Async elapsed time, including yields | Event callbacks per run |
+| --- | ---: | ---: | ---: | ---: |
+| 1,000,000 | 83.6–113.8 ms | 2.03–2.44 ms | 1.08–1.74 s | 78–119 |
+| 5,000,000 | 488.5–510.0 ms | 2.46–4.53 ms | 6.00–6.03 s | 410–423 |
+
+This Node environment lacks `scheduler.postTask`, so the shared scheduler uses its `setTimeout(0)` fallback. Windows timer waits dominate elapsed time; the maximum event callback gap was 16.4–18.4 ms. These results demonstrate ongoing event processing, not faster total computation or measured WebView/acquisition ACK latency. Native GUI, hardware endurance and macOS/Linux runs remain separate validation work.
+
+PD recovery advances a contiguous cursor, clones at most 512 messages per background page and freezes each pass horizon. Live events only raise the catch-up target without retaining another pending message queue. Fetched detail trees occupy at most eight frontend cache entries, excluding embedded legacy imported trees. TCP temperature uses fixed 1024-byte reads and a 256-byte line buffer, discarding oversized lines through their newline. Continuous unterminated input cannot accumulate memory or indefinitely defer stop checks.
+
 ## Dense chart display budget
 
 Each bucket/channel retains first, last and earliest min/max source indices, sorted and deduplicated in sample order. Candidates use actual timestamps, including unchanged repeated times. Connections require every source sample in the omitted interval to be finite. Stroke, fill and the existing-budget power overview use the same ordered geometry. Fully zoomed windows also use linear connections.

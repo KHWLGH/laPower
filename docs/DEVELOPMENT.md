@@ -82,6 +82,14 @@ npm run dev
 
 本机未指定 target 时，发布产物位于 `target/release/bundle/`；CI 显式指定 target，产物位于 `target/<target>/release/bundle/`。Tauri CLI 会自动运行 `beforeBuildCommand` 生成压缩前端，打包前无需再手动执行 `npm run build:dist`。直接运行 Cargo 检查时仍须先生成 `out/`。
 
+### Windows 构建脚本被杀毒软件拦截
+
+若 Cargo 在运行 `libc` 的 `build-script-build` 前报「拒绝访问（os error 5）」或文件占用（os error 32），且杀毒软件报告拦截了同一路径，受影响的是编译阶段运行的辅助程序；它不属于应用运行时。已在本机 Windows/MSVC 与 Kaspersky 环境重现 `libc 0.2.189` 的二级优化构建脚本被拦截，而零优化版本正常执行。
+
+根目录 `Cargo.toml` 为 `libc` 单独设置 `[profile.dev.package.libc] opt-level = 0`，其他依赖仍使用二级优化，release 配置不变。该设置也适用于 test 继承的 dev profile，同时影响 `libc` 的开发库。单独添加 `profile.dev.build-override` 无法覆盖现有 `package."*"` 设置。更新配置后直接重新运行原构建命令即可，Cargo 会重建相关产物，无需清空整个 `target/`。
+
+这是针对已验证编译组合的兼容调整，不能保证其他版本或其他文件不会被误报。若仍被拦截，保留杀毒软件的检测名称、路径与文件哈希以核查并向厂商反馈；仅凭 `os error 5` 本身不能确定是误报。
+
 ### 分级清理
 
 各档累计包含前一档，等待删除完成后返回；默认保留 Rust 编译缓存、依赖和安装包：
@@ -105,7 +113,13 @@ npm run clean:build -- --dry-run
 
 ### 运行组件清单
 
-关于页读取随应用打包的 `src/third-party-components.json`。修改 Cargo 运行依赖或内置前端组件后，运行 `npm run components:generate` 并提交生成结果，再用 `npm run components:check` 检查。脚本使用锁定的 Cargo 依赖图合并 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 四个目标，排除本项目工作区包、纯开发、构建和过程宏依赖；内置脚本与图标的版本从资源声明读取，无法确认时标记为随应用内置。生成与核对需要 Cargo，缺少依赖缓存时可能联网；普通前端构建只复制清单，不新增 Cargo 或联网要求。CI 的 `validate` 已运行清单核对。
+关于页使用随包的 `src/third-party-components.json` 组件清单，许可阅读器按需加载 `src/legal-notices.json` 全文目录。修改 Cargo 运行依赖、内置资源或许可输入后，运行 `npm run components:generate` 并提交两份生成结果及必要材料，再用 `npm run components:check` 核对；不要手改生成目录。脚本用锁定、离线的 Cargo metadata/tree 保守合并 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 的 normal 依赖，排除工作区包、纯开发／构建与过程宏包；这不是精确的发布编译单元图。内置资源版本来自其声明，不明时标为随应用内置。
+
+许可材料来自根目录 [`COPYRIGHT`](../COPYRIGHT)、[`LICENSE`](../LICENSE)、[`LICENSE.LGPL-3.0`](../LICENSE.LGPL-3.0)、本地 Cargo 缓存中的真实文件及 `licenses/materials.json` 登记的预存补件。补件记录固定版本、来源、revision、上游路径与 SHA-256，正文仅统一 CRLF 为 LF；默认情况下，缺件、内容漂移或目录校验失败会中止生成／核对。仅接受经过显式审核、绑定固定版本且附理由与证据的上游缺件或许可分支选择例外；例外会随目录离线呈现并由生成／检查报告，不代表恢复了缺失的上游正文。首次准备依赖缓存或补件可能需要另行联网，生成／核对本身不临时下载。普通前端构建只校验并复制已生成材料，不依赖 Cargo 或网络；CI 的 `validate` 继续核对清单。
+
+自有贡献的应用、脚本、工具、测试、基准、温度示例、工作流与项目文档／配置采用 GPL-3.0-only，`crates/` 下库、测试、例子及自有文档／配置采用 LGPL-3.0-or-later；具体资源和生成物范围见 [`COPYRIGHT`](../COPYRIGHT)。保留上游与其他作者的声明，不从 Git 作者记录推定转让，不把第三方材料标成 KHWLGH 原创。项目版权行固定为 `Copyright (C) 2026 KHWLGH`，仅用于其自有贡献；GNU 许可全文保持原文。
+
+发布对应 Tag 的 ZIP／tar.gz 是本仓库源码归档，不含本地依赖缓存或系统 SDK。从归档构建时，用 `cargo fetch --locked` 获取锁定的 Cargo 依赖源码，用 `npm ci` 获取锁定的 npm 构建工具；`Cargo.lock` 与 `package-lock.json` 确定相应依赖版本及可用的完整性校验信息。依赖来源可结合 [`src/third-party-components.json`](../src/third-party-components.json) 组件名单定位。当前工具链、平台 SDK／系统依赖和构建命令见本指南的环境要求与各平台构建段落；单独的 Tag 归档不代表已内含全部依赖源码。
 
 ## 发布流程
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! The per-connection read loop, shared by every device family.
 //!
 //! A [`Source`] only reports what arrived. Everything the stream contract depends on stays
@@ -786,7 +789,7 @@ mod tests {
         harness.join.join().unwrap();
         assert_eq!(pds, 1);
         let log = harness.pd_log.lock().unwrap();
-        let events = log.events_after(None);
+        let events = log.page_after(None, None, None).unwrap().events;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].msg_type.as_deref(), Some("Source_Capabilities"));
         assert_eq!((events[0].vbus, events[0].ibus), (Some(5.0), Some(2.0)));

@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * 打包形状测量。
  *
@@ -18,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { validateBundledLegalAssets } from '../scripts/build-dist.mjs';
 import { options, ROOT, saveJson } from './common.mjs';
 
 const SRC = resolve(ROOT, 'src');
@@ -151,6 +157,7 @@ async function main() {
     layer: 'shipped shape; deterministic, no timing',
     // Read, never assume: this is what tauri-codegen will WalkDir over.
     frontendDist: distSummary,
+    legal: distFiles ? await validateBundledLegalAssets(dist) : null,
     files: bytes.length,
     totalBytes,
     requests,

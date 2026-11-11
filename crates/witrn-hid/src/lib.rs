@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright and contribution scope: see COPYRIGHT.
 //! Read and decode the HID stream from a WITRN USB power meter.
 //!
 //! A Rust port of the [`witrnhid`](https://github.com/JohnScotttt/WITRN_HID_API)

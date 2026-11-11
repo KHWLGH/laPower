@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * 主图 X 窗纯函数：绕光标缩放、钳位、full / follow / frozen 判定。
  * 不碰 DOM、不碰 Tauri，供 data.js 与单测共用。

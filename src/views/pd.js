@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file PD 协议分析视图 — pd-data 接收、可增长日志、虚拟列表。
  *
@@ -61,12 +66,30 @@ let renderScheduled = false;
 let followTailPending = false;
 let initialized = false;
 let softCapWarned = false;
-/** 已入库报文的最大 seq；用于去重和 `pd_log_after` 补洞。 */
+/** 已连续消费的 seq；跳号时暂停实时追加，由单个分页任务追赶。 */
 let lastIngestedSeq = -1;
 /** 与后端 `PdLog.generation` 对齐；导入 / 清空后用来丢掉过期的实时事件。 */
 let acceptedGen = /** @type {number|null} */ (null);
 /** 导入或清空进行中，暂不接受实时事件。 */
 let ingestSuspended = false;
+
+let dataRevision = 0;
+let detailRevision = 0;
+let recoveryTarget = -1;
+/** @type {{revision:number, promise:Promise<void>}|null} */
+let recoveryWork = null;
+/** @type {PdDivider[]} */
+const pendingDividers = [];
+let lastDisconnectTarget = -1;
+
+function invalidatePdWork() {
+  dataRevision++;
+  detailRevision++;
+  recoveryWork = null;
+  recoveryTarget = -1;
+  pendingDividers.length = 0;
+  lastDisconnectTarget = -1;
+}
 
 /** 当前选中的日志下标。 */
 /** @type {number|null} */
@@ -183,7 +206,21 @@ function ingestOne(payload, live = true) {
       acceptedGen = gen;
     }
     const seq = entry.seq;
-    if (seq !== undefined && Number.isFinite(seq) && seq <= lastIngestedSeq) return false;
+    if (seq !== undefined && Number.isSafeInteger(seq)) {
+      if (seq <= lastIngestedSeq) return false;
+      if (live) {
+        recoveryTarget = Math.max(recoveryTarget, seq);
+        if (recoveryWork || seq !== lastIngestedSeq + 1) {
+          void fillPdGap();
+          return false;
+        }
+      } else if (seq !== lastIngestedSeq + 1) {
+        return false;
+      }
+    }
+    while (pendingDividers.length && pendingDividers[0].t < entry.t) {
+      ingestOne(pendingDividers.shift(), false);
+    }
   }
   rememberSeq(entry);
   log.push(entry);
@@ -243,14 +280,47 @@ export function ingestPdBatch(payloads, live = true) {
 /**
  * 切回 PD 视图时按 seq 向后端补齐可能漏掉的报文。
  */
-async function fillPdGap() {
-  const afterSeq = lastIngestedSeq >= 0 ? lastIngestedSeq : null;
-  try {
-    const extra = await invokeCmd('pd_log_after', { afterSeq });
-    if (Array.isArray(extra) && extra.length) ingestPdBatch(extra, false);
-  } catch (e) {
-    console.error(e);
-  }
+export function fillPdGap() {
+  if (ingestSuspended || acceptedGen === -1) return Promise.resolve();
+  if (recoveryWork) return recoveryWork.promise;
+  const revision = dataRevision;
+  const work = { revision, promise: Promise.resolve() };
+  recoveryWork = work;
+  work.promise = (async () => {
+    let throughSeq = null;
+    try {
+      do {
+        const page = /** @type {TauriAPI.PdPage|null} */ (
+          await invokeCmd('pd_log_after', {
+            generation: acceptedGen,
+            afterSeq: lastIngestedSeq >= 0 ? lastIngestedSeq : null,
+            throughSeq,
+          })
+        );
+        if (revision !== dataRevision || !page) return;
+        if (acceptedGen !== null && page.generation !== acceptedGen) return;
+        acceptedGen = page.generation;
+        throughSeq = page.throughSeq;
+        const before = lastIngestedSeq;
+        ingestPdBatch(page.events, false);
+        if (throughSeq !== null && lastIngestedSeq < throughSeq) {
+          if (lastIngestedSeq === before) throw new Error('PD recovery made no progress');
+        } else {
+          if (lastIngestedSeq >= recoveryTarget) break;
+          if (lastIngestedSeq === before) throw new Error('PD recovery target unavailable');
+          throughSeq = null;
+        }
+      } while (revision === dataRevision);
+      if (revision === dataRevision) {
+        while (pendingDividers.length) ingestPdBatch([pendingDividers.shift()], false);
+      }
+    } catch (error) {
+      if (revision === dataRevision) console.error(error);
+    } finally {
+      if (recoveryWork === work) recoveryWork = null;
+    }
+  })();
+  return work.promise;
 }
 
 /** 当前 PD 日志中的条目数（用于诊断与测试）。 */
@@ -298,19 +368,13 @@ document.addEventListener?.('witrn:monitor-changed', () => {
 
 /** 设备断开时插入分隔行，区分两次会话。 */
 export function markPdDisconnect() {
-  if (log.length === 0) return;
-  const last = log[log.length - 1];
-  if (last && isDivider(last)) return;
-  /** @type {PdDivider} */
-  const divider = { t: Date.now(), divider: true };
-  log.push(divider);
-  if (!paused && !viewHidden() && !projectionWork) {
-    if (matchesFilter(divider, currentFilterText(), currentHideGoodCrc())) {
-      filtered.push(log.length - 1);
-      appendRowOffset(divider);
-    }
-    scheduleWindowSync(true);
-  }
+  if (ingestSuspended || acceptedGen === -1) return;
+  if (pendingDividers.length && lastDisconnectTarget === recoveryTarget) return;
+  if (log.length > 0 && isDivider(log[log.length - 1]) && lastIngestedSeq === recoveryTarget) return;
+  if (!log.length && !recoveryWork) return;
+  lastDisconnectTarget = recoveryTarget;
+  pendingDividers.push({ t: Date.now(), divider: true });
+  void fillPdGap();
 }
 
 // ─── 虚拟列表 ────────────────────────────────────────────────────────────────
@@ -625,7 +689,7 @@ function moveSelection(dir) {
   }
   syncWindow();
   const row = listWindow?.querySelector(`[data-index="${next}"]`);
-  void selectIndex(next, row instanceof HTMLElement ? row : null);
+  void selectPdEntry(next, row instanceof HTMLElement ? row : null);
   if (row instanceof HTMLElement) row.focus();
 }
 
@@ -633,7 +697,7 @@ function moveSelection(dir) {
  * @param {number} logIndex
  * @param {HTMLElement|null} [row]
  */
-async function selectIndex(logIndex, row = null) {
+export async function selectPdEntry(logIndex, row = null) {
   const entry = log[logIndex];
   if (!entry || isDivider(entry)) return;
   if (selectedIndex === logIndex && row?.classList.contains('selected')) return;
@@ -650,18 +714,23 @@ async function selectIndex(logIndex, row = null) {
  * @param {number} logIndex
  */
 async function renderDetail(entry, logIndex) {
+  const revision = dataRevision;
+  const request = ++detailRevision;
+  const current = () =>
+    revision === dataRevision && request === detailRevision && selectedIndex === logIndex && log[logIndex] === entry;
   let meta = entry.meta ?? metaCache.get(logIndex) ?? null;
   if (!meta && Number.isFinite(entry.seq)) {
     try {
-      const decoded = await invokeCmd('decode_pd_at', { index: entry.seq });
+      const decoded = await invokeCmd('decode_pd_at', { index: entry.seq, generation: entry.gen ?? acceptedGen });
       if (decoded && typeof decoded === 'object') meta = /** @type {PdMeta} */ (decoded);
     } catch (e) {
+      if (!current()) return;
       console.error(e);
       toast.error(() => t('decodeFailed', { detail: errorText(e) }));
       return;
     }
   }
-  if (selectedIndex !== logIndex) return;
+  if (!current()) return;
   if (!meta) {
     toast.warning(() => t('noDecodeResult'));
     return;
@@ -669,7 +738,6 @@ async function renderDetail(entry, logIndex) {
   cacheMeta(logIndex, meta);
   const body = els.detailBody();
   if (!body) return;
-  entry.meta = meta;
   body.replaceChildren(buildDetail(entry, meta));
   body.hidden = false;
   const empty = els.detailEmpty();
@@ -779,6 +847,7 @@ function buildKvTable(fields, extraClass) {
 
 /** @param {number} index @param {PdMeta} meta */
 function cacheMeta(index, meta) {
+  metaCache.delete(index);
   metaCache.set(index, meta);
   if (metaCache.size > 8) {
     const first = metaCache.keys().next().value;
@@ -787,6 +856,7 @@ function cacheMeta(index, meta) {
 }
 
 function clearSelection() {
+  detailRevision++;
   selectedIndex = null;
   if (listWindow) {
     for (const el of listWindow.querySelectorAll('.pd-row.selected')) el.classList.remove('selected');
@@ -807,6 +877,8 @@ function clearSelection() {
  * 两侧各自只调用对方的无级联版本，因此不会互相递归。
  */
 export function clearPdEntries() {
+  invalidatePdWork();
+  const revision = dataRevision;
   cancelProjection();
   const hadData = log.length > 0;
   log.length = 0;
@@ -822,9 +894,11 @@ export function clearPdEntries() {
   clearSelection();
   void invokeCmd('pd_log_clear')
     .then((gen) => {
+      if (revision !== dataRevision) return;
       acceptedGen = typeof gen === 'number' && Number.isFinite(gen) ? gen : null;
     })
     .catch((e) => {
+      if (revision !== dataRevision) return;
       console.error(e);
       acceptedGen = null;
       toast.error(() => t('clearPdLogFailed', { detail: errorText(e) }));
@@ -872,7 +946,8 @@ async function exportPdCapture() {
   }
 }
 
-async function importPdCapture() {
+export async function importPdCapture() {
+  if (ingestSuspended) return;
   const { open } = window.__TAURI__.dialog;
   const { readTextFile } = window.__TAURI__.fs;
   try {
@@ -897,8 +972,11 @@ async function importPdCapture() {
       return;
     }
 
+    invalidatePdWork();
+    const revision = dataRevision;
     ingestSuspended = true;
     await invokeCmd('set_pd_capture_enabled', { enabled: false });
+    if (revision !== dataRevision) return;
 
     const needBackend = result.entries.some((e) => {
       if (isDivider(e)) return false;
@@ -914,17 +992,22 @@ async function importPdCapture() {
           return { t: e.t, divider: false, bytes: e.bytes ?? [], vbus: e.vbus, ibus: e.ibus };
         }),
       });
+      if (revision !== dataRevision) return;
       if (!Array.isArray(loaded)) {
         toast.error(() => t('pdBackendReplaceFailed'));
         return;
       }
       nextEntries = [];
-      for (const ev of loaded) {
-        const entry = normalizePdPayload(ev);
-        if (entry) nextEntries.push(entry);
+      for (let index = 0; index < loaded.length; index++) {
+        const entry = normalizePdPayload(loaded[index]);
+        if (!entry) continue;
+        const original = result.entries[index];
+        if (!isDivider(entry) && original && !isDivider(original) && original.meta) entry.meta = original.meta;
+        nextEntries.push(entry);
       }
     } else {
       const gen = await invokeCmd('pd_log_clear');
+      if (revision !== dataRevision) return;
       if (typeof gen === 'number' && Number.isFinite(gen)) {
         acceptedGen = gen;
       } else {
@@ -1091,7 +1174,7 @@ export function initPdView() {
       const hit = e.target instanceof Element ? e.target.closest('.pd-row') : null;
       if (!(hit instanceof HTMLElement) || !list.contains(hit)) return;
       const idx = Number(hit.dataset.index);
-      if (Number.isInteger(idx)) void selectIndex(idx, hit);
+      if (Number.isInteger(idx)) void selectPdEntry(idx, hit);
     });
     list.addEventListener('keydown', (e) => {
       const row = e.target instanceof HTMLElement && e.target.classList.contains('pd-row') ? e.target : null;
@@ -1099,7 +1182,7 @@ export function initPdView() {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         const idx = Number(row.dataset.index);
-        if (Number.isInteger(idx)) void selectIndex(idx, row);
+        if (Number.isInteger(idx)) void selectPdEntry(idx, row);
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(e.key === 'ArrowDown' ? 1 : -1);

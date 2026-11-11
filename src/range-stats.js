@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 import { yieldToMainThread } from './cooperative.js';
 import { currentMagnitude, pointEnergyMaxStepS } from './measurement.js';
 

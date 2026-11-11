@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file POWER-Z 协议控制的纯逻辑：PDM 选项、各协议的表单规则、命令构造、日志格式。
  *
@@ -12,7 +17,7 @@ import { t } from './i18n.js';
  * @typedef {{ pdType: number, em: number, sink: number }} PdmSettings
  * @typedef {{ type: string } & Record<string, unknown>} TriggerCommand
  * @typedef {{ protocol?: string, position: number, kind: string, volt_min_mv: number, volt_max_mv: number,
- *   cur_ma?: number, label: string, programmable: boolean }} TriggerPdo
+ *   cur_ma?: number, max_power_mw?: number, label: string, programmable: boolean }} TriggerPdo
  * @typedef {{ id: string, label: string }} DetectedProtocol
  * @typedef {{ kind: string, volt_min_mv: number, volt_max_mv: number }} DetectionVoltage
  * @typedef {{ revision_major: number, revision_minor: number, version_major: number, version_minor: number }} PdRevision
@@ -25,7 +30,7 @@ import { t } from './i18n.js';
  * @typedef {{ firmware_version?: string|null, firmware_diagnostic?: string|null, pdm_version?: string|null,
  *   applied_pdm?: {pd_type: number, em: number, sink: number}|null }} TriggerContext
  * @typedef {{status: string, target_mv: number, measured_mv?: number|null, sample_count: number, detail: string}} VoltageVerification
- * @typedef {{ results: ProtocolDetection[], phase: string, active: string|null, completion: string|null,
+ * @typedef {{ results: ProtocolDetection[], pdos?: TriggerPdo[], phase: string, active: string|null, completion: string|null,
  *   pdm_version: string|null, fallback_used: boolean, elapsed_ms: number, diagnostics: string[], context?: TriggerContext, reset_verification?: VoltageVerification }} DetectionReport
  * @typedef {{ ok: boolean, message: string, pdos: TriggerPdo[], protocols: DetectedProtocol[],
  *   detection?: DetectionReport, code?: string, pdm_open: boolean, description?: unknown, context?: TriggerContext,

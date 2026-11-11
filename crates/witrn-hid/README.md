@@ -52,5 +52,12 @@ $ cargo run --example monitor
 See the [workspace README](../../README.md) for the full picture, including how this
 differs from the Python original.
 
-Original Python implementation by [JohnScotttt](https://github.com/JohnScotttt).
-LGPL-3.0-or-later.
+## Copyright and license
+
+Copyright (C) 2026 KHWLGH
+
+This notice covers only KHWLGH's own contributions to this library, its tests, examples and documentation, under LGPL-3.0-or-later. Other authors retain their rights; Git authorship does not establish an assignment.
+
+The original Python package [witrnhid 1.1.5](https://github.com/JohnScotttt/WITRN_HID_API) declares `Copyright (c) 2025 JohnScotttt` and LGPL-3.0-or-later. The Rust sources came through the retired WITRN-API-RS project (last recorded import `30c4bdb`); that object and a public repository copy are unavailable, so its complete notice history remains unverified. No additional author, assignment or license is inferred.
+
+See the root [`COPYRIGHT`](../../COPYRIGHT) for scope and source evidence. Read the local full [`LGPLv3`](../../LICENSE.LGPL-3.0) together with [`GPLv3`](../../LICENSE); the later-version option comes from the library declaration. The software comes without warranty and may be modified and redistributed under the applicable license conditions.

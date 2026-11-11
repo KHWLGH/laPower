@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Native WebView2 cancellation check; holds background tasks after a complete coarse draw. */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';

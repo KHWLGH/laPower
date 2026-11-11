@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Frame loop shared by the macOS and Linux encoders.
 //!
 //! Rendering, cancellation and the container are identical on both hosts; only the encoder in the

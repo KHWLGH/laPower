@@ -2,6 +2,8 @@
   "name": "lapower",
   "version": "0.2.5",
   "private": true,
+  "author": "KHWLGH",
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

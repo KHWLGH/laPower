@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: GPL-3.0-only
+// For original project contributions; see COPYRIGHT.
 //! Rust-side hot-path benchmarks. `cargo bench -p lapower`.
 //!
 //! Why these and not others:

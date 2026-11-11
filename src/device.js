@@ -1,4 +1,9 @@
 // @ts-check
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /**
  * @file HID 设备枚举、连接、断开。
  */
@@ -13,6 +18,7 @@ import { finalizeSpool } from './recording-spool.js';
 import { state } from './state.js';
 import { resetTempForDevice } from './temperature.js';
 import { toast } from './ui/toast.js';
+import { cancelReportPreparation } from './video-export.js';
 
 const { invoke } = window.__TAURI__.core;
 
@@ -106,6 +112,7 @@ const SPOOL_EXIT_TIMEOUT_MS = 3000;
 
 /** Replaces app.js invoke('shutdown'); rejects rather than destroy with a missing tail. */
 export async function shutdownDeviceStream() {
+  await cancelReportPreparation();
   await cancelPdExport();
   await initializeDeviceStream();
   // 末包排空之后再收尾落盘：退出前最后一批点也要进文件。

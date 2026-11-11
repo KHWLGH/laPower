@@ -1,3 +1,8 @@
+/*!
+ * SPDX-FileCopyrightText: 2026 KHWLGH
+ * SPDX-License-Identifier: GPL-3.0-only
+ * For original project contributions; see COPYRIGHT.
+ */
 /** Bilingual Markdown notes and the local, explicit release preparation step. */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -80,7 +85,9 @@ function taggedLinks(text, version, language, base) {
 export function releaseNotes(notes, version, repository) {
   checkVersion(version);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? '')) throw new Error('无效的发布仓库');
-  const base = `https://github.com/${repository}/blob/v${version}/`;
+  const repositoryUrl = `https://github.com/${repository}`;
+  const base = `${repositoryUrl}/blob/v${version}/`;
+  const archives = `${repositoryUrl}/archive/refs/tags/v${version}`;
   const english = taggedLinks(bodyOf(notes.en, 'en'), version, 'en', base);
   const chinese = taggedLinks(bodyOf(notes['zh-CN'], 'zh-CN'), version, 'zh-CN', base);
   return `## What's changed
@@ -93,6 +100,8 @@ ${english}
 - macOS 12+: choose macos-x64 for Intel or macos-arm64 for Apple Silicon. Builds use ad-hoc signing, without Developer ID signing or notarization. On first launch, you may need to allow the app in System Settings → Privacy & Security. macOS 12 compatibility still requires real-machine verification.
 - Linux x64: DEB, RPM or AppImage. Make the AppImage executable and configure device access using the [udev instructions](${base}docs/en/DEVELOPMENT.md#udev-rules-required). Installers do not change device permissions automatically.
 - SHA256SUMS contains SHA-256 checksums for all seven installers.
+- Corresponding source for this release: [ZIP](${archives}.zip) or [tar.gz](${archives}.tar.gz), both at Tag v${version}. Follow the [build instructions](${base}docs/en/DEVELOPMENT.md) with the included lockfiles; dependency sources are retrieved as described there.
+- Copyright, permissions and notices: [COPYRIGHT](${base}COPYRIGHT), [GPLv3](${base}LICENSE), [LGPLv3](${base}LICENSE.LGPL-3.0) and [third-party materials](${base}licenses/). The software is provided without warranty; applicable license conditions govern modification and redistribution. Full notices are available offline in Settings → About.
 
 Full notes: [English](${base}changelog/${version}/en.md) · [Version history](${base}CHANGELOG.md)
 
@@ -109,6 +118,8 @@ ${chinese}
 - macOS 12+：Intel 选择 macos-x64，Apple Silicon 选择 macos-arm64。应用仅有 ad-hoc 签名，未做 Developer ID 签名或公证；首次打开可能需要在「系统设置 → 隐私与安全性」中允许运行。macOS 12 兼容性仍需实机验证。
 - Linux x64：DEB、RPM 或 AppImage；AppImage 需赋予执行权限，访问仪表需按[开发指南中的 udev 规则](${base}docs/DEVELOPMENT.md#udev-规则必需)配置。安装包不会自动修改设备权限。
 - SHA256SUMS：包含七个安装包的 SHA-256 校验和。
+- 本版本对应源码：[ZIP](${archives}.zip) 或 [tar.gz](${archives}.tar.gz)，均对应 Tag v${version}；使用所附锁文件并按[构建指南](${base}docs/DEVELOPMENT.md)构建，依赖源码按指南说明获取。
+- 版权、许可与告知：[COPYRIGHT](${base}COPYRIGHT)、[GPLv3](${base}LICENSE)、[LGPLv3](${base}LICENSE.LGPL-3.0) 及[第三方材料](${base}licenses/)。软件不提供担保，修改与再分发须遵守相应许可；完整声明可在「设置 → 关于」离线阅读。
 
 完整说明：[简体中文](${base}changelog/${version}/zh-CN.md) · [版本历史](${base}CHANGELOG.md)
 

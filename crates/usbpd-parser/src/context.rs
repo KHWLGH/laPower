@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// Copyright and contribution scope: see COPYRIGHT.
 //! Shared context threaded through message-body decoders.
 
 use crate::error::{ParseError, Result};

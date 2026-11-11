@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 KHWLGH
+// SPDX-License-Identifier: LGPL-3.0-or-later
+// For original project contributions; see COPYRIGHT.
 //! KM003C Interface 0 Vendor Bulk：EP 0x01 OUT / 0x81 IN。
 
 use std::cmp::Reverse;

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 KHWLGH
+# SPDX-License-Identifier: GPL-3.0-only
+# For original project contributions; see COPYRIGHT.
 [workspace]
 resolver = "2"
 members = [
@@ -66,3 +69,10 @@ strip = false
 # Costs one full dependency rebuild the first time; every later relink is unaffected.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Kaspersky on Windows blocks libc 0.2.189's build script at opt-level=2 on the
+# current MSVC toolchain; the default opt-level=0 builds and runs successfully.
+# A named package override is needed: package."*" takes precedence over build-override.
+# This also leaves libc's dev library unoptimized; release profiles are unaffected.
+[profile.dev.package.libc]
+opt-level = 0
