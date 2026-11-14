@@ -322,8 +322,10 @@ function monitorVisible() {
 }
 
 // The overview retains its existing bucket budget and only uses the power channel.
-const navBuckets = new SeriesBuckets();
+const navBuckets = new SeriesBuckets(1);
+const navIndex = new ExactExtremaIndex(1);
 let navSrcLen = 0;
+let navProjectionCap = 0;
 /** @type {import('./chart-buckets.js').OrderedGeometry|null} */
 let navGeometry = null;
 let lastNavPaint = 0;
@@ -333,7 +335,9 @@ function navMaxBuckets() {
 }
 function resetNavBuckets() {
   navBuckets.reset();
+  navIndex.reset();
   navSrcLen = 0;
+  navProjectionCap = 0;
   navGeometry = null;
 }
 /** 把新样本折进导航桶；不 flatten、不 setData。 */
@@ -353,12 +357,23 @@ function syncNavBuckets(through = state.chartSeries.x.length) {
   } else if (navSrcLen < n) {
     foldNavRange(xs, ps, navSrcLen, n, cap);
   }
+  if (navProjectionCap !== cap) {
+    navBuckets.rebuild(xs, [ps], 0, n, cap, navIndex);
+    navBuckets.cap = cap;
+    navProjectionCap = cap;
+  }
 }
 
 /** @param {import('./state.js').F64Col} xs @param {import('./state.js').F64Col} ps @param {number} _start @param {number} end @param {number} cap */
 function foldNavRange(xs, ps, _start, end, cap) {
+  if (navSrcLen && navProjectionCap !== cap) {
+    navBuckets.rebuild(xs, [ps], 0, navSrcLen, cap, navIndex);
+  }
+  navIndex.sync([ps], end);
   navBuckets.cap = cap;
   navBuckets.appendThrough(xs, [ps], end);
+  navBuckets._index = navIndex;
+  navProjectionCap = cap;
   navSrcLen = navBuckets.srcEnd;
 }
 
@@ -2201,6 +2216,8 @@ function axisAutoSize(u, values, axisIdx, cycleNum) {
   const axis = u.axes[axisIdx];
   // 第二轮布局迭代后直接复用已计算的尺寸，避免布局震荡
   if (cycleNum > 1) return axis._size;
+  // uPlot caches the active font; measurement must not change its Canvas state behind that cache.
+  const previousFont = u.ctx.font;
   let size = (axis.ticks?.show ? axis.ticks.size : 0) + axis.gap + 4;
   const longest = (values ?? []).reduce((acc, v) => (String(v).length > acc.length ? String(v) : acc), '');
   if (longest !== '') {
@@ -2212,6 +2229,7 @@ function axisAutoSize(u, values, axisIdx, cycleNum) {
     u.ctx.font = Array.isArray(axis.labelFont) ? axis.labelFont[0] : `12px ${CHART_FONT}`;
     titleSize = u.ctx.measureText(axis.axisTitle).width / (uPlot.pxRatio || devicePixelRatio || 1) + 8;
   }
+  u.ctx.font = previousFont;
   return Math.ceil(Math.max(size, titleSize, 28));
 }
 
@@ -3096,7 +3114,7 @@ function initNavigatorChart() {
 
   state.navigatorChart = new uPlot(opts, /** @type {any} */ (navData), host);
   observeResize(host, state.navigatorChart, () => {
-    resetNavBuckets();
+    navProjectionCap = 0;
     appliedNavGen = -1;
   });
 }

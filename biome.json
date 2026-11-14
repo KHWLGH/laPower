@@ -55,6 +55,7 @@
       "!**/output",
       "!**/bench/baselines",
       "!**/.vscode",
+      "!**/.local-*",
       "!**/node_modules",
       "!**/package-lock.json"
     ]

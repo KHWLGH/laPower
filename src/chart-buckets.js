@@ -114,6 +114,13 @@ export function firstIndexAfter(xs, length, target) {
  */
 
 export class SeriesBuckets {
+  /** @param {number} [channels=8] */
+  constructor(channels = 8) {
+    this.channels = channels;
+    this._carrierX = new Float64Array(0);
+    this._carrierYs = Array.from({ length: channels }, () => new Float64Array(0));
+    this._candidates = new Array(4);
+  }
   /** @type {DisplayBucket[]} */
   list = [];
   ppb = 1;
@@ -161,6 +168,7 @@ export class SeriesBuckets {
   }
   /** @param {number} x @param {number[]} values @param {boolean} merge */
   pushSampleInternal(x, values, merge) {
+    if (values.length !== this.channels) values = Array.from({ length: this.channels }, (_, s) => values[s] ?? NaN);
     const last = this.list.at(-1),
       partial = last && last.n < this.ppb;
     this._dirty = Math.min(this._dirty, partial ? this.list.length - 1 : this.list.length);
@@ -177,8 +185,8 @@ export class SeriesBuckets {
         this._stream.set(bucket, {
           first: values.slice(),
           last: values.slice(),
-          minX: Array(8).fill(x),
-          maxX: Array(8).fill(x),
+          minX: Array(this.channels).fill(x),
+          maxX: Array(this.channels).fill(x),
           minRank: bucket.count.slice(),
           maxRank: bucket.count.slice(),
         });
@@ -215,7 +223,7 @@ export class SeriesBuckets {
             minRank: am.minRank.slice(),
             maxRank: am.maxRank.slice(),
           };
-          for (let s = 0; s < 8; s++) {
+          for (let s = 0; s < this.channels; s++) {
             if (out.minIndex[s] === b.minIndex[s] && b.minIndex[s] >= 0) {
               meta.minX[s] = bm.minX[s];
               meta.minRank[s] = a.count[s] + bm.minRank[s];
@@ -253,20 +261,20 @@ export class SeriesBuckets {
     let i = start;
     /** @type {DisplayBucket|null} */
     let bucket = null;
-    const values = new Array(8);
+    const values = new Array(this.channels);
     return (maxSamples = 4096, maxBuckets = Infinity) => {
       let remaining = Math.max(1, maxSamples),
         bucketsRemaining = Math.max(1, maxBuckets);
       while (i < end && remaining > 0 && bucketsRemaining > 0) {
         if (!bucket) {
-          for (let s = 0; s < 8; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
+          for (let s = 0; s < this.channels; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
           bucket = makeBucket(columnValue(xs, i), values, i++);
           remaining--;
         }
         const through = Math.min(end, bucket.start + this.ppb, i + remaining);
         if (index) index.fold(bucket, series, i, through);
         else {
-          for (let s = 0; s < 8; s++) {
+          for (let s = 0; s < this.channels; s++) {
             const col = series[s];
             if (!col) continue;
             let min = bucket.min[s],
@@ -326,13 +334,13 @@ export class SeriesBuckets {
   appendThroughMode(xs, series, end, fixed) {
     this._xs = xs;
     this._series = series;
-    const values = new Array(8);
+    const values = new Array(this.channels);
     for (let i = this.srcEnd; i < end; ) {
       const xSpan = columnSpan(xs, i, end),
         spans = series.map((col) => (col ? columnSpan(col, i, end) : null));
       const through = Math.min(xSpan.end, ...spans.map((span) => span?.end ?? end));
       for (; i < through; i++) {
-        for (let s = 0; s < 8; s++) {
+        for (let s = 0; s < this.channels; s++) {
           const span = spans[s];
           values[s] = span ? Number(span.values[i - span.base]) : NaN;
         }
@@ -370,7 +378,7 @@ export class SeriesBuckets {
   flatten() {
     if (this._flatView) return this._flatView;
     const size = this.list.length * 4;
-    const channels = Array.from({ length: 8 }, (_, s) => {
+    const channels = Array.from({ length: this.channels }, (_, s) => {
       let buffer = this._buffers[s];
       const reused = !!buffer && buffer.x.length >= size;
       if (!reused) {
@@ -387,7 +395,7 @@ export class SeriesBuckets {
       const { x, y, indices, connect, ends } = buffer,
         dirty = reused ? this._dirty : 0;
       let n = dirty ? ends[dirty - 1] : 0;
-      const candidates = new Array(4),
+      const candidates = this._candidates,
         col = this._series[s];
       for (let bi = n ? dirty : 0; bi < this.list.length; bi++) {
         const b = this.list[bi],
@@ -441,8 +449,14 @@ export class SeriesBuckets {
         connect: connect.subarray(0, n),
       };
     });
-    const x = new Float64Array(this.list.length * 2),
-      ys = Array.from({ length: 8 }, () => new Float64Array(x.length));
+    const carrierSize = this.list.length * 2;
+    if (this._carrierX.length < carrierSize) {
+      const capacity = Math.max(64, carrierSize, this._carrierX.length * 2);
+      this._carrierX = new Float64Array(capacity);
+      this._carrierYs = Array.from({ length: this.channels }, () => new Float64Array(capacity));
+    }
+    const x = this._carrierX,
+      ys = this._carrierYs;
     let n = 0;
     for (const b of this.list)
       for (const last of [false, true]) {
@@ -450,7 +464,7 @@ export class SeriesBuckets {
           meta = this._stream.get(b);
         if (n > 0 && x[n - 1] === px) n--;
         x[n] = px;
-        for (let s = 0; s < 8; s++)
+        for (let s = 0; s < this.channels; s++)
           ys[s][n] = this._series[s]
             ? columnValue(this._series[s], last ? b.start + b.n - 1 : b.start)
             : ((last ? meta?.last[s] : meta?.first[s]) ?? NaN);
@@ -464,12 +478,12 @@ export class SeriesBuckets {
 
 /** @param {number} x @param {number[]} values @param {number} start @returns {DisplayBucket} */
 function makeBucket(x, values, start) {
-  const min = new Array(8),
-    max = new Array(8),
-    minIndex = new Array(8),
-    maxIndex = new Array(8),
-    count = new Array(8);
-  for (let s = 0; s < 8; s++) {
+  const min = new Array(values.length),
+    max = new Array(values.length),
+    minIndex = new Array(values.length),
+    maxIndex = new Array(values.length),
+    count = new Array(values.length);
+  for (let s = 0; s < values.length; s++) {
     const v = values[s],
       valid = Number.isFinite(v);
     min[s] = max[s] = valid ? v : NaN;
@@ -480,7 +494,7 @@ function makeBucket(x, values, start) {
 }
 /** @param {DisplayBucket} b @param {number[]} values @param {number} i */
 function foldValues(b, values, i) {
-  for (let s = 0; s < 8; s++) {
+  for (let s = 0; s < b.min.length; s++) {
     const v = values[s];
     if (!Number.isFinite(v)) continue;
     b.count[s]++;
@@ -497,7 +511,7 @@ function foldValues(b, values, i) {
 /** @param {StreamPoints} meta @param {DisplayBucket} b @param {number} x @param {number[]} values @param {number} i */
 function updateStream(meta, b, x, values, i) {
   meta.last = values.slice();
-  for (let s = 0; s < 8; s++) {
+  for (let s = 0; s < b.min.length; s++) {
     if (b.minIndex[s] === i) {
       meta.minX[s] = x;
       meta.minRank[s] = b.count[s];
@@ -521,7 +535,7 @@ function mergeBucket(a, b) {
     maxIndex: a.maxIndex.slice(),
     count: a.count.map((n, s) => n + b.count[s]),
   };
-  for (let s = 0; s < 8; s++) {
+  for (let s = 0; s < a.min.length; s++) {
     if (b.minIndex[s] >= 0 && (a.minIndex[s] < 0 || b.min[s] < a.min[s])) {
       out.min[s] = b.min[s];
       out.minIndex[s] = b.minIndex[s];

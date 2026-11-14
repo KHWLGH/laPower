@@ -8,12 +8,13 @@
  * @file HID 设备枚举、连接、断开。
  */
 
-import { refreshRecordButton, stopRecording } from './data.js';
+import { refreshRecordButton, stopRecording, suspendMonitorDisplay } from './data.js';
 import { deviceStream } from './device-stream.js';
 import { registerListeners } from './event-listeners.js';
 import { errorText, onLanguageChange, t } from './i18n.js';
 import { cancelPdExport } from './pd-export.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
+import { terminateRangeStatsWorker } from './range-stats-background.js';
 import { finalizeSpool } from './recording-spool.js';
 import { state } from './state.js';
 import { resetTempForDevice } from './temperature.js';
@@ -69,7 +70,9 @@ export function setConnectionReady(ready) {
 /** Call once at app startup, before a device can connect. PD listeners remain in app.js. */
 export function initializeDeviceStream() {
   if (streamInitialization) return streamInitialization;
-  performanceDiagnostics.start();
+  performanceDiagnostics.start({
+    isVisible: () => state.windowVisible && !document.hidden,
+  });
   deviceStream.configure({
     onEnd: () => setConnected(false),
     onError: (error) => {
@@ -85,7 +88,12 @@ export function initializeDeviceStream() {
   // 的回执里那两个 declared 字段就是从这里的返回值读的。只读，不影响采集路径。
   window.__WITRN_STREAM__ = () => deviceStream.diagnostics();
   window.__WITRN_PERF__ = () => performanceDiagnostics.snapshot();
-  window.__WITRN_PERF_RESET__ = () => performanceDiagnostics.reset();
+  window.__WITRN_PERF_START__ = () => performanceDiagnostics.startDetailed();
+  window.__WITRN_PERF_STOP__ = () => performanceDiagnostics.stopDetailed();
+  window.__WITRN_PERF_RESET__ = () => {
+    performanceDiagnostics.startDetailed();
+    performanceDiagnostics.reset();
+  };
   streamInitialization = (async () => {
     const { listen } = window.__TAURI__.event;
     try {
@@ -115,10 +123,13 @@ export async function shutdownDeviceStream() {
   await cancelReportPreparation();
   await cancelPdExport();
   await initializeDeviceStream();
+  suspendMonitorDisplay();
   // 末包排空之后再收尾落盘：退出前最后一批点也要进文件。
   await deviceStream.shutdown(() =>
     Promise.race([finalizeSpool(), new Promise((resolve) => setTimeout(resolve, SPOOL_EXIT_TIMEOUT_MS))]),
   );
+  suspendMonitorDisplay();
+  terminateRangeStatsWorker();
 }
 
 /** @param {string} id @param {string} value */

@@ -312,10 +312,9 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let url = format!("http://{}/release", listener.local_addr().unwrap());
-            let server = std::thread::spawn(move || {
-                let (_stream, _) = listener.accept().unwrap();
-                std::thread::sleep(Duration::from_millis(100));
-            });
+            // Keep the listening socket open without responding. A short client
+            // timeout can expire before connect under load; joining a thread
+            // blocked in accept would then hang the test suite indefinitely.
             let client = Client::builder()
                 .no_proxy()
                 .timeout(Duration::from_millis(25))
@@ -328,7 +327,7 @@ mod tests {
                     .code,
                 "updateTimeout"
             );
-            server.join().unwrap();
+            drop(listener);
             // The listener has closed, so this is a connection error rather than a timeout.
             let client = Client::builder()
                 .no_proxy()

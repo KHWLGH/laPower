@@ -9,6 +9,7 @@
 - [發佈流程](#發佈流程)
 - [質量檢查](#質量檢查)
 - [測試與迴歸邊界](#測試與迴歸邊界)
+- [按需瀏覽器自動驗收](#按需瀏覽器自動驗收)
 - [開發展示工具](#開發展示工具)
 - [效能測量](#效能測量)
 - [CI 門禁](#ci-門禁)
@@ -219,10 +220,11 @@ Windows 當前不做憑證簽章；macOS 使用 ad-hoc 簽章，沒有 Developer
 | `npm run check` | 日常前端檢查 |
 | `npm run check:rust` | Rust 檢查，自動先產生 `out/` |
 | `npm run check:all` | 交付前完整核心檢查，包含前兩組與元件清單核對 |
+| `npm run test:browser` | 按需無頭瀏覽器工作流程與效能結構驗收 |
 
 `check` 依序執行 `npm test`、`typecheck`、`lint`，不建置前端或執行 Cargo；`check:rust` 先建置一次前端，再執行格式檢查、工作區 Clippy 與測試。`check:all` 依序組合兩組檢查與 `components:check`，只建置一次前端，所有入口遇錯即停。單項命令仍可獨立執行；元件清單核對需要 Cargo，缺少相依快取時可能連網。原有 CI 檢查集合維持不變。
 
-`npm test` 使用 Node 內置測試運行器，覆蓋純邏輯、資料處理、協定/檔案契約、安全邊界和版本同步。測試檔案按核心領域組織，當前保留的主要檔案包括：
+`npm test` 使用 Node 內建測試執行器，只尋找 `test/*.test.js`，避免執行輸出目錄中的歷史原始碼副本。新核心測試沿用該位置與命名，定向檢查使用 `node --test test/檔名.test.js`。Biome 跳過輸出、相依與 `.local-*` 本機工具目錄，不必臨時移走檔案。核心測試涵蓋純邏輯、資料處理、協定／檔案契約、安全邊界和版本同步，主要檔案包括：
 
 ```text
 chart-buckets  chart-columns  chart-extrema  chart-window
@@ -254,11 +256,27 @@ done
 - 效能 benchmark 和真機檢查按需手動運行，不作為每次改動的瀏覽器自動迴歸。
 - CI 保持固定的核心檢查集合，不因單個功能增加專用迴歸流程。
 
+## 按需瀏覽器自動驗收
+
+沿用現有 Playwright 與模擬裝置伺服器，不新增執行期相依。首次執行 `npx playwright install chromium`，然後執行：
+
+```bash
+npm run test:browser
+npm run test:browser -- --case chart-idle-resize,range-worker
+npm run test:browser -- --channel msedge
+```
+
+六個隔離場景依序驗證：模擬每秒 100／1000 筆記錄、暫停末包消費及 ACK、CSV 逐欄與統計／積分往返；含缺測與重複時間的十萬點歷史，五次尺寸變更後投影及圖表 PNG 一致、不重掃索引且空閒診斷停止；真正瀏覽器 Worker 重用、4096 行緩衝上限與取消隔離；PD 同條件投影重用、連續篩選並行追加及隱藏零 DOM 提交；模擬協定進度、依據展開及 PDO 觸發。恢復檔案去重、寫入失敗及持久化邊界仍由 `recording-spool` 核心測試覆蓋。
+
+固定無頭執行，不開啟或啟用桌面視窗，不存取真實儀表、設定或測量檔案。預設使用 Playwright Chromium，也可指定已安裝的 Edge／Chrome；缺少瀏覽器直接失敗。每項最多 90 秒，失敗後繼續收集其餘場景，最終回傳非零退出碼。`output/browser-tests/<時間>/` 保存環境、指標及錯誤的 `report.json`、`junit.xml`，失敗另存 PNG 與 Playwright trace ZIP；可用 `npx playwright show-trace <zip>` 人工查看。`--output <目錄>` 指定結果根目錄，`--help` 列出場景。結果不提交，像素在同次執行內比較，不維護跨機器圖片基準；絕對耗時僅報告。
+
+維護時優先擴充核心測試；依賴真正瀏覽器排程、Worker 或 Canvas 的高影響問題才加入 `tools/showcase/verify-workflows.mjs`，使用狀態與有界工作量斷言。四語／版面仍可按需執行 `node tools/showcase/verify-i18n.mjs`、`node tools/showcase/verify-appearance.mjs`。原生 GUI、真實檔案故障、儀表序號異常與持續擷取需另做實機驗收。
+
 ## 開發展示工具
 
 長時間錄製的記憶體比較使用 `npm run bench:memory`，預設以 `bench/results/memory-before/` 中修改前的 `state.js`、`csv-codec.js`、`csv-import-core.js` 與 `measurement.js` 快照比較目前原始碼，也可用 `-- --baseline <目錄>` 指定快照。涵蓋 100 萬／500 萬點持續追加、持有匯出快照時追加、串流 CSV 匯入及反覆清空；逐欄 SHA-256 必須一致，欄緩衝至少節省 20%。結果寫入 `bench/results/memory.json`，分開記錄獨立欄緩衝、Node RSS 抽樣峰值及 OS 峰值，不代表整個 Tauri／WebView2 程序樹。
 
-`tools/showcase/` 是獨立的瀏覽器開發工具，提供虛擬 WITRN K2 與 POWER-Z KM003C、確定性的測量曲線、PD 報文和協定控制結果。資料仍經過軟體現有攝入與渲染邏輯；完整標題列使用 decorum 同款控制項結構與軟體自身的圖示、樣式，視窗行為虛擬化。工具不連線真實儀表，不進入 `src/`、`out/` 或安裝包，也不加入瀏覽器 CI。
+`tools/showcase/` 是獨立的瀏覽器開發工具，提供虛擬 WITRN K2 與 POWER-Z KM003C、確定性的測量曲線、PD 報文和協定控制結果。資料仍經過軟體現有攝入與渲染邏輯；完整標題列使用 decorum 同款控制項結構與軟體自身的圖示、樣式，視窗行為虛擬化。工具不連線真實儀表，不進入 `src/`、`out/` 或安裝包，按需瀏覽器驗收沿用其伺服器。
 
 首次準備：
 
@@ -327,7 +345,7 @@ npm run showcase:capture -- --help
 | `package-summary` | 四目標全部成功後驗證七個安裝包並產生 `SHA256SUMS` |
 | `release` | 僅版本 Tag push；上傳並核對附件後自動公開 Release |
 
-普通分支 push 和 PR 只運行原有檢查，不打包或發佈。CI 不運行瀏覽器驗收、硬體長跑或功能表面迴歸。開發展示工具僅用於按需預覽和產生文件圖片，不承擔瀏覽器驗收或 CI 門禁；新增功能不應順手增加專用 workflow、job 或迴歸 harness。發佈指令碼的失敗、重跑、附件完整性和公開版本保護由 `test/release.test.js` 離線驗證。
+普通分支 push 和 PR 只執行原有檢查，不打包或發佈。按需選擇 Actions → **Browser acceptance** → Run workflow，使用獨立的 `.github/workflows/browser-tests.yml`：安裝 Chromium、執行 `test:browser`，無論成敗上傳報告及失敗證據，保留 14 天，不打包或發佈。不要為瀏覽器驗收觸發原有 **CI** 手動入口，後者會打包。瀏覽器驗收不加入每次 push／PR 的固定檢查，也不執行硬體長跑。發佈指令碼的失敗、重跑、附件完整性和公開版本保護由 `test/release.test.js` 離線驗證。
 
 ## Linux 自行編譯
 

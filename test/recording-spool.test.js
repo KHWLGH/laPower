@@ -132,7 +132,10 @@ test('a spool file starts with the fixed-width header and back-fills existing ro
   assert.match(file.stem, /^KM003C_\d{8}-\d{6}$/);
   assert.equal(file.headerLen, SPOOL_PATCH_BYTES);
   assert.ok(file.text.startsWith('SUM,000000000003\n'), 'the pause patched the row count in place');
-  assert.equal(file.synced, 3, 'header, completed backfill and pause are durable');
+  assert.equal(file.synced, 2, 'header and completed backfill are durable');
+  const calls = backend.calls.length;
+  await spool.spoolRecordingPaused();
+  assert.equal(backend.calls.length, calls, 'an unchanged durable version needs no patch or sync');
   assert.equal(file.closed, false, 'a pause keeps the file open for the next segment');
   const parsed = parseCsv(file.text, { fallbackStartTime: 0 });
   assert.equal(parsed.columns.x.length, 3);
@@ -210,6 +213,9 @@ test('native checkpoints drain a low-rate tail and sync without waiting for anot
   backend.tick({ payload: { handle: backend.nextHandle, error: null } });
   for (let i = 0; i < 50 && file.synced === before; i++) await new Promise((resolve) => setTimeout(resolve, 1));
   assert.ok(file.synced > before);
+  // Wait for the drain's final checkpoint, which previously repeated patch + sync.
+  await spool.spoolRecordingPaused();
+  assert.equal(file.synced, before + 1, 'one appended version is synchronized only once');
   assert.ok(file.text.startsWith('SUM,000000000002\n'));
   assert.equal(parseCsv(file.text, { fallbackStartTime: 0 }).columns.x.length, 2);
   const calls = backend.calls.length;

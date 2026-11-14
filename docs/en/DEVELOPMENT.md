@@ -9,6 +9,7 @@
 - [Release process](#release-process)
 - [Quality checks](#quality-checks)
 - [Testing and regression boundaries](#testing-and-regression-boundaries)
+- [Optional automated browser acceptance](#optional-automated-browser-acceptance)
 - [Development showcase](#development-showcase)
 - [Performance measurements](#performance-measurements)
 - [CI gates](#ci-gates)
@@ -218,10 +219,11 @@ Choose one entry point for the scope of your changes:
 | `npm run check` | Daily frontend checks |
 | `npm run check:rust` | Rust checks, generating `out/` first |
 | `npm run check:all` | All core checks before delivery, including both groups and component-list verification |
+| `npm run test:browser` | Optional headless workflow and performance-structure acceptance |
 
 `check` runs `npm test`, `typecheck` and `lint` in sequence without building the frontend or running Cargo. `check:rust` builds the frontend once, then runs Rust formatting, workspace Clippy and tests. `check:all` combines both groups with `components:check`, builds the frontend only once, and stops on the first failure. Individual commands remain available. Component-list verification needs Cargo and may fetch uncached dependencies. The existing CI check set is unchanged.
 
-`npm test` uses Node's built-in runner for pure logic, data processing, protocol/file contracts, security boundaries and version synchronization. Tests are organized by core domain; major retained files include:
+`npm test` uses Node's built-in runner, discovering only `test/*.test.js` to avoid historical source copies in output directories. Place new core tests there with the same naming convention; run selected files with `node --test test/name.test.js`. Biome skips output, dependencies and `.local-*` machine-local tooling without moving files. Core coverage includes pure logic, data processing, protocol/file contracts, security boundaries and version synchronization. Major files include:
 
 ```text
 chart-buckets  chart-columns  chart-extrema  chart-window
@@ -253,11 +255,27 @@ done
 - Run performance benchmarks and real-device checks manually as needed, rather than browser regression on every change.
 - Keep CI's core checks fixed; individual features should not add dedicated regression workflows.
 
+## Optional automated browser acceptance
+
+This reuses Playwright and the existing simulated-device server without new runtime dependencies. Install Chromium once with `npx playwright install chromium`, then run:
+
+```bash
+npm run test:browser
+npm run test:browser -- --case chart-idle-resize,range-worker
+npm run test:browser -- --channel msedge
+```
+
+Six isolated scenarios run serially: simulated 100/1000 samples per second, pause-tail consumption/ACK and exact CSV column/statistics/energy round trips; 100,000 history points with missing values and duplicate times, identical projections/chart PNGs after five resizes, reused indexes and no idle diagnostic frames; real browser Worker reuse, bounded 4096-row transfers and cancellation isolation; reused PD projections, rapid filters with concurrent appends and no hidden DOM commits; simulated protocol progress, expandable evidence and PDO triggering. Core `recording-spool` tests retain checkpoint deduplication, failure and durability coverage.
+
+The runner is always headless, never opens or activates desktop windows, and does not access real devices, settings or measurements. It defaults to Playwright Chromium; explicitly select installed Edge/Chrome if needed. Missing browsers fail rather than skip. Each case has a 90-second limit; failures do not stop later cases, and the final exit code is nonzero. `output/browser-tests/<timestamp>/` contains environment, metrics and errors in `report.json` and `junit.xml`, plus PNG/Playwright trace ZIP files on failure. Inspect traces manually with `npx playwright show-trace <zip>`. `--output <directory>` changes the result root; `--help` lists cases. Do not commit results. Pixels are compared within one run without a cross-machine image baseline; absolute timings are reports only.
+
+Extend core tests first. Add high-impact cases requiring actual browser scheduling, Workers or Canvas to `tools/showcase/verify-workflows.mjs`, asserting state and bounded work. Optional language/layout checks remain at `node tools/showcase/verify-i18n.mjs` and `node tools/showcase/verify-appearance.mjs`. Native GUI, real file failures, device sequence anomalies and sustained acquisition need separate hardware acceptance.
+
 ## Development showcase
 
 `npm run bench:memory` compares long-recording memory against pre-change snapshots of `state.js`, `csv-codec.js`, `csv-import-core.js` and `measurement.js` in `bench/results/memory-before/`, or a directory passed with `-- --baseline <directory>`. It covers continuous appends at one/five million points, appends with retained export snapshots, streaming CSV imports and repeated clears. Per-column SHA-256 must match; column buffers must save at least 20%. Results in `bench/results/memory.json` distinguish unique column buffers, sampled Node RSS peaks and OS peaks; they do not measure the complete Tauri/WebView2 process tree.
 
-`tools/showcase/` is a separate browser development tool with virtual WITRN K2 and POWER-Z KM003C devices, deterministic measurements, PD messages and protocol-control results. Data uses the app's existing ingestion/rendering logic. The full title bar uses decorum-style control structure and the app's icons/styles with virtual window behavior. It does not connect hardware, enter `src/`, `out/` or installers, or join browser CI.
+`tools/showcase/` is a separate browser development tool with virtual WITRN K2 and POWER-Z KM003C devices, deterministic measurements, PD messages and protocol-control results. Data uses the app's existing ingestion/rendering logic. The full title bar uses decorum-style control structure and the app's icons/styles with virtual window behavior. It does not connect hardware or enter `src/`, `out/` or installers. Optional browser acceptance reuses its server.
 
 Initial setup:
 
@@ -326,7 +344,7 @@ The `perf-shape` CI job enforces only shipping shape and baseline structure. Alg
 | `package-summary` | Verifies seven installers and generates `SHA256SUMS` after all targets succeed |
 | `release` | Version-tag pushes only; uploads/verifies assets and publishes automatically |
 
-Ordinary branch pushes and PRs run checks without packaging or release. CI does not run browser acceptance, hardware endurance or surface-feature regressions. The showcase is for optional preview/documentation images, not browser acceptance or a CI gate. New features should not add a workflow/job/regression harness incidentally. `test/release.test.js` verifies failure, retries, asset integrity and public-release protection offline.
+Ordinary branch pushes and PRs run existing checks without packaging or release. For optional browser acceptance, select Actions → **Browser acceptance** → Run workflow, using the separate `.github/workflows/browser-tests.yml`. It installs Chromium, runs `test:browser` and uploads reports/failure evidence regardless of success, retaining artifacts for 14 days without packaging or releasing. Do not use the existing **CI** manual entry for this; that entry builds installers. Browser acceptance is not added to every push/PR and does not run hardware endurance. `test/release.test.js` verifies failure, retries, asset integrity and public-release protection offline.
 
 ## Building on Linux
 

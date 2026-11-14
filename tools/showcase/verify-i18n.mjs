@@ -267,16 +267,15 @@ try {
       await page.waitForFunction(() => document.getElementById('btn-km-cancel').hidden);
       await page.evaluate(() => window.__SHOWCASE__.resetTriggerDelay());
       const callsBeforeFill = await page.evaluate(() => window.__SHOWCASE__.diagnostics().triggerCalls);
-      await page
-        .locator('.trigger-detection-group.is-pd [data-protocol="pd"] .trigger-detection-action button')
-        .click();
+      await page.locator('.trigger-detection-group.is-pd [data-protocol="pd"] .trigger-use-protocol').click();
       assert.equal(await page.locator('#btn-km-mode-trigger').getAttribute('aria-selected'), 'true');
       assert.equal(await page.locator('#km-proto').inputValue(), 'pd');
       assert.equal(await page.locator('#km-req-pos').inputValue(), '1');
       assert.equal(await page.evaluate(() => window.__SHOWCASE__.diagnostics().triggerCalls), callsBeforeFill);
 
       await page.locator('#km-req-pos').fill('3');
-      await page.locator('#km-req-volt').fill('9000');
+      assert.equal(await page.locator('#km-req-volt').inputValue(), '12000');
+      assert.equal(await page.locator('#km-req-volt').getAttribute('readonly'), '');
       await page.locator('#km-req-cur').fill('3000');
       await page.locator('#btn-km-trigger').click();
       await page.waitForFunction(() => document.getElementById('btn-km-cancel').hidden);
@@ -299,12 +298,12 @@ try {
       const contextCalls = await page.evaluate(() => window.__SHOWCASE__.diagnostics().triggerCalls);
       await page.locator('#km-log-text-filter').fill('');
       const pdRequest = page.locator('#km-history-list .trigger-history-item').first();
-      await pdRequest.locator('summary').click();
+      if ((await pdRequest.getAttribute('open')) === null) await pdRequest.locator('summary').click();
       await page.locator('#km-req-pos').fill('1');
-      await page.locator('#km-req-volt').fill('5000');
+      assert.equal(await page.locator('#km-req-volt').inputValue(), '5000');
       await pdRequest.getByRole('button', { name: 'Fill form' }).click();
       assert.equal(await page.locator('#km-req-pos').inputValue(), '3');
-      assert.equal(await page.locator('#km-req-volt').inputValue(), '9000');
+      assert.equal(await page.locator('#km-req-volt').inputValue(), '12000');
       assert.equal(await page.evaluate(() => window.__SHOWCASE__.diagnostics().triggerCalls), contextCalls);
       await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       await page.locator('#btn-km-log-copy').click();

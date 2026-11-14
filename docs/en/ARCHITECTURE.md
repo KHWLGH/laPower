@@ -252,6 +252,14 @@ Pixel-column bitmaps and independent strip fill apply only to the main chart. Th
 
 Pressure feedback measures actual JS drawing and post-draw frame delay, excluding preparation/import time. The persisted `chartFillEnabled` setting and per-channel opacities control shading; pressure, pausing, dragging and window density never change it automatically. Continuous input coalesces the latest window each frame and release immediately submits the final projection. Density adaptation and pacing do not affect acquisition, saving, statistics or integration. See [Performance benchmarks and limits](PERFORMANCE.md#measurement-and-hardware-limits).
 
+### Reusing display and background work
+
+Default frame telemetry samples short windows after real drawing and visibility restoration; explicit debug entries enable/disable full diagnostics. Global status outside Monitor commits at most once per 250 ms and returning to Monitor synchronizes immediately. A separate single-channel power index survives navigator resizes; only source invalidation resets it. Both charts retain the existing bucket budgets and ordered extrema rules.
+
+Range statistics serialize fixed snapshots on one reusable Worker. Job/request IDs isolate late replies, and eight scratch columns of at most 4096 rows return after consumption. Source buffers never transfer, cancellation never publishes partial results, and failures retain cooperative fallback. Shutdown cancels statistics and releases the Worker after device producers finish.
+
+PD filtering, layout and visibility restoration coalesce into one valid projection. Hidden views cancel DOM commits and recover gaps when restored. Ingested entries are immutable, allowing exports to freeze reference arrays. Protocol progress is retained line by line while changed history/detection DOM commits per frame. Recovery files checkpoint only when durable row/header versions change. The emitter blocks on an empty queue and starts its original batching deadline on the first message.
+
 ### Cooperative report preparation
 
 Image and video reports share the incremental `video-projection.js` kernel through synchronous `projectVideo` and asynchronous `projectVideoAsync`. The UI freezes columns, marker values, provenance, labels, options and recording state before the first yield. Statistics and energy integration, bucket scans, frame-cursor traversal and marker sorting are split into steps of at most 4096 samples or operations, using the existing approximately 1.5 ms cooperative budget. Budget checks occur between steps, so this is not a hard task-duration guarantee. Cancellation abandons the unpublished payload; shutdown awaits preparation cancellation, and a late save-dialog result cannot submit a cancelled report. Raw samples, integration order and payload fields stay unchanged.

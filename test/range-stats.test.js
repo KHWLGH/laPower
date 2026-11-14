@@ -13,7 +13,7 @@ import {
   computeRangeStatsSync,
   rangeStatsRevision,
 } from '../src/range-stats.js';
-import { computeRangeStatsBackground } from '../src/range-stats-background.js';
+import { computeRangeStatsBackground, terminateRangeStatsWorker } from '../src/range-stats-background.js';
 import { emptyChartColumns } from '../src/state.js';
 
 function columnsOf(count, capacity = count) {
@@ -216,7 +216,7 @@ test('the real Worker preserves exact folds across mixed cadence, segment and tr
     assert.ok(
       worker.messages.filter((m) => m.type === 'chunk').every((m) => m.rows <= 4096 && m.bytes <= 4096 * 8 * 8),
     );
-    assert.ok(worker.closed);
+    assert.equal(worker.closed, false);
     const seed = computeRangeStatsSync(captureRangeStatsSnapshot(cols, 0, 4095, 2));
     const full = captureRangeStatsSnapshot(cols, 0, 10030, 2);
     assertExact(
@@ -228,7 +228,9 @@ test('the real Worker preserves exact folds across mixed cadence, segment and tr
       }),
       Object.fromEntries(Object.entries(computeRangeStatsSync(full)).filter(([key]) => key !== 'columns')),
     );
+    assert.equal(ModuleWorker.instances.at(-1), worker, 'completed jobs reuse one worker');
   } finally {
+    terminateRangeStatsWorker();
     globalThis.Worker = previousWorker;
   }
 });
@@ -245,7 +247,11 @@ test('Worker cancellation returns no partial result and initialization failure u
     });
     controller.abort();
     assert.equal(await pending, null);
-    assert.ok(ModuleWorker.instances.at(-1).closed);
+    const next = await computeRangeStatsBackground(snapshot, {
+      isCancelled: () => false,
+      signal: new AbortController().signal,
+    });
+    assertExact(next, reference(snapshot));
     globalThis.Worker = class {
       constructor() {
         throw new Error('unavailable');
@@ -257,6 +263,38 @@ test('Worker cancellation returns no partial result and initialization failure u
     });
     assertExact(fallback, reference(snapshot));
   } finally {
+    terminateRangeStatsWorker();
+    globalThis.Worker = previousWorker;
+  }
+});
+
+test('cancelling an in-flight transfer cannot replace the next range result or detach its source', async () => {
+  const previousWorker = globalThis.Worker;
+  const controller = new AbortController();
+  let chunks = 0;
+  class CancellingWorker extends ModuleWorker {
+    postMessage(message, transfer) {
+      super.postMessage(message, transfer);
+      if (message.type === 'chunk' && ++chunks === 1) queueMicrotask(() => controller.abort());
+    }
+  }
+  globalThis.Worker = CancellingWorker;
+  try {
+    const cols = columnsOf(18001);
+    const first = captureRangeStatsSnapshot(cols, 0, 18000, 2);
+    const second = captureRangeStatsSnapshot(cols, 301, 9001, 2);
+    const stale = computeRangeStatsBackground(first, { isCancelled: () => false, signal: controller.signal });
+    const latest = computeRangeStatsBackground(second, {
+      isCancelled: () => false,
+      signal: new AbortController().signal,
+    });
+    assert.equal(await stale, null);
+    assertExact(await latest, reference(second));
+    assert.ok(chunks > 1);
+    assert.equal(cols.power._chunks[0].byteLength, 32768);
+    assert.equal(ModuleWorker.instances.at(-1).closed, false);
+  } finally {
+    terminateRangeStatsWorker();
     globalThis.Worker = previousWorker;
   }
 });
@@ -288,6 +326,7 @@ test('magnitude-aware capacity matches across synchronous, cooperative and real 
     cols.currentMagnitudes.setAt(4096, 2);
     assert.notEqual(rangeStatsRevision(cols), snapshot.revision, 'magnitude edits invalidate cached energy');
   } finally {
+    terminateRangeStatsWorker();
     globalThis.Worker = previousWorker;
   }
 });

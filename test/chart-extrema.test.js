@@ -20,6 +20,31 @@ function data(n) {
   return { xs, series };
 }
 
+test('a retained single-channel index reproduces overview geometry at every resized bucket budget', () => {
+  const { xs, series } = data(100031);
+  const power = series[2];
+  const index = new ExactExtremaIndex(1);
+  index.sync([power], xs.length);
+  const blocks = index.blocks;
+  for (const cap of [300, 420, 256, 600, 64, 300]) {
+    const original = new SeriesBuckets();
+    original.cap = cap;
+    original.appendThrough(xs, [power], xs.length);
+    const actual = new SeriesBuckets(1);
+    actual.rebuild(xs, [power], 0, xs.length, cap, index);
+    const expected = original.flatten();
+    const flat = actual.flatten();
+    assert.deepEqual(flat.channels[0], expected.channels[0]);
+    assert.deepEqual(flat.x, expected.x);
+    assert.deepEqual(flat.ys[0], expected.ys[0]);
+    assert.equal(index.blocks, blocks, 'queries retain the completed source prefix');
+    assert.equal(flat.channels.length, 1);
+  }
+  const all = new ExactExtremaIndex();
+  all.sync(series, xs.length);
+  assert.equal(index.byteLength * 8, all.byteLength);
+});
+
 function compare(xs, series, start, end, cap, index) {
   const reference = new SeriesBuckets();
   reference.rebuild(xs, series, start, end, cap);

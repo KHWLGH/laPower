@@ -47,6 +47,7 @@ const ROWS_PER_WRITE = 8192;
  * @property {number} written 已写入的行数
  * @property {number} startTime 表头 DateTime
  * @property {number} sampleRate 本文件初始标称间隔，不跟随另一份数据或设置变化
+ * @property {string|null} syncedHeader 已完成同步的固定表头；行数变化也标识新增数据
  */
 
 /** @type {Spool|null} */
@@ -148,8 +149,11 @@ async function drain(target) {
 /** @param {Spool} target */
 async function checkpoint(target) {
   checkpointDue = false;
-  await patchHeader(target);
-  await syncFile(target.handle);
+  const patch = await patchHeader(target);
+  if (patch !== target.syncedHeader) {
+    await syncFile(target.handle);
+    target.syncedHeader = patch;
+  }
   lastFlushAt = performance.now();
 }
 
@@ -178,7 +182,8 @@ async function patchHeader(target) {
   const lastX = target.written > 0 ? target.columns.x.valueAt(target.written - 1) : Number.NaN;
   const sampleRate = nominalIntervalMs(target.columns, target.sampleRate);
   const patch = formatSpoolHeaderPatch({ length: target.written, lastX, sampleRate });
-  await patchText(target.handle, 0, patch);
+  if (patch !== target.syncedHeader) await patchText(target.handle, 0, patch);
+  return patch;
 }
 
 /** 开始记录：当前这份数据还没有落盘文件时新建一个，并补写已有的行。 */
@@ -200,10 +205,19 @@ export function spoolRecordingStarted() {
       source: { software: softwareLabel(), ...provenanceOf(columns) },
     });
     const file = await openSpool(stem(), SPOOL_PATCH_BYTES);
-    const target = { handle: file.handle, path: file.path, columns, written: 0, startTime, sampleRate };
+    const target = {
+      handle: file.handle,
+      path: file.path,
+      columns,
+      written: 0,
+      startTime,
+      sampleRate,
+      syncedHeader: /** @type {string|null} */ (null),
+    };
     spool = target;
     await writeText(target.handle, header);
     await syncFile(target.handle);
+    target.syncedHeader = formatSpoolHeaderPatch({ length: 0, lastX: Number.NaN, sampleRate });
     lastFlushAt = performance.now();
     await drain(target);
     await checkpoint(target);

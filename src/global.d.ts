@@ -95,6 +95,8 @@ interface Window {
   __WITRN_STREAM__?: (() => StreamDiagnostics) | null;
   __WITRN_PERF__?: (() => PerformanceDiagnostics) | null;
   __WITRN_PERF_RESET__?: (() => void) | null;
+  __WITRN_PERF_START__?: (() => void) | null;
+  __WITRN_PERF_STOP__?: (() => void) | null;
 }
 
 // uPlot global (loaded via <script> tag from vendor/uPlot.iife.min.js)

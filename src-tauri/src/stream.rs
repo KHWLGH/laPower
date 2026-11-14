@@ -271,13 +271,14 @@ pub fn emit_loop(
 ) -> Result<(), String> {
     let mut samples = Vec::with_capacity(BATCH_POINTS);
     let mut pds = Vec::with_capacity(BATCH_POINTS);
-    let mut deadline = None;
+    let mut deadline: Option<Instant> = None;
     loop {
-        let budget = window();
-        let wait = deadline.map_or(budget, |at: Instant| {
-            at.saturating_duration_since(Instant::now())
-        });
-        let msg = rx.recv_timeout(wait);
+        // An empty batch has no deadline. Block until real work arrives instead of
+        // waking at the high-rate batch cadence while the device is idle.
+        let msg = match deadline {
+            Some(at) => rx.recv_timeout(at.saturating_duration_since(Instant::now())),
+            None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
         let mut end = None;
         let disconnected = matches!(msg, Err(mpsc::RecvTimeoutError::Disconnected));
         match msg {
@@ -287,7 +288,7 @@ pub fn emit_loop(
             Err(_) => {}
         }
         if deadline.is_none() && (!samples.is_empty() || !pds.is_empty()) {
-            deadline = Some(Instant::now() + budget);
+            deadline = Some(Instant::now() + window());
         }
         if samples.len() >= BATCH_POINTS
             || pds.len() >= BATCH_POINTS

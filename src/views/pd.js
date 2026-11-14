@@ -63,6 +63,7 @@ let filtered = [];
 let paused = false;
 let bufferedWhilePaused = 0;
 let renderScheduled = false;
+let renderFrame = 0;
 let followTailPending = false;
 let initialized = false;
 let softCapWarned = false;
@@ -108,13 +109,23 @@ let listWindow = null;
 let rowOffsets = [0];
 let noteColWidth = 0;
 let monoAdvance = 0;
-/** @type {{cancelled: boolean}|null} */
+/** @type {{cancelled: boolean,key:string}|null} */
 let projectionWork = null;
+let projectionKey = '';
+let projectedLength = 0;
+let projectionScheduled = false;
+let projectionFrame = 0;
+let showing = false;
+let showRevision = 0;
+
+function currentProjectionKey() {
+  return JSON.stringify([dataRevision, currentFilterText(), currentHideGoodCrc(), noteColWidth, monoAdvance]);
+}
 
 function cancelProjection() {
   if (projectionWork) projectionWork.cancelled = true;
   projectionWork = null;
-  els.list()?.setAttribute?.('aria-busy', 'false');
+  if (!viewHidden()) els.list()?.setAttribute?.('aria-busy', 'false');
 }
 
 // ─── 摘取 DOM ────────────────────────────────────────────────────────────────
@@ -159,7 +170,7 @@ function followRecordingEnabled() {
 }
 
 function viewHidden() {
-  return els.view()?.hidden ?? true;
+  return !state.windowVisible || document.hidden || (els.view()?.hidden ?? true);
 }
 
 /** @param {string} cmd @param {Record<string, unknown>} [args] */
@@ -235,11 +246,21 @@ function ingestOne(payload, live = true) {
     return true;
   }
   if (viewHidden()) return true;
-  if (projectionWork) return true;
+  // Append only to a complete projection of the immediately preceding prefix.
+  // Input may change away and back before its coalesced task runs.
+  if (
+    projectionWork ||
+    projectionScheduled ||
+    showing ||
+    projectedLength !== log.length - 1 ||
+    projectionKey !== currentProjectionKey()
+  )
+    return true;
   if (matchesFilter(entry, currentFilterText(), currentHideGoodCrc())) {
     filtered.push(log.length - 1);
     appendRowOffset(entry);
   }
+  projectedLength = log.length;
   return true;
 }
 
@@ -330,7 +351,8 @@ export function getPdBufferLength() {
 
 /** Independent of view initialization, filters and subsequent log replacement. */
 export function capturePdSnapshot() {
-  return log.map((entry) => ({ ...entry }));
+  // Entries are immutable after ingestion; only the containing log is appended/replaced.
+  return log.slice();
 }
 
 /**
@@ -398,10 +420,12 @@ function ensureListStructure() {
 
 /** @param {boolean} [followTail=false] */
 function scheduleWindowSync(followTail = false) {
+  if (viewHidden()) return;
   if (followTail) followTailPending = true;
   if (renderScheduled) return;
   renderScheduled = true;
-  requestAnimationFrame(() => {
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = 0;
     renderScheduled = false;
     const follow = followTailPending;
     followTailPending = false;
@@ -413,6 +437,7 @@ function scheduleWindowSync(followTail = false) {
  * @param {boolean} [followTail]
  */
 function syncWindow(followTail = false) {
+  if (viewHidden() || showing) return;
   const list = ensureListStructure();
   if (!list || !listSpacer || !listWindow) {
     updateCounter();
@@ -420,6 +445,11 @@ function syncWindow(followTail = false) {
   }
 
   refreshRowMetrics();
+  if (projectionWork || projectionScheduled) return;
+  if (projectionKey !== currentProjectionKey() || (!paused && projectedLength !== log.length)) {
+    rebuildFilterAndWindow();
+    return;
+  }
   if (rowOffsets.length !== filtered.length + 1) rebuildRowOffsets();
   const total = rowOffsets[rowOffsets.length - 1] ?? 0;
   // Publish the scroll extent first: setting scrollTop against the old, shorter
@@ -447,23 +477,45 @@ function syncWindow(followTail = false) {
 }
 
 function rebuildFilterAndWindow() {
+  if (projectionWork && projectionWork.key !== currentProjectionKey()) cancelProjection();
+  if (viewHidden() || showing || projectionScheduled) return;
+  projectionScheduled = true;
+  projectionFrame = requestAnimationFrame(() => {
+    projectionFrame = 0;
+    projectionScheduled = false;
+    if (!viewHidden() && !showing) rebuildProjection();
+  });
+}
+
+function rebuildProjection() {
+  const width = measureNoteColWidth();
+  if (width > 0) noteColWidth = width;
+  if (!monoAdvance) monoAdvance = measureMonoAdvance();
+  const key = currentProjectionKey();
+  if (projectionWork?.key === key) return;
+  if (projectionKey === key && projectedLength === log.length) {
+    syncWindow(autoscrollEnabled());
+    return;
+  }
   cancelProjection();
   if (log.length > 4096) {
-    const width = measureNoteColWidth();
-    if (width > 0) noteColWidth = width;
-    if (!monoAdvance) monoAdvance = measureMonoAdvance();
     const next = createPdProjection(log, currentFilterText(), currentHideGoodCrc(), noteColWidth, monoAdvance);
-    const work = { cancelled: false };
+    const work = { cancelled: false, key };
     projectionWork = work;
     els.list()?.setAttribute?.('aria-busy', 'true');
     void runCooperativeSlices(() => next.step(), { isCancelled: () => work.cancelled || viewHidden() })
       .then((complete) => {
         if (projectionWork !== work) return;
         projectionWork = null;
-        els.list()?.setAttribute?.('aria-busy', 'false');
-        if (!complete) return;
+        if (!viewHidden()) els.list()?.setAttribute?.('aria-busy', 'false');
+        if (!complete || key !== currentProjectionKey()) {
+          rebuildFilterAndWindow();
+          return;
+        }
         filtered = next.indices;
         rowOffsets = next.offsets;
+        projectionKey = key;
+        projectedLength = log.length;
         if (selectedIndex !== null && !filtered.includes(selectedIndex)) clearSelection();
         syncWindow(autoscrollEnabled());
       })
@@ -476,6 +528,8 @@ function rebuildFilterAndWindow() {
   }
   filtered = filterIndices(log, currentFilterText(), currentHideGoodCrc());
   rebuildRowOffsets();
+  projectionKey = key;
+  projectedLength = log.length;
   if (selectedIndex !== null) {
     const still = filtered.includes(selectedIndex);
     if (!still) clearSelection();
@@ -484,9 +538,18 @@ function rebuildFilterAndWindow() {
 }
 
 function measureNoteColWidth() {
-  const note = els.tableHead()?.querySelector('.pd-col-note');
-  const width = note?.getBoundingClientRect().width ?? 0;
-  return width > 1 ? width : 0;
+  const head = els.tableHead();
+  if (!head || viewHidden()) return 0;
+  // Empty lists hide the header. Measure its final layout before scanning the log,
+  // then restore it in the same task so no provisional header is painted.
+  const hidden = head.hidden;
+  if (hidden) head.hidden = false;
+  try {
+    const width = head.querySelector('.pd-col-note')?.getBoundingClientRect().width ?? 0;
+    return width > 1 ? width : 0;
+  } finally {
+    if (hidden) head.hidden = true;
+  }
 }
 
 function measureMonoAdvance() {
@@ -1059,6 +1122,7 @@ function updateEmptyState() {
 }
 
 function updateCounter() {
+  if (viewHidden()) return;
   const counter = els.counter();
   if (!counter) return;
   const parts = [t('pdCounter', { count: log.length })];
@@ -1277,8 +1341,25 @@ export function initPdView() {
 
 /** 每次切到 PD 视图：先补 seq 缺口，再重建过滤窗口。 */
 export function syncPdView() {
+  const revision = ++showRevision;
+  showing = true;
+  els.list()?.setAttribute?.('aria-busy', 'false');
   refreshPdLanguage();
-  void fillPdGap().then(() => rebuildFilterAndWindow());
+  void fillPdGap().finally(() => {
+    if (revision !== showRevision) return;
+    showing = false;
+    rebuildFilterAndWindow();
+  });
+}
+
+export function suspendPdView() {
+  showRevision++;
+  showing = false;
+  cancelProjection();
+  if (renderFrame) cancelAnimationFrame(renderFrame);
+  if (projectionFrame) cancelAnimationFrame(projectionFrame);
+  renderFrame = projectionFrame = 0;
+  renderScheduled = projectionScheduled = followTailPending = false;
 }
 
 /** Refresh state-derived text without changing the capture gate, filters or selection. */

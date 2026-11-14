@@ -34,6 +34,7 @@ globalThis.requestAnimationFrame = (callback) => {
 };
 globalThis.cancelAnimationFrame = (id) => frames.delete(id);
 globalThis.uPlot = class {
+  static pxRatio = 1;
   static paths = { spline: () => () => null, linear: () => () => null };
   constructor(options, data) {
     Object.assign(this, { options, data, width: options.width, height: options.height, hooks: options.hooks });
@@ -1085,4 +1086,53 @@ test('ordered paint caches coordinates and fills while scale, size, source and b
     globalThis.OffscreenCanvas = savedCanvas;
     chart.handleMonitorHidden();
   }
+});
+
+test('axis width measurement preserves the Canvas font cached by uPlot', () => {
+  seed(false);
+  const axis = {
+    ...state.mainChart.options.axes[1],
+    font: ['12px monospace'],
+    labelFont: ['12px sans-serif'],
+    _size: 70,
+  };
+  const fonts = [];
+  const ctx = {
+    font: '12px cached-monospace',
+    measureText(value) {
+      fonts.push(this.font);
+      return { width: value.length * 6 };
+    },
+  };
+  const plot = { axes: [axis], ctx };
+  const width = axis.size(plot, ['0', '10.5'], 0, 1);
+  assert.ok(width >= 28);
+  assert.deepEqual(fonts, ['12px monospace', '12px sans-serif']);
+  assert.equal(ctx.font, '12px cached-monospace', 'measurement cannot invalidate uPlot font bookkeeping');
+  assert.equal(axis.size(plot, ['0', '10.5'], 0, 2), 70);
+  assert.equal(ctx.font, '12px cached-monospace');
+  chart.handleMonitorHidden();
+});
+
+test('light telemetry stops idle frames and resumes bounded probes after visibility changes', async () => {
+  performanceDiagnostics.start();
+  for (let i = 0; i < 40; i++) await frame(16);
+  assert.equal(frames.size, 0, 'initial refresh calibration finishes');
+  const count = performanceDiagnostics.snapshot().frames.count;
+  for (let i = 0; i < 20; i++) await frame(16);
+  assert.equal(performanceDiagnostics.snapshot().frames.count, count);
+  document.hidden = true;
+  listeners.get('visibilitychange')();
+  assert.equal(frames.size, 0);
+  document.hidden = false;
+  listeners.get('visibilitychange')();
+  assert.ok(frames.size > 0);
+  for (let i = 0; i < 40; i++) await frame(16);
+  assert.equal(frames.size, 0);
+  performanceDiagnostics.startDetailed();
+  for (let i = 0; i < 40; i++) await frame(16);
+  assert.ok(frames.size > 0, 'explicit full diagnostics retains continuous sampling');
+  performanceDiagnostics.stopDetailed();
+  for (let i = 0; i < 40; i++) await frame(16);
+  assert.equal(frames.size, 0);
 });

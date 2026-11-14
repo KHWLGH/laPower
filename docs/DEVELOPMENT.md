@@ -9,6 +9,7 @@
 - [发布流程](#发布流程)
 - [质量检查](#质量检查)
 - [测试与回归边界](#测试与回归边界)
+- [按需浏览器自动验收](#按需浏览器自动验收)
 - [开发展示工具](#开发展示工具)
 - [性能测量](#性能测量)
 - [CI 门禁](#ci-门禁)
@@ -219,10 +220,11 @@ Windows 当前不做证书签名；macOS 使用 ad-hoc 签名，没有 Developer
 | `npm run check` | 日常前端检查 |
 | `npm run check:rust` | Rust 检查，自动先生成 `out/` |
 | `npm run check:all` | 交付前完整核心检查，包含前两组与组件清单核对 |
+| `npm run test:browser` | 按需无头浏览器工作流与性能结构验收 |
 
 `check` 依次运行 `npm test`、`typecheck`、`lint`，不构建前端或运行 Cargo；`check:rust` 先构建一次前端，再运行格式检查、工作区 Clippy 和测试。`check:all` 顺序组合两组检查与 `components:check`，只构建一次前端，所有入口遇错即停。单项命令仍可独立运行；组件清单核对需要 Cargo，缺少依赖缓存时可能联网。原有 CI 检查集合保持不变。
 
-`npm test` 使用 Node 内置测试运行器，覆盖纯逻辑、数据处理、协议/文件契约、安全边界和版本同步。测试文件按核心领域组织，当前保留的主要文件包括：
+`npm test` 使用 Node 内置测试运行器，只发现 `test/*.test.js`，避免执行输出目录中的历史源码副本。新核心测试沿用该位置及命名，定向检查使用 `node --test test/文件名.test.js`。Biome 跳过输出、依赖和 `.local-*` 本机工具目录，无需临时移动文件。核心测试覆盖纯逻辑、数据处理、协议/文件契约、安全边界和版本同步，主要文件包括：
 
 ```text
 chart-buckets  chart-columns  chart-extrema  chart-window
@@ -254,13 +256,29 @@ done
 - 性能 benchmark 和真机检查按需手动运行，不作为每次改动的浏览器自动回归。
 - CI 保持固定的核心检查集合，不因单个功能增加专用回归流程。
 
+## 按需浏览器自动验收
+
+沿用现有 Playwright 和模拟设备服务器，不新增运行依赖。首次执行 `npx playwright install chromium`，然后运行：
+
+```bash
+npm run test:browser
+npm run test:browser -- --case chart-idle-resize,range-worker
+npm run test:browser -- --channel msedge
+```
+
+六个独立场景依次验证：模拟 100／1000 次每秒记录、暂停末包消费及 ACK、CSV 逐列与统计／积分往返；含缺测和重复时间的十万点历史，五次尺寸变化后投影与图表 PNG 一致、无索引重扫及空闲诊断帧；真实浏览器 Worker 复用、4096 行缓冲上限和取消隔离；PD 同条件投影复用、连续过滤并发追加与隐藏零 DOM 提交；模拟协议进度、依据展开和 PDO 触发。恢复文件去重、写入失败及持久化边界继续由 `recording-spool` 核心测试覆盖。
+
+工具固定无头运行，不打开或激活桌面窗口，不访问真实仪表、设置或测量文件。默认使用 Playwright Chromium，也可指定已安装的 Edge／Chrome；缺少浏览器直接失败。每项限时 90 秒，失败后继续收集其余场景，最终退出码非零。`output/browser-tests/<时间>/` 保存环境、指标及错误的 `report.json` 和 `junit.xml`，失败另存 PNG 和 Playwright trace ZIP；可用 `npx playwright show-trace <zip>` 人工查看。`--output <目录>` 指定结果根目录，`--help` 列出场景。结果不提交；像素在同次运行内比较，不维护跨机器图片基线，绝对耗时仅报告。
+
+维护时优先扩展对应核心测试；依赖真实浏览器调度、Worker 或 Canvas 的高影响问题才加入 `tools/showcase/verify-workflows.mjs`，使用状态和有界工作量断言。四语／布局仍可按需运行 `node tools/showcase/verify-i18n.mjs`、`node tools/showcase/verify-appearance.mjs`。原生 GUI、真实文件故障、仪表序号异常和持续采集需另做实机验收。
+
 ## 开发展示工具
 
 长期记录内存对比使用 `npm run bench:memory`，默认比较 `bench/results/memory-before/` 中修改前的 `state.js`、`csv-codec.js`、`csv-import-core.js`、`measurement.js` 四个纯模块快照与当前源码；也可用 `-- --baseline <目录>` 指定快照位置。测试包含 100 万和 500 万点持续追加、持有导出快照时继续追加、流式 CSV 导入及反复清空，逐列 SHA-256 必须一致，列缓冲至少节省 20%。结果保存到 `bench/results/memory.json`，分别记录独立列缓冲、Node RSS 抽样峰值及 OS 峰值，不能把它们当作 Tauri / WebView2 整个进程树的测量。
 
 Windows 字体检查可运行 `node tools/showcase/verify-appearance.mjs`，覆盖繁体中文浅深主题与 100% / 125% / 150% DPI，检查 DOM 实际使用的字体、Canvas 轴字体和语言切换，截图及结果保存在 `output/appearance-verification/`。
 
-`tools/showcase/` 是独立的浏览器开发工具，提供虚拟 WITRN K2 与 POWER-Z KM003C、确定性的测量曲线、PD 报文和协议控制结果。数据仍经过软件现有摄入与渲染逻辑；完整标题栏使用 decorum 同款控件结构与软件自身的图标、样式，窗口行为虚拟化。工具不连接真实仪表，不进入 `src/`、`out/` 或安装包，也不加入浏览器 CI。
+`tools/showcase/` 是独立的浏览器开发工具，提供虚拟 WITRN K2 与 POWER-Z KM003C、确定性的测量曲线、PD 报文和协议控制结果。数据仍经过软件现有摄入与渲染逻辑；完整标题栏使用 decorum 同款控件结构与软件自身的图标、样式，窗口行为虚拟化。工具不连接真实仪表，不进入 `src/`、`out/` 或安装包，按需浏览器验收复用其服务器。
 
 首次准备：
 
@@ -329,7 +347,7 @@ npm run showcase:capture -- --help
 | `package-summary` | 四目标全部成功后验证七个安装包并生成 `SHA256SUMS` |
 | `release` | 仅版本 Tag push；上传并核对附件后自动公开 Release |
 
-普通分支 push 和 PR 只运行原有检查，不打包或发布。CI 不运行浏览器验收、硬件长跑或功能表面回归。开发展示工具仅用于按需预览和生成文档图片，不承担浏览器验收或 CI 门禁；新增功能不应顺手增加专用 workflow、job 或回归 harness。发布脚本的失败、重跑、附件完整性和公开版本保护由 `test/release.test.js` 离线验证。
+普通分支 push 和 PR 只运行原有检查，不打包或发布。按需选择 Actions → **Browser acceptance** → Run workflow，运行独立的 `.github/workflows/browser-tests.yml`：安装 Chromium、执行 `test:browser`，无论成败上传报告及失败证据，保留 14 天，不打包或发布。不要为浏览器验收触发原有 **CI** 手动入口，后者会打包。浏览器验收不加入每次 push／PR 的固定检查，也不执行硬件长跑。发布脚本的失败、重跑、附件完整性和公开版本保护由 `test/release.test.js` 离线验证。
 
 ## Linux 自行编译
 

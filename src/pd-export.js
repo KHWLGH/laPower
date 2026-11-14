@@ -33,10 +33,8 @@ export function exportPdFile(getEntries) {
 async function runExport(getEntries) {
   const file = await pickPdExportFile(`lapower_pd_${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
   if (!file) return null;
-  return writePdSnapshot(
-    file,
-    getEntries().map((entry) => ({ ...entry })),
-  );
+  // Log entries are immutable; freezing the references also survives clear/import.
+  return writePdSnapshot(file, getEntries().slice());
 }
 
 /** @param {import('./file-io.js').OpenedFile} file

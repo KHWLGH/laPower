@@ -8,14 +8,17 @@ import { columnSpan, columnValue } from './chart-buckets.js';
 /** @typedef {import('./chart-buckets.js').NumericColumn} NumericColumn */
 /** @typedef {{min:number[],max:number[],minIndex?:number[],maxIndex?:number[],count?:number[]}} ExtremaResult */
 export const BLOCK_SIZE = 32;
-const CHANNELS = 8;
-const STRIDE = CHANNELS * 3;
 const PAGE_SHIFT = 8;
 const PAGE_NODES = 1 << PAGE_SHIFT;
 const PAGE_MASK = PAGE_NODES - 1;
 const MISSING = 0xffffffff;
 
 export class ExactExtremaIndex {
+  /** @param {number} [channels=8] */
+  constructor(channels = 8) {
+    this.channels = channels;
+    this.stride = channels * 3;
+  }
   /** 24 KiB pages hold indices and counts, never duplicate the source values. @type {Uint32Array[][]} */
   levels = [];
   blocks = 0;
@@ -29,7 +32,7 @@ export class ExactExtremaIndex {
   /** @param {number} level @param {number} node */
   ensure(level, node) {
     this.levels[level] ??= [];
-    this.levels[level][node >>> PAGE_SHIFT] ??= new Uint32Array(PAGE_NODES * STRIDE);
+    this.levels[level][node >>> PAGE_SHIFT] ??= new Uint32Array(PAGE_NODES * this.stride);
     return this.levels[level][node >>> PAGE_SHIFT];
   }
   /** @param {NumericColumn[]} series @param {number} length */
@@ -45,8 +48,8 @@ export class ExactExtremaIndex {
     for (let block = this.blocks; block < through; block++) {
       const leaves = this.ensure(0, block),
         start = block * BLOCK_SIZE,
-        offset = (block & PAGE_MASK) * STRIDE;
-      for (let s = 0; s < CHANNELS; s++) {
+        offset = (block & PAGE_MASK) * this.stride;
+      for (let s = 0; s < this.channels; s++) {
         const col = series[s];
         let min = NaN,
           max = NaN,
@@ -70,28 +73,28 @@ export class ExactExtremaIndex {
           }
         }
         leaves[offset + s] = mi;
-        leaves[offset + CHANNELS + s] = ma;
-        leaves[offset + CHANNELS * 2 + s] = count;
+        leaves[offset + this.channels + s] = ma;
+        leaves[offset + this.channels * 2 + s] = count;
       }
       let node = block;
       for (let level = 1; node % 2 === 1; level++) {
         const child = this.levels[level - 1][node >>> PAGE_SHIFT];
-        const a = ((node - 1) & PAGE_MASK) * STRIDE,
-          b = (node & PAGE_MASK) * STRIDE;
+        const a = ((node - 1) & PAGE_MASK) * this.stride,
+          b = (node & PAGE_MASK) * this.stride;
         node = Math.floor(node / 2);
         const parent = this.ensure(level, node),
-          target = (node & PAGE_MASK) * STRIDE;
-        for (let s = 0; s < CHANNELS; s++) {
+          target = (node & PAGE_MASK) * this.stride;
+        for (let s = 0; s < this.channels; s++) {
           const col = series[s],
             ami = child[a + s],
             bmi = child[b + s],
-            ama = child[a + CHANNELS + s],
-            bma = child[b + CHANNELS + s];
+            ama = child[a + this.channels + s],
+            bma = child[b + this.channels + s];
           parent[target + s] =
             ami === MISSING || (bmi !== MISSING && columnValue(col, bmi) < columnValue(col, ami)) ? bmi : ami;
-          parent[target + CHANNELS + s] =
+          parent[target + this.channels + s] =
             ama === MISSING || (bma !== MISSING && columnValue(col, bma) > columnValue(col, ama)) ? bma : ama;
-          parent[target + CHANNELS * 2 + s] = child[a + CHANNELS * 2 + s] + child[b + CHANNELS * 2 + s];
+          parent[target + this.channels * 2 + s] = child[a + this.channels * 2 + s] + child[b + this.channels * 2 + s];
         }
       }
     }
@@ -116,7 +119,7 @@ export class ExactExtremaIndex {
       }
       const node = block / span;
       pages.push(this.levels[level][node >>> PAGE_SHIFT]);
-      offsets.push((node & PAGE_MASK) * STRIDE);
+      offsets.push((node & PAGE_MASK) * this.stride);
       block += span;
     }
     const mins = result.min,
@@ -124,7 +127,7 @@ export class ExactExtremaIndex {
       minIndices = result.minIndex,
       maxIndices = result.maxIndex,
       counts = result.count;
-    for (let s = 0; s < CHANNELS; s++) {
+    for (let s = 0; s < this.channels; s++) {
       const col = series[s];
       if (!col) continue;
       let min = Number.isFinite(mins[s]) ? mins[s] : Infinity,
@@ -152,11 +155,11 @@ export class ExactExtremaIndex {
       for (let j = 0; j < pages.length; j++) {
         const page = pages[j],
           offset = offsets[j];
-        const finite = page[offset + CHANNELS * 2 + s];
+        const finite = page[offset + this.channels * 2 + s];
         if (!finite) continue;
         count += finite;
         const a = page[offset + s],
-          b = page[offset + CHANNELS + s];
+          b = page[offset + this.channels + s];
         const v = chunks ? chunks[a >>> 12][a & 4095] : col[a];
         const w = chunks ? chunks[b >>> 12][b & 4095] : col[b];
         if (v < min) {
@@ -194,7 +197,7 @@ export class ExactExtremaIndex {
 
   /** @param {ExtremaResult} result @param {NumericColumn[]} series @param {number} start @param {number} end */
   foldRaw(result, series, start, end) {
-    for (let s = 0; s < CHANNELS; s++) {
+    for (let s = 0; s < this.channels; s++) {
       const col = series[s];
       let min = result.min[s],
         max = result.max[s],
@@ -240,7 +243,7 @@ export class ExactExtremaIndex {
         }
         const node = block / span;
         if (
-          this.levels[level][node >>> PAGE_SHIFT][(node & PAGE_MASK) * STRIDE + CHANNELS * 2 + channel] !==
+          this.levels[level][node >>> PAGE_SHIFT][(node & PAGE_MASK) * this.stride + this.channels * 2 + channel] !==
           span * BLOCK_SIZE
         )
           return false;
@@ -267,7 +270,8 @@ export class ExactExtremaIndex {
           level++;
         }
         const node = block / span;
-        count += this.levels[level][node >>> PAGE_SHIFT][(node & PAGE_MASK) * STRIDE + CHANNELS * 2 + channel];
+        count +=
+          this.levels[level][node >>> PAGE_SHIFT][(node & PAGE_MASK) * this.stride + this.channels * 2 + channel];
         i += span * BLOCK_SIZE;
       } else {
         const until = Math.min(end, (block + 1) * BLOCK_SIZE);

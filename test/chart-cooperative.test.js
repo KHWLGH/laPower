@@ -130,6 +130,7 @@ test('large chart preparations publish a complete projection and discard replace
   const originalSyncStep = ExactExtremaIndex.prototype.syncStep;
   let indexSteps = 0;
   ExactExtremaIndex.prototype.syncStep = function (...args) {
+    if (this.channels === 1) return originalSyncStep.apply(this, args);
     indexSteps++;
     return originalSyncStep.apply(this, args);
   };
@@ -190,10 +191,12 @@ test('changing the window during cold indexing retains the completed prefix for 
   let resets = 0;
   let retired = false;
   ExactExtremaIndex.prototype.reset = function () {
+    if (this.channels === 1) return originalReset.call(this);
     resets++;
     return originalReset.call(this);
   };
   ExactExtremaIndex.prototype.syncStep = function (...args) {
+    if (this.channels === 1) return originalStep.apply(this, args);
     index = this;
     const done = originalStep.apply(this, args);
     if (!retired && this.blocks >= 128) {
@@ -362,6 +365,7 @@ test('recording warms fixed prefixes between paints and cancels background index
   let replace = false;
   globalThis.scheduler = { postTask: (callback) => new Promise((resolve) => tasks.push(() => resolve(callback()))) };
   ExactExtremaIndex.prototype.syncStep = function (...args) {
+    if (this.channels === 1) return originalStep.apply(this, args);
     index = this;
     steps++;
     assert.equal(args[2], 32, 'background steps have a fixed sample budget');
@@ -502,6 +506,7 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
   let index = null,
     steps = 0;
   ExactExtremaIndex.prototype.syncStep = function (...args) {
+    if (this.channels === 1) return original.apply(this, args);
     index = this;
     steps++;
     return original.apply(this, args);

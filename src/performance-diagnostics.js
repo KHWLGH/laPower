@@ -37,6 +37,12 @@ const memorySamples = /** @type {Array<any>} */ ([]);
 let latestSampleWallMs = null;
 let batchStarted = 0;
 let frameLoopStarted = false;
+let detailedEnabled = true;
+let frameRequest = 0;
+let remainingFrames = 0;
+let visibilityListenerInstalled = false;
+/** @type {() => boolean} */
+let displayVisible = () => typeof document === 'undefined' || !document.hidden;
 let lastFrameAt = 0;
 let lastChartDrawAt = -Infinity;
 let idleFrameMs = 1000 / 60;
@@ -45,10 +51,29 @@ let pendingInputAt = null;
 let pendingInputFrame = 0;
 let inputListenerInstalled = false;
 let longTaskObserverInstalled = false;
+/** @type {PerformanceObserver|null} */
+let longTaskObserver = null;
 let lastMemorySampleAt = -Infinity;
 
 function now() {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+/** Short calibration/probe windows keep pressure feedback live without an idle loop. */
+function wakeFrames(count = 3) {
+  if (!frameLoopStarted || !displayVisible()) return;
+  remainingFrames = Math.max(remainingFrames, count);
+  if (!frameRequest) frameRequest = requestAnimationFrame(frameTick);
+}
+
+function visibilityChanged() {
+  if (displayVisible()) wakeFrames(32);
+  else {
+    if (frameRequest) cancelAnimationFrame(frameRequest);
+    frameRequest = 0;
+    remainingFrames = 0;
+    lastFrameAt = 0;
+  }
 }
 
 /** @param {number|undefined|null} wallMs */
@@ -126,6 +151,7 @@ export function chartRequest(role, info = {}) {
 export function chartPaint(role, request, drawEndedAt = now(), drawMs = null, stages) {
   if (!request) return;
   lastChartDrawAt = drawEndedAt;
+  wakeFrames();
   const sampleToPaintMs =
     Number.isFinite(request.sampleWallMs) &&
     typeof performance !== 'undefined' &&
@@ -197,6 +223,7 @@ export function idleFrameIntervalMs() {
 
 /** @param {string} name @param {number} startedAt @param {number} [endedAt] */
 export function domCommit(name, startedAt, endedAt = now()) {
+  if (!detailedEnabled) return;
   const sampleToDomMs =
     Number.isFinite(latestSampleWallMs) && typeof performance !== 'undefined' && Number.isFinite(performance.timeOrigin)
       ? endedAt + performance.timeOrigin - /** @type {number} */ (latestSampleWallMs)
@@ -231,6 +258,7 @@ function installInputListener() {
     document.addEventListener(
       type,
       () => {
+        if (!detailedEnabled) return;
         const at = now();
         pendingInputAt = pendingInputAt == null ? at : Math.min(pendingInputAt, at);
         scheduleInputFlush();
@@ -255,6 +283,7 @@ function installLongTaskObserver() {
       }
     });
     observer.observe({ type: 'longtask', buffered: true });
+    longTaskObserver = observer;
     longTaskObserverInstalled = true;
   } catch {
     // WebView2 versions without longtask support leave this section empty.
@@ -262,7 +291,8 @@ function installLongTaskObserver() {
 }
 
 function frameTick(at) {
-  if (typeof document === 'undefined' || !document.hidden) {
+  frameRequest = 0;
+  if (displayVisible()) {
     if (lastFrameAt > 0) {
       const durationMs = at - lastFrameAt;
       pushRing(frames, { at, durationMs });
@@ -280,18 +310,48 @@ function frameTick(at) {
   } else {
     lastFrameAt = 0;
   }
-  sampleMemory(at);
-  scheduleInputFlush();
-  requestAnimationFrame(frameTick);
+  if (detailedEnabled) {
+    sampleMemory(at);
+    scheduleInputFlush();
+  }
+  if (remainingFrames > 0) remainingFrames--;
+  if (displayVisible() && (detailedEnabled || remainingFrames > 0)) frameRequest = requestAnimationFrame(frameTick);
+  else lastFrameAt = 0;
 }
 
-export function start() {
-  installInputListener();
-  installLongTaskObserver();
-  sampleMemory(now());
-  if (frameLoopStarted || typeof requestAnimationFrame !== 'function') return;
+/** @param {{detailed?:boolean,isVisible?:()=>boolean}} [options] */
+export function start({ detailed = false, isVisible } = {}) {
+  if (isVisible) displayVisible = isVisible;
+  detailedEnabled = detailed;
+  if (detailed) {
+    installInputListener();
+    installLongTaskObserver();
+    sampleMemory(now());
+  } else {
+    longTaskObserver?.disconnect();
+    longTaskObserver = null;
+    longTaskObserverInstalled = false;
+  }
+  if (typeof requestAnimationFrame !== 'function') return;
   frameLoopStarted = true;
-  requestAnimationFrame(frameTick);
+  if (
+    !visibilityListenerInstalled &&
+    typeof document !== 'undefined' &&
+    typeof document.addEventListener === 'function'
+  ) {
+    visibilityListenerInstalled = true;
+    document.addEventListener('visibilitychange', visibilityChanged);
+    document.addEventListener('witrn:window-visibility', visibilityChanged);
+  }
+  wakeFrames(32);
+}
+
+export function startDetailed() {
+  start({ detailed: true });
+}
+
+export function stopDetailed() {
+  start({ detailed: false });
 }
 
 /** @param {Array<{durationMs:number}>} ring */
@@ -397,6 +457,8 @@ export function reset() {
 
 export const performanceDiagnostics = {
   start,
+  startDetailed,
+  stopDetailed,
   snapshot,
   reset,
   batchStart,

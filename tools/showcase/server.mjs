@@ -42,6 +42,10 @@ export async function startServer({ port = 0, distribution = false } = {}) {
       const url = new URL(req.url, 'http://localhost');
       const pathname = decodeURIComponent(url.pathname);
       res.setHeader('Cache-Control', 'no-store');
+      if (pathname === '/favicon.ico') {
+        res.writeHead(204).end();
+        return;
+      }
       res.setHeader('Content-Security-Policy', config.app.security.csp);
       let body;
       let file;

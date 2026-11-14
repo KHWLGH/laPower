@@ -1159,6 +1159,9 @@ let __statsUpdateTimer = null;
 /** @type {boolean} */
 let __rangeUiPending = false;
 let __rangeUiGeneration = 0;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let statusUiTimer = null;
+let lastStatusUiAt = -Infinity;
 /** @type {Parameters<typeof updateRealtimeDisplay>[0]|null} */
 let lastRealtime = null;
 
@@ -1222,6 +1225,19 @@ export function scheduleRangeUi() {
     return;
   }
   if (__rangeUiPending) return;
+  if (!monitorDisplayVisible() && performance.now() - lastStatusUiAt < 250) {
+    if (statusUiTimer === null)
+      statusUiTimer = setTimeout(
+        () => {
+          statusUiTimer = null;
+          scheduleRangeUi();
+        },
+        Math.max(0, 250 - (performance.now() - lastStatusUiAt)),
+      );
+    return;
+  }
+  if (statusUiTimer !== null) clearTimeout(statusUiTimer);
+  statusUiTimer = null;
   __rangeUiPending = true;
   const generation = __rangeUiGeneration;
   displayFrames.schedule('monitor-ui', () => {
@@ -1237,6 +1253,7 @@ export function scheduleRangeUi() {
     const el = document.getElementById('data-count');
     setTextIfChanged(el, String(state.chartSeries.x.length));
     updateRemainingDisplay();
+    lastStatusUiAt = performance.now();
     performanceDiagnostics.domCommit('monitor-ui', startedAt);
   });
 }
@@ -1248,6 +1265,8 @@ export function refreshMonitorDisplay() {
   __rangeUiGeneration++;
   __rangeUiPending = false;
   displayFrames.cancel('monitor-ui');
+  if (statusUiTimer !== null) clearTimeout(statusUiTimer);
+  statusUiTimer = null;
   if (__statsUpdateTimer !== null) {
     clearTimeout(__statsUpdateTimer);
     __statsUpdateTimer = null;

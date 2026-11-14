@@ -80,6 +80,11 @@ let scanning = false;
 let watchdog = null;
 /** @type {ReturnType<typeof setInterval>|null} */
 let liveTimer = null;
+let progressFrame = 0;
+/** @type {Map<string,{key:string,row:HTMLElement}>} */
+const detectionRows = new Map();
+/** @type {WeakMap<HTMLElement,unknown[]>} */
+const historyRenderKeys = new WeakMap();
 
 /** @param {string} id */
 const el = (id) => document.getElementById(id);
@@ -100,7 +105,17 @@ function controllable() {
 }
 
 function viewVisible() {
-  return state.settings.activeView === 'trigger' && !document.hidden;
+  return state.settings.activeView === 'trigger' && state.windowVisible && !document.hidden;
+}
+
+function scheduleProgressRender() {
+  if (!initialized || !viewVisible() || progressFrame) return;
+  progressFrame = requestAnimationFrame(() => {
+    progressFrame = 0;
+    if (!viewVisible()) return;
+    renderLog();
+    renderDetection();
+  });
 }
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
@@ -204,6 +219,23 @@ function renderHistory() {
       nodes = createHistoryItem(entry);
       historyNodes.set(entry.id, nodes);
     }
+    const key = [
+      entry.startedAt,
+      entry.command,
+      entry.elapsedMs,
+      entry.status,
+      entry.progress,
+      entry.reply,
+      entry.truncated,
+      busy,
+      t('triggerHistoryProgress'),
+    ];
+    const previous = historyRenderKeys.get(nodes.item);
+    if (previous && key.every((value, i) => Object.is(value, previous[i]))) {
+      if (list.children[index] !== nodes.item) list.insertBefore(nodes.item, list.children[index] ?? null);
+      return;
+    }
+    historyRenderKeys.set(nodes.item, key);
     nodes.item.className = `trigger-history-item is-${entry.status}`;
     setHistoryText(nodes.time, new Date(entry.startedAt).toLocaleTimeString(undefined, { hour12: false }));
     setHistoryText(nodes.status, t(historyStatusKey(entry.status)));
@@ -440,8 +472,9 @@ function renderDetection() {
       (node) => /** @type {HTMLElement} */ (node).dataset.protocol,
     ),
   );
-  box.replaceChildren();
   if (!detection) {
+    box.replaceChildren();
+    detectionRows.clear();
     if (diagnostics) diagnostics.textContent = '';
     if (diagnosticsDetails) diagnosticsDetails.hidden = true;
     return;
@@ -457,12 +490,23 @@ function renderDetection() {
   for (const [id, labelKey] of groups) {
     const groupResults = report.results.filter((result) => groupId(result.id) === id);
     if (!groupResults.length) continue;
-    const group = document.createElement('section');
+    let group = /** @type {HTMLElement|null} */ (box.querySelector(`.trigger-detection-group.is-${id}`));
+    if (!group) {
+      group = document.createElement('section');
+      group.appendChild(document.createElement('h3'));
+      box.appendChild(group);
+    }
     group.className = `trigger-detection-group is-${id}`;
-    const groupHeading = document.createElement('h3');
-    groupHeading.textContent = t(labelKey);
-    group.appendChild(groupHeading);
+    if (group.firstElementChild) setHistoryText(/** @type {HTMLElement} */ (group.firstElementChild), t(labelKey));
+    let position = 1;
     for (const result of groupResults) {
+      const before = group.children[position++] ?? null;
+      const key = JSON.stringify([result, report.completion, report.active === result.id, busy, t('scanEvidence')]);
+      const cached = detectionRows.get(result.id);
+      if (cached?.key === key) {
+        if (before !== cached.row) group.insertBefore(cached.row, before);
+        continue;
+      }
       const row = document.createElement('div');
       row.className = `trigger-detection-result is-${result.state}`;
       row.dataset.protocol = result.id;
@@ -548,9 +592,20 @@ function renderDetection() {
         actions.appendChild(use);
       }
       if (actions.childElementCount) row.insertBefore(actions, row.querySelector('.trigger-detection-detail'));
-      group.appendChild(row);
+      if (cached?.row.parentElement === group) cached.row.replaceWith(row);
+      else group.insertBefore(row, before);
+      detectionRows.set(result.id, { key, row });
     }
-    box.appendChild(group);
+  }
+  const ids = new Set(report.results.map((result) => result.id));
+  for (const [id, cached] of detectionRows) {
+    if (!ids.has(id)) {
+      cached.row.remove();
+      detectionRows.delete(id);
+    }
+  }
+  for (const group of box.querySelectorAll('.trigger-detection-group')) {
+    if (!group.querySelector('.trigger-detection-result')) group.remove();
   }
   if (diagnostics) {
     diagnostics.textContent = [
@@ -726,6 +781,9 @@ function renderLive() {
 }
 
 function renderAll() {
+  if (progressFrame) cancelAnimationFrame(progressFrame);
+  progressFrame = 0;
+  if (!viewVisible()) return;
   renderPdmStatus();
   renderFields();
   renderEnabled();
@@ -1006,10 +1064,9 @@ export function handleTriggerProgress(payload) {
   if (scanning && p.detection) {
     detection = p.detection;
     triggerContext = p.detection.context ?? triggerContext;
-    if (initialized) renderDetection();
   }
   if (p.text) appendHistoryProgress(p.text);
-  if (initialized) renderLog();
+  scheduleProgressRender();
 }
 
 /**
@@ -1179,6 +1236,13 @@ export function syncTriggerView() {
       renderLive();
     }, 250);
   }
+}
+
+export function suspendTriggerView() {
+  if (progressFrame) cancelAnimationFrame(progressFrame);
+  progressFrame = 0;
+  if (liveTimer !== null) clearInterval(liveTimer);
+  liveTimer = null;
 }
 
 /** @param {import('../km003c-model.js').VoltageVerification} verification */

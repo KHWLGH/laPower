@@ -97,6 +97,7 @@ import {
   initPdView,
   markPdDisconnect,
   refreshPdLanguage,
+  suspendPdView,
   syncPdView,
 } from './views/pd.js';
 import { initSettingsView, showSettingsView } from './views/settings-view.js';
@@ -104,6 +105,7 @@ import {
   handlePdmState,
   handleTriggerProgress,
   initTriggerView,
+  suspendTriggerView,
   syncTriggerConnection,
   syncTriggerView,
 } from './views/trigger.js';
@@ -896,18 +898,33 @@ function setupShell() {
   };
   registerView({ id: 'monitor', icon: 'pulse', label: t('monitor'), onShow: showMonitor, onHide: hideMonitor });
   const visibilityChanged = () => {
-    if (state.windowVisible && !document.hidden) refreshMonitorDisplay();
-    else hideMonitor();
+    if (state.windowVisible && !document.hidden) {
+      if (state.settings.activeView === 'pd') syncPdView();
+      else if (state.settings.activeView === 'trigger') syncTriggerView();
+      else refreshMonitorDisplay();
+    } else {
+      hideMonitor();
+      suspendPdView();
+      suspendTriggerView();
+    }
   };
   document.addEventListener('visibilitychange', visibilityChanged);
   document.addEventListener('witrn:window-visibility', visibilityChanged);
-  registerView({ id: 'pd', icon: 'flash', label: t('pdWorkspace'), init: initPdView, onShow: syncPdView });
+  registerView({
+    id: 'pd',
+    icon: 'flash',
+    label: t('pdWorkspace'),
+    init: initPdView,
+    onShow: syncPdView,
+    onHide: suspendPdView,
+  });
   registerView({
     id: 'trigger',
     icon: 'options',
     label: t('protocolWorkspace'),
     init: initTriggerView,
     onShow: syncTriggerView,
+    onHide: suspendTriggerView,
   });
   // 设置页按需初始化；目录和滚动位置在同一会话内保留。
   registerView({

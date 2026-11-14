@@ -898,6 +898,8 @@ test('large follow statistics coalesce appends, label completed bounds and avoid
     assert.equal(await cancelled, null, 'hidden jobs cannot publish stale results');
   } finally {
     suspendMonitorDisplay();
+    const { terminateRangeStatsWorker } = await import('../src/range-stats-background.js');
+    terminateRangeStatsWorker();
     state.settings.statsRange = false;
     globalThis.Worker = previousWorker;
     F64Col.prototype.snapshot = originalSnapshot;
