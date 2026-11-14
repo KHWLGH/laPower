@@ -150,6 +150,8 @@ export function main(args = process.argv.slice(2)) {
         'cargo',
         [
           'tree',
+          '--color',
+          'never',
           '-p',
           'lapower',
           '--locked',
