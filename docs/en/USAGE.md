@@ -4,7 +4,7 @@
 
 # User guide
 
-This guide covers laPower **0.2.5**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
+This guide covers laPower **0.2.6**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
 
 - [Getting started](#getting-started)
 - [Interface overview](#interface-overview)
@@ -141,6 +141,18 @@ The three CSV options are saved: `Include temperature` is off by default; `Inclu
 
 ### Export report
 
+![Image report (16:9)](../screenshots/en/light-report-image.png)
+
+[Dark theme](../screenshots/en/dark-report-image.png)
+
+![Image report (long)](../screenshots/en/light-report-long.png)
+
+[Dark theme](../screenshots/en/dark-report-long.png)
+
+![Video report frame](../screenshots/en/light-report-video.png)
+
+[Dark theme](../screenshots/en/dark-report-video.png)
+
 Use the document-chart icon beside CSV export to open **Export report**. Choose a lossless PNG image or a short video of the whole frozen recording. The first use defaults to image; subsequent uses remember the selected type, resolution (720p–4K), theme and content.
 
 **Report content** provides matching checkboxes for voltage, current, power, temperature, **Markers** and **Marker details**. The two marker controls are independent: markers alone appear only on the chart; details add names, times and readings below it. Details alone and neither are also supported for both images and videos.
@@ -227,6 +239,14 @@ Progress retains each serial command, reply, recovery and retry step, and is rec
 Repeated acknowledgements, ready messages and connection states are retained in arrival order, including voltage changes, disconnection and reconnection. PDO retries retain status information from both attempts while displaying one selected capability table. Detection determines the final result from the ordered states in the complete reply.
 
 ### Protocol detection
+
+![Protocol detection](../screenshots/en/light-detection.png)
+
+[Dark theme](../screenshots/en/dark-detection.png)
+
+![Protocol detection report](../screenshots/en/light-protocol-report.png)
+
+[Dark theme](../screenshots/en/dark-protocol-report.png)
 
 After detection ends, select **Export image report** on the Detection tab to save a 16:9 PNG at 1920×1080, 2560×1440 or 3840×2160 in the light or dark theme. The first export uses the current theme; subsequent exports remember their own options, independently of monitoring reports. The image includes the meter, detection time and completion status, every protocol result and voltage, PD version, and the complete independently read PDO voltage/current/power parameters, preserving each SPR AVS band. `*` marks reference power calculated as maximum voltage × current, not measured or guaranteed sustained output; reported PDP/power is shown directly. `†` marks AVS reference current at maximum voltage; missing values show `—`. Partial, cancelled and timed-out detections remain exportable with explicit warnings, including unconfirmed reset. Opening the dialog freezes this detection, so later scans, PDO reads or disconnection cannot change the report. Failed saves do not replace existing files with incomplete images.
 
@@ -322,7 +342,7 @@ SUM,1
 TotalTime,="00:00:00.250"
 SampTime(ms),250
 DateTime,2026-10-17 12:00:00
-Software,laPower 0.2.5
+Software,laPower 0.2.6
 Device,WITRN K2 (0716:5060)
 Points,mean
 

@@ -127,8 +127,8 @@ npm run clean:build -- --dry-run
 開發期間只維護 `changelog/unreleased/zh-CN.md`。發佈前由開發助手合併重複項目、整理面向使用者的簡體中文說明，再產生 `en.md` 並人工校對。更新記錄僅提供英文與簡體中文，不要求逐句或逐項對應，也不使用翻譯 API。
 
 ```bash
-npm run release:prepare -- 0.2.5 --date 2026-10-17 --dry-run
-npm run release:prepare -- 0.2.5 --date 2026-10-17
+npm run release:prepare -- 0.2.6 --date 2026-11-14 --dry-run
+npm run release:prepare -- 0.2.6 --date 2026-11-14
 npm run release:notes
 npm run showcase:capture
 ```
@@ -143,7 +143,9 @@ Release 預設展開英文，簡體中文放在摺疊區，兩種語言均附安
 
 首次使用先執行 `npx playwright install chromium`；Linux 缺少瀏覽器系統依賴時，使用 `npx playwright install --with-deps chromium`。截圖必須完整涵蓋簡體中文、繁體中文、英文、日文 × 淺色、深色 × 監控、PD 分析、協定控制、設定，共 32 張，寫入 `docs/screenshots/<language>/` 並保留完整標題列。使用目前版本、統一的 120 秒模擬資料與既定視口尺寸，不以部分截圖代替整套發佈圖片。
 
-產生後逐張查看語言、主題、文字截斷、圖表、所選報文、協定狀態與設定目錄，確認沒有空白、遮擋或溢出，版本也與目前清單一致。同步四語 README 的截圖版本、說明及圖片引用，並將 32 張圖片與文件一起提交。截圖失敗或檢查未通過時，修正後重新產生，發佈前準備尚未完成。參數與資料說明見[開發展示工具](#開發展示工具)。
+另產生協定偵測主介面的 8 張截圖，以及 16:9 圖片報告、長圖、影片畫面和協定偵測報告的 32 張樣式圖；預設共 72 張（40 張主介面 + 32 張報告樣式），基礎 32 張仍須全部更新。
+
+產生後逐張查看語言、主題、文字截斷、圖表、所選報文、協定狀態與設定目錄，確認沒有空白、遮擋或溢出，版本也與目前清單一致。同步四語 README 的截圖版本、說明及圖片引用，並將完整 72 張圖片與文件一起提交。截圖失敗或檢查未通過時，修正後重新產生，發佈前準備尚未完成。參數與資料說明見[開發展示工具](#開發展示工具)。
 
 ### 文件維護範圍
 
@@ -306,7 +308,9 @@ npm run showcase:capture
 
 報告影片匯出的原生驗收不會開啟系統儲存對話框：debug 建置在 `video_export_pick` 讀取 `LAPOWER_VIDEO_TARGET`，有值就直接為它簽發 ticket。該分支只在 `debug_assertions` 下編譯，release 建置中的路徑仍只能來自原生對話框；它只服務本機自動化，不進設定、文件介面或 CI。
 
-截圖命令使用 Chromium、Windows 風格、1280×800 CSS 視口、2 倍像素密度及 100% 介面縮放，產生 2560×1600 PNG。預設使用 POWER-Z、儀表溫度源與相同的 120 秒模擬資料，先凍結虛擬時間，再等待實際圖表、報文詳情、字體與控制項渲染完成。輸出為 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`，每種語言各 8 張展示圖（共 32 張）。
+主介面截圖使用 Chromium、Windows 風格、1280×800 CSS 視口、2 倍像素密度及 100% 介面縮放，產生 2560×1600 PNG。預設使用 POWER-Z、儀表溫度源與相同的 120 秒模擬資料，先凍結虛擬時間，再等待實際圖表、報文詳情、字體與控制項渲染完成。輸出為 `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report}.png`，每種語言各 18 張展示圖（共 72 張，其中 32 張為基礎工作區）。
+
+主介面保留完整標題列；報告展示實際輸出，不擷取匯出設定對話框。監控報告由應用程式的 captureReport 投影與共用 scene／tiny-skia 渲染器產生：1920×1080 橫圖及影片影格、1920×1340 長圖，範例含 12 個標記；協定報告透過實際 PNG 匯出產生。產生監控報告前自動建置前端，再執行 cargo run --locked -p lapower --example showcase-reports；需要 Rust 與對應平台建置環境。只產生主介面可用 --page record,pd,trigger,detection,settings，無需 Rust 編譯。
 
 關於頁版本讀取 package.json，截圖命令會驗證版本、語言與頁面溢位。截圖只寫入對應語言子目錄，不再產生根目錄中的重複副本。
 
@@ -317,9 +321,9 @@ npm run showcase:capture -- --theme light --page pd,trigger --output output/show
 npm run showcase:capture -- --help
 ```
 
-`--language` 支援 zh-CN、zh-TW、en、ja（逗號分隔，預設全部）；`--theme` 支援 `light,dark`，預設按淺色、深色順序產生；`--page` 支援 `record,pd,trigger,settings`。輸出目錄相對於儲存庫根目錄，也可使用絕對路徑。修改 `tools/showcase/scenario.js` 可以調整虛擬裝置資訊、隨機種子、充電曲線、握手時刻及 PDO / 協定偵測結果。`bridge.js` 實現 Tauri 命令、事件、錄製段、ACK、記憶體設定與檔案句柄；未實現的調用會明確報錯。CSV / PD 匯出通過瀏覽器下載，CSV 匯入通過瀏覽器檔案選擇器；PD 匯入僅支援包含已固化樣例原始報文的檔案，任意真機報文解碼仍應使用原生軟體。
+`--language` 支援 zh-CN、zh-TW、en、ja（逗號分隔，預設全部）；`--theme` 支援 `light,dark`，預設按淺色、深色順序產生；`--page` 支援 `record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report`。輸出目錄相對於儲存庫根目錄，也可使用絕對路徑。修改 `tools/showcase/scenario.js` 可以調整虛擬裝置資訊、隨機種子、充電曲線、握手時刻及 PDO / 協定偵測結果。`bridge.js` 實現 Tauri 命令、事件、錄製段、ACK、記憶體設定與檔案句柄；未實現的調用會明確報錯。CSV / PD 匯出通過瀏覽器下載，CSV 匯入通過瀏覽器檔案選擇器；PD 匯入僅支援包含已固化樣例原始報文的檔案，任意真機報文解碼仍應使用原生軟體。
 
-`pd-fixtures.json` 儲存由現有 `witrn-hid` Rust 解析器產生的原始報文與解碼樹，普通預覽和截圖無需 Rust 編譯。更改 PD 原始樣例後，可在安裝 Rust 的環境中運行 `node tools/showcase/generate-pd.mjs` 重新產生；臨時產生器寫入忽略的 `output/`，編譯產物寫入 `target/`。
+`pd-fixtures.json` 儲存由現有 `witrn-hid` Rust 解析器產生的原始報文與解碼樹，普通瀏覽器預覽和主介面截圖無需 Rust 編譯，報告樣式產生需要 Rust。更改 PD 原始樣例後，可在安裝 Rust 的環境中運行 `node tools/showcase/generate-pd.mjs` 重新產生；臨時產生器寫入忽略的 `output/`，編譯產物寫入 `target/`。
 
 瀏覽器上下文使用記憶體設定與檔案，不讀寫真實應用的資料目錄。軟體使用新的標識 `io.github.khwlgh.lapower`，啟動測量工具也已同步該標識；舊 WITRN-RS 設定不會自動遷移。
 

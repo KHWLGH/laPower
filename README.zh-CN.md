@@ -49,7 +49,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 ## 📸 界面预览
 
-以下展示图为 Windows 上的 **0.2.5** 版本，使用独立开发工具生成的模拟设备与数据，保留软件完整标题栏，浅色主题优先展示。软件默认跟随系统，开发展示工具默认浅色。每次发布前更新整套截图，重新生成方法见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
+以下展示图为 Windows 上的 **0.2.6** 版本，使用独立开发工具生成的模拟设备与数据，保留软件完整标题栏，浅色主题优先展示。软件默认跟随系统，开发展示工具默认浅色。每次发布前更新整套截图，重新生成方法见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
 
 | 浅色主题 | 深色主题 |
 | :---: | :---: |
@@ -57,6 +57,18 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 | <img src="docs/screenshots/zh-CN/light-pd.png" alt="PD 分析工作区（浅色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/zh-CN/dark-pd.png" alt="PD 分析工作区（深色）" /><br><sub>**PD 分析** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-trigger.png" alt="协议控制工作区（浅色）：PDM、PDO 列表与检测日志" /><br><sub>**协议控制** · PDM / PDO / 协议检测与电压触发</sub> | <img src="docs/screenshots/zh-CN/dark-trigger.png" alt="协议控制工作区（深色）" /><br><sub>**协议控制** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-settings.png" alt="设置页（浅色）：固定目录、外观与语言、图表与记录" /><br><sub>**设置** · 固定目录 / 外观与语言 / 图表与记录</sub> | <img src="docs/screenshots/zh-CN/dark-settings.png" alt="设置页（深色）" /><br><sub>**设置** · 深色主题</sub> |
+| <img src="docs/screenshots/zh-CN/light-detection.png" alt="协议检测（浅色主题）" /><br><sub>**协议检测** · 逐协议状态 / 电压档位 / 独立依据</sub> | <img src="docs/screenshots/zh-CN/dark-detection.png" alt="协议检测（深色主题）" /><br><sub>**协议检测** · 深色主题</sub> |
+
+### 报告样式
+
+主界面覆盖四语与浅深主题，共 40 张；下方展示实际生成的 32 张报告样式。报告使用相同的 120 秒模拟记录，横图和视频保留前 8 个打点，长图保留全部 12 个打点，视频示例取中间帧。
+
+| 浅色主题 | 深色主题 |
+| :---: | :---: |
+| <img src="docs/screenshots/zh-CN/light-report-image.png" alt="图片报告（16:9） (浅色主题)" /><br><sub>**图片报告（16:9）** · 无损 PNG / 完整曲线 / 统计与打点</sub> | <img src="docs/screenshots/zh-CN/dark-report-image.png" alt="图片报告（16:9） (深色主题)" /><br><sub>**图片报告（16:9）** · 深色主题</sub> |
+| <img src="docs/screenshots/zh-CN/light-report-long.png" alt="图片报告（长图） (浅色主题)" /><br><sub>**图片报告（长图）** · 全部 12 个打点 / 时间与逐项读数</sub> | <img src="docs/screenshots/zh-CN/dark-report-long.png" alt="图片报告（长图） (深色主题)" /><br><sub>**图片报告（长图）** · 深色主题</sub> |
+| <img src="docs/screenshots/zh-CN/light-report-video.png" alt="视频报告画面 (浅色主题)" /><br><sub>**视频报告画面** · 视频中间帧 / 动态读数 / 播放光标</sub> | <img src="docs/screenshots/zh-CN/dark-report-video.png" alt="视频报告画面 (深色主题)" /><br><sub>**视频报告画面** · 深色主题</sub> |
+| <img src="docs/screenshots/zh-CN/light-protocol-report.png" alt="协议检测报告 (浅色主题)" /><br><sub>**协议检测报告** · 协议状态与电压 / PD 版本 / 完整 PDO</sub> | <img src="docs/screenshots/zh-CN/dark-protocol-report.png" alt="协议检测报告 (深色主题)" /><br><sub>**协议检测报告** · 深色主题</sub> |
 
 ## ✨ 功能特性
 
@@ -86,10 +98,12 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 - 密集数据自动切换为增量 min/max 像素桶渲染，**百万点仍可拖动**；回看按画布实际像素分辨率保留细节，慢帧不会把曲线降成宽桶，放大后恢复原始点。完整数据保留在列式存储中，悬停时二分回查原始采样点。主图支持滚轮横向缩放，录制中也可使用。
 - 1000 次/秒采样时自动绘图约 10–20 帧/秒，拖动与缩放独立刷新；采集与保存完整保留所有样本。录制和停止后的回看复用历史极值索引，缩小或平移窗口时无需重新扫描完整历史。验证范围及性能边界见 [性能说明](docs/PERFORMANCE.md#测量与硬件边界)。
 - tooltip 显示已开启且有有效数值的通道（最多 8 个），图例展示已显示通道，显隐在 `显示` 面板中切换，底部时间线导航器支持范围选取与拖动平移。
-- 每条曲线的填充由不透明度直接控制（0 = 关闭填充，1–100 = 开启）。
+- 「显示 → 曲线阴影」总开关默认开启并保存选择；各通道不透明度独立保留（0 = 关闭填充，1–100 = 开启），录制、暂停与缩放不会自动改变阴影。
 
 ### 数据记录与互通
 
+- **图片与视频报告**：将整段记录导出为 PNG 或短视频，选择分辨率、主题、曲线与打点；图片支持 16:9 和保留全部打点的长图。
+- **POWER-Z 协议检测与报告**：逐项查看支持状态、电压与依据，独立读取 PD PDO 和版本；可将本轮检测导出为 1080p–4K PNG，支持的协议可填入触发表单。
 - **CSV 导出**分别勾选温度、设备信息和打点，可同时保存 CSV 与 PD JSON；**导入**按表头名匹配列，兼容旧文件。
 - **打点标注**：记录时点击 `打点` 或按 `M` 给当前时刻写标签（例如电量 50%），鼠标停在图上时按 `M` 标记光标下的点；图上显示竖线，CSV 的 `Marker` 列随文件导出导入。
 - **PD 捕获导出 / 导入**，使用带版本号的 JSON 信封，旧版本格式仍可读取。
@@ -97,7 +111,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 ### 界面
 
-- 多 Tab 工作区（监控 / PD 分析 / 协议控制 / 设置），设备连接常驻标题栏，任何页面都能快速连断；协议控制仅连接 POWER-Z 时显示。
+- 多 Tab 工作区（监控 / PD 分析 / 协议控制 / 设置），设备连接常驻标题栏，任何页面都能快速连断；协议控制入口始终可见，连接支持的 POWER-Z 后启用操作。
 - **跟随系统 / 浅色 / 深色**三种主题，默认跟随系统，设计令牌对齐 Fluent UI webDark / webLight。
 - **界面缩放 50 – 200%**，系统缩放偏大导致窗口拥挤时可整体调低。
 - macOS 使用原生窗口按钮，支持全屏、平铺与最小化；Windows 保留 Win11 贴靠布局浮窗，Windows / Linux 可切换 Windows 与 macOS 按钮外观。

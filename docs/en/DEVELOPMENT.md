@@ -126,8 +126,8 @@ A release Tag's ZIP/tar.gz archives contain this repository's sources, without l
 During development, edit only `changelog/unreleased/zh-CN.md`. Before a release, ask the development assistant to merge duplicates and prepare user-facing Chinese notes, generate `en.md`, and review both languages manually. Notes are bilingual; sentence-by-sentence or item-by-item parity is not required. No translation API is used.
 
 ```bash
-npm run release:prepare -- 0.2.5 --date 2026-10-17 --dry-run
-npm run release:prepare -- 0.2.5 --date 2026-10-17
+npm run release:prepare -- 0.2.6 --date 2026-11-14 --dry-run
+npm run release:prepare -- 0.2.6 --date 2026-11-14
 npm run release:notes
 npm run showcase:capture
 ```
@@ -142,7 +142,9 @@ Every release preparation must refresh documentation screenshots in this order: 
 
 Install Chromium once with `npx playwright install chromium`; on Linux, use `npx playwright install --with-deps chromium` if browser system libraries are missing. Capture the full matrix of Simplified Chinese, Traditional Chinese, English and Japanese × light and dark × monitor, PD analysis, protocol control and settings: 32 images under `docs/screenshots/<language>/`, retaining the full title bar. Use the current version, the same 120 seconds of simulated data and the established viewport; a partial capture does not replace the release set.
 
-Review every image for language, theme, clipped text, charts, selected messages, protocol state and settings navigation, with no blank, obscured or overflowing content. Confirm the version matches the manifests. Update screenshot versions, descriptions and image references in all four READMEs, and commit the 32 images together with the documents. A failed capture or review leaves release preparation incomplete; fix the issue and regenerate. See [Development showcase](#development-showcase) for capture options and fixture details.
+Capture also includes eight protocol-detection workspace images and 32 report samples: 16:9 images, long images, video frames and protocol detection reports. The default set has 72 images (40 main interface screenshots plus 32 report samples); all 32 base workspace images remain required.
+
+Review every image for language, theme, clipped text, charts, selected messages, protocol state and settings navigation, with no blank, obscured or overflowing content. Confirm the version matches the manifests. Update screenshot versions, descriptions and image references in all four READMEs, and commit all 72 images together with the documents. A failed capture or review leaves release preparation incomplete; fix the issue and regenerate. See [Development showcase](#development-showcase) for capture options and fixture details.
 
 ### Documentation maintenance
 
@@ -305,7 +307,9 @@ The preview listens on `http://127.0.0.1:4173` and defaults to light mode. Stand
 
 Native acceptance for the report video never opens the system save dialog: a debug build reads `LAPOWER_VIDEO_TARGET` inside `video_export_pick` and issues a ticket for that path directly. The branch is compiled only under `debug_assertions`, so a release build still takes its path from the native dialog, and it serves local automation only — not settings, the shipped interface or CI.
 
-Capture uses Chromium, Windows window style, a 1280×800 CSS viewport, 2× pixel density and 100% UI scale, producing 2560×1600 PNGs. Defaults use POWER-Z, device temperature and the same 120 seconds of simulated data. Virtual time is frozen before waiting for actual charts, details, fonts and controls to finish rendering. Output is `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png`, eight images per language and 32 total.
+Main interface capture uses Chromium, Windows window style, a 1280×800 CSS viewport, 2× pixel density and 100% UI scale, producing 2560×1600 PNGs. Defaults use POWER-Z, device temperature and the same 120 seconds of simulated data. Virtual time is frozen before waiting for actual charts, details, fonts and controls to finish rendering. Output is `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report}.png`, 18 images per language and 72 total, including the 32 base workspace images.
+
+Main interface screenshots retain the full title bar. Report samples show rendered output rather than export settings dialogs. Monitor samples use the application's captureReport projection and shared scene/tiny-skia renderer: 1920×1080 landscape images and video frames, and 1920×1340 long images, with 12 sample markers. Protocol reports use the actual PNG export. Before rendering Monitor reports, capture builds the frontend and runs cargo run --locked -p lapower --example showcase-reports; Rust and the platform build environment are required. Use --page record,pd,trigger,detection,settings for main interface screenshots without Rust compilation.
 
 The About version comes from package.json; capture checks the version, language and viewport overflow. Images are written only to language subdirectories, without duplicate copies in the screenshot root.
 
@@ -316,9 +320,9 @@ npm run showcase:capture -- --theme light --page pd,trigger --output output/show
 npm run showcase:capture -- --help
 ```
 
-`--language` accepts zh-CN, zh-TW, en, ja (comma-separated; all by default). `--theme` accepts `light,dark`, generated in that order by default. `--page` accepts `record,pd,trigger,settings`. Output directories are relative to the repository root or absolute. Edit `tools/showcase/scenario.js` to change virtual device information, random seed, charging curves, handshake timing and PDO/protocol-detection results. `bridge.js` implements Tauri commands, events, recording segments, ACKs, in-memory settings and file handles; unimplemented calls fail explicitly. CSV/PD export uses browser downloads; CSV import uses a browser file picker. PD import supports only raw messages included in the frozen fixtures; arbitrary hardware messages still need the native app for decoding.
+`--language` accepts zh-CN, zh-TW, en, ja (comma-separated; all by default). `--theme` accepts `light,dark`, generated in that order by default. `--page` accepts `record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report`. Output directories are relative to the repository root or absolute. Edit `tools/showcase/scenario.js` to change virtual device information, random seed, charging curves, handshake timing and PDO/protocol-detection results. `bridge.js` implements Tauri commands, events, recording segments, ACKs, in-memory settings and file handles; unimplemented calls fail explicitly. CSV/PD export uses browser downloads; CSV import uses a browser file picker. PD import supports only raw messages included in the frozen fixtures; arbitrary hardware messages still need the native app for decoding.
 
-`pd-fixtures.json` stores raw messages and trees generated by the existing `witrn-hid` Rust parser. Normal preview/capture needs no Rust compilation. After changing raw fixtures, regenerate with `node tools/showcase/generate-pd.mjs` in a Rust environment. The temporary generator goes in ignored `output/`, and build artifacts in `target/`.
+`pd-fixtures.json` stores raw messages and trees generated by the existing `witrn-hid` Rust parser. Browser previews and main interface captures need no Rust compilation; rendering report samples requires Rust. After changing raw fixtures, regenerate with `node tools/showcase/generate-pd.mjs` in a Rust environment. The temporary generator goes in ignored `output/`, and build artifacts in `target/`.
 
 Browser settings and files are in memory and do not access real app data directories. The app uses `io.github.khwlgh.lapower`, also reflected in startup measurement tools. Former WITRN-RS settings are not migrated automatically.
 

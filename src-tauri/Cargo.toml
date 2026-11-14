@@ -33,6 +33,12 @@ crate-type = ["rlib"]
 name = "stream"
 harness = false
 
+# Documentation-only renderer; shares the shipping report layout and portable rasteriser.
+[[example]]
+name = "showcase-reports"
+path = "../tools/showcase/render-reports.rs"
+test = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

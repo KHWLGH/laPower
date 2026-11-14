@@ -126,8 +126,8 @@ Node.js と Git が必要です。スクリプトの位置からリポジトリ�
 開発中は `changelog/unreleased/zh-CN.md` だけを編集します。リリース前に開発アシスタントで重複をまとめ、利用者向けの簡体字中国語の説明を整理し、`en.md` を生成して両言語を手動で校正します。変更履歴は英語と簡体字中国語のみです。文や項目の厳密な一対一対応は要求せず、翻訳 API は使いません。
 
 ```bash
-npm run release:prepare -- 0.2.5 --date 2026-10-17 --dry-run
-npm run release:prepare -- 0.2.5 --date 2026-10-17
+npm run release:prepare -- 0.2.6 --date 2026-11-14 --dry-run
+npm run release:prepare -- 0.2.6 --date 2026-11-14
 npm run release:notes
 npm run showcase:capture
 ```
@@ -142,7 +142,9 @@ Release は英語を展開し、簡体字中国語を折りたたみます。両
 
 初回は `npx playwright install chromium` を実行します。Linux でブラウザーのシステム依存が不足する場合は `npx playwright install --with-deps chromium` を使います。簡体字中国語・繁体字中国語・英語・日本語 × ライト・ダーク × モニター・PD 分析・プロトコル制御・設定の全 32 枚を `docs/screenshots/<language>/` に生成し、タイトルバー全体を残します。現在のバージョン、共通の 120 秒の仮想データ、既定の画面サイズを使い、一部だけの撮影でリリース用の一式を代用しません。
 
-全画像で言語、テーマ、文字切れ、グラフ、選択メッセージ、プロトコル状態、設定の目次を確認し、空白、重なり、はみ出しがないことを確認します。バージョンは現在のマニフェストと一致させます。4 言語の README の画像バージョン、説明、参照も更新し、32 枚の画像と文書を一緒にコミットします。撮影や確認に失敗した場合、修正して再生成するまでリリース準備は完了しません。オプションとデータの詳細は[開発用プレビュー](#開発用プレビュー)を参照してください。
+プロトコル検出のメイン画面 8 枚と、16:9 画像・縦長画像・動画フレーム・プロトコル検出レポートの表示例 32 枚を追加します。既定で全 72 枚（メイン画面 40 枚とレポート 32 枚）となり、基本 32 枚も毎回すべて更新します。
+
+全画像で言語、テーマ、文字切れ、グラフ、選択メッセージ、プロトコル状態、設定の目次を確認し、空白、重なり、はみ出しがないことを確認します。バージョンは現在のマニフェストと一致させます。4 言語の README の画像バージョン、説明、参照も更新し、全 72 枚の画像と文書を一緒にコミットします。撮影や確認に失敗した場合、修正して再生成するまでリリース準備は完了しません。オプションとデータの詳細は[開発用プレビュー](#開発用プレビュー)を参照してください。
 
 ### 文書の保守範囲
 
@@ -305,7 +307,9 @@ npm run showcase:capture
 
 レポート動画のネイティブ検証ではシステムの保存ダイアログを開きません。debug ビルドの `video_export_pick` は `LAPOWER_VIDEO_TARGET` を読み、値があればそのパスに対して直接チケットを発行します。この分岐は `debug_assertions` でのみコンパイルされ、release ビルドではパスはネイティブダイアログからのみ取得します。ローカル自動化専用で、設定・同梱 UI・CI には含まれません。
 
-キャプチャは Chromium、Windows スタイル、1280×800 CSS ビューポート、2 倍ピクセル密度、100% UI 倍率を使い、2560×1600 PNG を作成します。既定で POWER-Z、デバイス温度、共通の 120 秒データを使い、仮想時間を止めてからグラフ・詳細・フォント・操作部の描画完了を待ちます。`docs/screenshots/<language>/{dark,light}-{record,pd,trigger,settings}.png` に言語ごと 8 枚、合計 32 枚を出力します。
+メイン画面のキャプチャは Chromium、Windows スタイル、1280×800 CSS ビューポート、2 倍ピクセル密度、100% UI 倍率を使い、2560×1600 PNG を作成します。既定で POWER-Z、デバイス温度、共通の 120 秒データを使い、仮想時間を止めてからグラフ・詳細・フォント・操作部の描画完了を待ちます。`docs/screenshots/<language>/{dark,light}-{record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report}.png` に言語ごと 18 枚、基本 32 枚を含め合計 72 枚を出力します。
+
+メイン画面はタイトルバー全体を残し、レポートは書き出し設定ダイアログではなく実際の描画結果を掲載します。モニターレポートはアプリの captureReport と共通 scene／tiny-skia レンダラーを使用し、横長画像・動画フレームは 1920×1080、縦長画像は 1920×1340 で、12 個のマーカーを含みます。プロトコルレポートは実際の PNG 書き出しを使用します。モニターレポートの生成前にフロントエンドを自動ビルドし、cargo run --locked -p lapower --example showcase-reports を実行するため、Rust と対象プラットフォームのビルド環境が必要です。--page record,pd,trigger,detection,settings でメイン画面のみ撮影する場合は Rust コンパイル不要です。
 
 「このアプリについて」のバージョンは package.json から取得し、撮影時にバージョン、言語、画面のはみ出しを検証します。画像は言語別のサブディレクトリにのみ保存し、スクリーンショットのルートには重複コピーを作成しません。
 
@@ -316,9 +320,9 @@ npm run showcase:capture -- --theme light --page pd,trigger --output output/show
 npm run showcase:capture -- --help
 ```
 
-`--language` は zh-CN、zh-TW、en、ja（カンマ区切り、既定は全部）、`--theme` は `light,dark`（既定でこの順）、`--page` は `record,pd,trigger,settings` に対応します。出力先はリポジトリルートからの相対パス、または絶対パスです。`tools/showcase/scenario.js` でデバイス情報、乱数シード、充電曲線、ハンドシェイク時刻、PDO・検出結果を変更できます。`bridge.js` は Tauri コマンド・イベント、記録区間、ACK、メモリー設定、ファイルハンドルを実装し、未実装呼び出しは明示的に失敗します。CSV／PD はブラウザーダウンロードで保存し、CSV はファイル選択で読み込みます。PD は固定サンプルの生メッセージを含むファイルのみ読み込め、任意の実機デコードにはネイティブアプリを使います。
+`--language` は zh-CN、zh-TW、en、ja（カンマ区切り、既定は全部）、`--theme` は `light,dark`（既定でこの順）、`--page` は `record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report` に対応します。出力先はリポジトリルートからの相対パス、または絶対パスです。`tools/showcase/scenario.js` でデバイス情報、乱数シード、充電曲線、ハンドシェイク時刻、PDO・検出結果を変更できます。`bridge.js` は Tauri コマンド・イベント、記録区間、ACK、メモリー設定、ファイルハンドルを実装し、未実装呼び出しは明示的に失敗します。CSV／PD はブラウザーダウンロードで保存し、CSV はファイル選択で読み込みます。PD は固定サンプルの生メッセージを含むファイルのみ読み込め、任意の実機デコードにはネイティブアプリを使います。
 
-`pd-fixtures.json` は既存 `witrn-hid` Rust パーサーで生成した生データとデコードツリーです。通常のプレビュー・撮影では Rust ビルドは不要です。生サンプルを変えたら Rust 環境で `node tools/showcase/generate-pd.mjs` を実行します。一時ジェネレーターは無視対象の `output/`、コンパイル結果は `target/` に置きます。
+`pd-fixtures.json` は既存 `witrn-hid` Rust パーサーで生成した生データとデコードツリーです。通常のブラウザープレビュー・メイン画面の撮影に Rust ビルドは不要ですが、レポートの描画には Rust が必要です。生サンプルを変えたら Rust 環境で `node tools/showcase/generate-pd.mjs` を実行します。一時ジェネレーターは無視対象の `output/`、コンパイル結果は `target/` に置きます。
 
 ブラウザーはメモリー設定・ファイルを使い、実アプリのデータ領域を読み書きしません。新識別子 `io.github.khwlgh.lapower` は起動測定ツールにも反映されています。旧 WITRN-RS 設定は自動移行しません。
 

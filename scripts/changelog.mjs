@@ -209,7 +209,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     );
     console.log(`\n${result.body}`);
     console.log(
-      `\n${args.includes('--dry-run') ? '正式准备后' : '下一步'}：运行 npm run showcase:capture 更新四语言、浅深主题的 32 张文档截图；逐张检查并同步四语言 README 的截图版本与说明，完成质量检查后再提交发布。`,
+      `\n${args.includes('--dry-run') ? '正式准备后' : '下一步'}：运行 npm run showcase:capture 更新四语言、浅深主题的 72 张展示图（40 张主界面 + 32 张报告样式）；逐张检查并同步四语言 README 的截图版本与说明，完成质量检查后再提交发布。`,
     );
   } catch (error) {
     console.error(error.message);
