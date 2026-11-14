@@ -81,6 +81,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Fetch locked dependencies for the offline component audit
+        run: cargo fetch --locked
+
       - name: Verify bundled runtime component list
         run: npm run components:check
 
