@@ -30,6 +30,7 @@ pub enum Codec {
     H265,
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 impl Codec {
     /// Diagnostic-only name. Never rendered into a frame.
     pub fn label(self) -> &'static str {

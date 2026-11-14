@@ -448,6 +448,7 @@ pub(super) fn annexb_nals(annexb: &[u8]) -> Vec<&[u8]> {
 }
 
 /// Convert Annex-B NAL units into the 4 byte length prefixed form a sample table stores.
+#[cfg(test)]
 pub(super) fn annexb_to_length_prefixed(annexb: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(annexb.len());
     for unit in annexb_nals(annexb) {
