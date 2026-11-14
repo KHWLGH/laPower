@@ -6,35 +6,24 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
-import { startServer } from './server.mjs';
+import { createHeadlessHarness } from './headless.mjs';
 
-const server = await startServer();
-const browser = await chromium.launch({ headless: true });
-const errors = [];
-const output = resolve('out/recording-review');
+const output = resolve('output/recording-review');
 await mkdir(output, { recursive: true });
-const context = await browser.newContext({
-  viewport: { width: 1280, height: 800 },
-  locale: 'en-US',
-  acceptDownloads: true,
-});
-const page = await context.newPage();
-page.on('pageerror', (error) => errors.push(String(error)));
-const recording = () => page.evaluate(async () => (await import('/state.js')).state.isRecording);
-const unfocus = () => page.evaluate(() => document.activeElement?.blur());
+const harness = await createHeadlessHarness();
 try {
-  await page.goto(`${server.url}/app/?capture=1&theme=light&language=en`);
-  await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
+  const app = await harness.openApp({ context: { locale: 'en-US', acceptDownloads: true } });
+  const { page, errors } = app;
+  const recording = () => page.evaluate(async () => (await import('/state.js')).state.isRecording);
+  const unfocus = () => page.evaluate(() => document.activeElement?.blur());
   assert.equal(await page.locator('#temp-card').isVisible(), true);
   assert.equal(await page.locator('.commandbar #marker-actions').count(), 0);
   assert.equal(await page.locator('.chart-header #marker-actions').count(), 1);
-  await page.locator('#device-select').selectOption('showcase:km003c', { force: true });
-  await page.locator('#btn-connect').click();
+  await app.connect();
   await unfocus();
   await page.keyboard.press('p');
   assert.equal(await recording(), true);
-  await page.evaluate(() => window.__SHOWCASE__.advance(2000));
+  await app.advance(2000);
   await page.keyboard.press('p');
   assert.equal(await recording(), false);
   await page.keyboard.press('p');
@@ -52,8 +41,8 @@ try {
   const markerRow = await page.evaluate(async () => (await import('/state.js')).state.chartSeries.x.length);
   await page.keyboard.press('m');
   await page.locator('dialog[open]').waitFor();
-  await page.locator('dialog input').fill('Original marker');
-  await page.evaluate(() => window.__SHOWCASE__.advance(100));
+  await page.locator('dialog[open] .fluent-dialog-input').fill('Original marker');
+  await app.advance(100);
   await page.keyboard.press('p');
   assert.equal(await recording(), true);
   await page.locator('.fluent-dialog-ok').click();
@@ -184,6 +173,5 @@ try {
     'Recording UI verified: shortcuts, focus guards, customization, CSV/PD downloads, 4 languages × 2 themes × 3 scales.',
   );
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }

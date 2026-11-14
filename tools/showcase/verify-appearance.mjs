@@ -6,11 +6,8 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
-import { startServer } from './server.mjs';
+import { createHeadlessHarness } from './headless.mjs';
 
-const server = await startServer();
-const browser = await chromium.launch({ headless: true });
 const output = resolve('output/appearance-verification');
 await mkdir(output, { recursive: true });
 const results = [];
@@ -25,18 +22,17 @@ function assertChineseFont(fonts) {
   assert.ok(fonts.some((font) => font.familyName === 'Microsoft YaHei UI' && font.glyphCount > 0));
   assert.ok(fonts.every((font) => !/JhengHei|MingLiU|SimSun/.test(font.postScriptName)));
 }
+const harness = await createHeadlessHarness();
 try {
   for (const theme of ['light', 'dark'])
     for (const scale of [1, 1.25, 1.5]) {
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-        deviceScaleFactor: scale,
-        locale: 'en-US',
+      await using app = await harness.openApp({
+        theme,
+        language: 'zh-TW',
+        query: { systemLocale: 'zh-CN' },
+        context: { deviceScaleFactor: scale, locale: 'en-US' },
       });
-      const page = await context.newPage();
-      page.on('pageerror', (error) => failures.push(String(error)));
-      await page.goto(`${server.url}/app/?capture=1&theme=${theme}&language=zh-TW&systemLocale=zh-CN`);
-      await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
+      const { page, context } = app;
       await page.locator('#btn-settings-tab').click();
       // Verify the initial language as well as switching back from another language.
       const startupFont = await page
@@ -123,11 +119,10 @@ try {
       await page.screenshot({ path: resolve(output, `zh-CN-${theme}-${scale * 100}-settings.png`) });
       results.push({ theme, scale, ...fonts });
       console.log(`PASS: ${theme}, ${scale * 100}% DPI, Traditional Chinese DOM and Canvas fonts`);
-      await context.close();
+      failures.push(...app.errors);
     }
   assert.deepEqual(failures, []);
   await writeFile(resolve(output, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }

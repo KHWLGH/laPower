@@ -9,7 +9,7 @@
 - [發佈流程](#發佈流程)
 - [質量檢查](#質量檢查)
 - [測試與迴歸邊界](#測試與迴歸邊界)
-- [按需瀏覽器自動驗收](#按需瀏覽器自動驗收)
+- [無頭測試介面](#無頭測試介面)
 - [開發展示工具](#開發展示工具)
 - [效能測量](#效能測量)
 - [CI 門禁](#ci-門禁)
@@ -220,7 +220,6 @@ Windows 當前不做憑證簽章；macOS 使用 ad-hoc 簽章，沒有 Developer
 | `npm run check` | 日常前端檢查 |
 | `npm run check:rust` | Rust 檢查，自動先產生 `out/` |
 | `npm run check:all` | 交付前完整核心檢查，包含前兩組與元件清單核對 |
-| `npm run test:browser` | 按需無頭瀏覽器工作流程與效能結構驗收 |
 
 `check` 依序執行 `npm test`、`typecheck`、`lint`，不建置前端或執行 Cargo；`check:rust` 先建置一次前端，再執行格式檢查、工作區 Clippy 與測試。`check:all` 依序組合兩組檢查與 `components:check`，只建置一次前端，所有入口遇錯即停。單項命令仍可獨立執行；元件清單核對需要 Cargo，缺少相依快取時可能連網。原有 CI 檢查集合維持不變。
 
@@ -256,21 +255,32 @@ done
 - 效能 benchmark 和真機檢查按需手動運行，不作為每次改動的瀏覽器自動迴歸。
 - CI 保持固定的核心檢查集合，不因單個功能增加專用迴歸流程。
 
-## 按需瀏覽器自動驗收
+## 無頭測試介面
 
-沿用現有 Playwright 與模擬裝置伺服器，不新增執行期相依。首次執行 `npx playwright install chromium`，然後執行：
+`tools/showcase/headless.mjs` 為其他 Node 指令碼提供可匯入的無頭介面，重用既有 Playwright、模擬伺服器與裝置橋接。首次執行 `npx playwright install chromium`。不附加測試場景、執行器或 CI 工作；截圖、既有 UI 檢查與瀏覽器基準共用此介面。儲存庫根目錄指令碼範例：
 
-```bash
-npm run test:browser
-npm run test:browser -- --case chart-idle-resize,range-worker
-npm run test:browser -- --channel msedge
+```js
+import { createHeadlessHarness } from './tools/showcase/headless.mjs';
+
+await using harness = await createHeadlessHarness();
+await using app = await harness.openApp({ language: 'zh-CN', theme: 'dark' });
+await app.connect('showcase:km003c');
+await app.record();
+await app.advance(1000);
+await app.pause();
+await app.waitForCharts();
+console.log(await app.diagnostics());
+// app.page / app.context: ordinary Playwright APIs
 ```
 
-六個隔離場景依序驗證：模擬每秒 100／1000 筆記錄、暫停末包消費及 ACK、CSV 逐欄與統計／積分往返；含缺測與重複時間的十萬點歷史，五次尺寸變更後投影及圖表 PNG 一致、不重掃索引且空閒診斷停止；真正瀏覽器 Worker 重用、4096 行緩衝上限與取消隔離；PD 同條件投影重用、連續篩選並行追加及隱藏零 DOM 提交；模擬協定進度、依據展開及 PDO 觸發。恢復檔案去重、寫入失敗及持久化邊界仍由 `recording-spool` 核心測試覆蓋。
+- `createHeadlessHarness({ channel, distribution, timeout })`：預設 Chromium、原始碼與 15 秒操作逾時；可指定 `msedge`／`chrome` 或已建置的 `out/`。回傳 `url`、`browser`、`openApp`、`close`。
+- `openApp({ language, theme, query, context, beforeLoad })`：隔離儲存、虛擬裝置、時鐘與下載，等待連接控制及圖表就緒。`context` 接受 Playwright 選項；`query` 重用橋接參數；非同步 `beforeLoad(page)` 在導覽前安裝路由、事件與初始化指令碼。
+- `connect(path)`、`record()`、`pause()` 透過實際介面操作；`freeze()`／`resume()` 控制虛擬時鐘。預設凍結；`advance(ms)` 推進 0–300000 毫秒並等待消費及實際 ACK，自動時鐘需先凍結。
+- `flush()` 只等待消費邊界；`waitForCharts()` 等待主圖顯示工作與兩幀；匯出的 `frames(page)` 只等待字型及兩幀。不保證磁碟持久化、螢幕呈現或所有非同步工作完成。
+- `diagnostics()` 回傳 `source`、`stream`、`performance`、未捕獲異常 `errors` 與 `consoleErrors`，不自動啟用完整效能取樣。斷言、截圖、trace 及錯誤處理由呼叫端負責；既有協定故障鉤子可透過 `app.page.evaluate()` 呼叫 `window.__SHOWCASE__`。
+- `app.close()` 關閉目前上下文；`harness.close()` 關閉全部上下文、瀏覽器與伺服器，皆可重複呼叫。Node 24 的 `await using` 在正常或異常離開作用域時清理；初始化失敗亦清理已建立資源。錯誤直接拋給呼叫端，不吞掉或當作跳過。
 
-固定無頭執行，不開啟或啟用桌面視窗，不存取真實儀表、設定或測量檔案。預設使用 Playwright Chromium，也可指定已安裝的 Edge／Chrome；缺少瀏覽器直接失敗。每項最多 90 秒，失敗後繼續收集其餘場景，最終回傳非零退出碼。`output/browser-tests/<時間>/` 保存環境、指標及錯誤的 `report.json`、`junit.xml`，失敗另存 PNG 與 Playwright trace ZIP；可用 `npx playwright show-trace <zip>` 人工查看。`--output <目錄>` 指定結果根目錄，`--help` 列出場景。結果不提交，像素在同次執行內比較，不維護跨機器圖片基準；絕對耗時僅報告。
-
-維護時優先擴充核心測試；依賴真正瀏覽器排程、Worker 或 Canvas 的高影響問題才加入 `tools/showcase/verify-workflows.mjs`，使用狀態與有界工作量斷言。四語／版面仍可按需執行 `node tools/showcase/verify-i18n.mjs`、`node tools/showcase/verify-appearance.mjs`。原生 GUI、真實檔案故障、儀表序號異常與持續擷取需另做實機驗收。
+固定無頭啟動，不啟用桌面視窗；模擬裝置不連接真實儀表或讀取原生設定。既有 `verify-*.mjs` 依影響領域手動選擇；圖表專項保留 `bench/chart-transitions.mjs` 與 `bench/chart-raster.mjs`，移除依賴舊內部索引行為且覆蓋重複的歷史矩陣指令碼。核心 `test/` 保留資料、協定與建置不變量；不再維護額外的全流程驗收套件或瀏覽器 CI。平台、原生檔案系統與硬體擷取仍須個別驗證。
 
 ## 開發展示工具
 
@@ -329,7 +339,7 @@ npm run showcase:capture -- --help
 | `node bench/packaging.mjs` | 檢查 `out/` 的發貨檔案和內嵌集合 |
 | `cargo bench -p lapower` | Rust 協定解碼、編碼和選擇路徑基準 |
 
-`perf-shape` CI job 只硬性檢查發貨形狀和基線結構；算法和 Rust benchmark 只報告結果，不把單次耗時當作跨主機門禁。
+發貨形狀與基準結構檢查合併至 `validate`，重用前端建置；算法與 Rust 耗時基準按需在本機執行，不在每次 CI 重複建置與計時。
 
 ## CI 門禁
 
@@ -337,15 +347,14 @@ npm run showcase:capture -- --help
 
 | Job | 內容 |
 | --- | --- |
-| `validate` | Linux 依賴、前端建置、JS 測試、typecheck、lint、Rust fmt、Clippy、workspace test |
+| `validate` | Linux 依賴、前端建置、JS 測試、typecheck、lint、Rust fmt、Clippy、workspace test、發貨形狀與基準結構 |
 | `backend-other-platforms` | Windows workspace test；macOS workspace test |
 | `crate-features` | 協定 crate 的非預設 feature 組合 Clippy 與 test |
-| `perf-shape` | `bench/packaging.mjs`、`core.mjs --verify-baseline`，以及報告型 benchmark |
-| `package` | 僅版本 Tag push / 手動觸發；依賴以上四項檢查，四目標並行打包，單個平台失敗不會取消其他目標 |
+| `package` | 僅版本 Tag push / 手動觸發；依賴以上三項檢查，四目標並行打包，單個平台失敗不會取消其他目標 |
 | `package-summary` | 四目標全部成功後驗證七個安裝包並產生 `SHA256SUMS` |
 | `release` | 僅版本 Tag push；上傳並核對附件後自動公開 Release |
 
-普通分支 push 和 PR 只執行原有檢查，不打包或發佈。按需選擇 Actions → **Browser acceptance** → Run workflow，使用獨立的 `.github/workflows/browser-tests.yml`：安裝 Chromium、執行 `test:browser`，無論成敗上傳報告及失敗證據，保留 14 天，不打包或發佈。不要為瀏覽器驗收觸發原有 **CI** 手動入口，後者會打包。瀏覽器驗收不加入每次 push／PR 的固定檢查，也不執行硬體長跑。發佈指令碼的失敗、重跑、附件完整性和公開版本保護由 `test/release.test.js` 離線驗證。
+普通分支 push／PR 只執行核心檢查，不打包或發佈；CI 不安裝瀏覽器、不執行 UI 矩陣、長時間擷取或耗時 benchmark。按需透過無頭介面呼叫既有工具；原有 **CI** 手動入口仍會打包。發佈指令碼的失敗、重跑、附件完整性與公開版本保護由 `test/release.test.js` 離線驗證。
 
 ## Linux 自行編譯
 

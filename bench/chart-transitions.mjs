@@ -7,8 +7,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
-import { startServer } from '../tools/showcase/server.mjs';
+import { createHeadlessHarness } from '../tools/showcase/headless.mjs';
 import { environment, options, provenance, quantiles } from './common.mjs';
 
 const config = options(process.argv.slice(2), {
@@ -45,47 +44,36 @@ const baselineSources = Object.fromEntries(
   ]),
 );
 await mkdir(output, { recursive: true });
-const server = await startServer();
-const browser = await chromium.launch({ channel: config.channel, headless: true }).catch(async (error) => {
-  await server.close();
-  throw error;
-});
-const result = {
-  config,
-  environment: environment(),
-  provenance: await provenance(),
-  browser: browser.version(),
-  date: new Date().toISOString(),
-  cases: [],
-  limitations:
-    'Synthetic 1 ms data; real chart.js and uPlot, headless browser, no HID or native disk I/O. Baseline loads the pre-implementation uncommitted snapshot including chart-buckets; fingerprints are saved alongside the snapshot. All fixtures first settle auxiliaries, reset the index, then repaint the unchanged live projection. Current waits for production background warmup; baseline has no warmup and waits 750 ms. Current-cold resets again immediately before pause. Warmup cost is reported separately. Chart latency is through draw and three subsequent rAFs, not physical display presentation. Repeats use fresh contexts in one process, not independent host runs.',
-};
+const harness = await createHeadlessHarness({ channel: config.channel });
+const { browser } = harness;
 try {
+  const result = {
+    config,
+    environment: environment(),
+    provenance: await provenance(),
+    browser: browser.version(),
+    date: new Date().toISOString(),
+    cases: [],
+    limitations:
+      'Synthetic 1 ms data; real chart.js and uPlot, headless browser, no HID or native disk I/O. Baseline loads the pre-implementation uncommitted snapshot including chart-buckets; fingerprints are saved alongside the snapshot. All fixtures first settle auxiliaries, reset the index, then repaint the unchanged live projection. Current waits for production background warmup; baseline has no warmup and waits 750 ms. Current-cold resets again immediately before pause. Warmup cost is reported separately. Chart latency is through draw and three subsequent rAFs, not physical display presentation. Repeats use fresh contexts in one process, not independent host runs.',
+  };
   for (let run = 0; run < config.runs; run++) {
     const cases = config.sizes.flatMap((n) => variants.map((variant) => [variant, n]));
     if (run % 2) cases.reverse();
     for (const [variant, n] of cases) {
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-        deviceScaleFactor: config.ratio,
+      await using app = await harness.openApp({
+        language: 'zh-CN',
+        context: { deviceScaleFactor: config.ratio },
+        beforeLoad: async (page) => {
+          if (variant === 'baseline')
+            await page.route(/\/(chart|chart-extrema|chart-buckets)\.js$/, async (route) => {
+              const file = new URL(route.request().url()).pathname.split('/').at(-1);
+              await route.fulfill({ contentType: 'text/javascript', body: baselineSources[file] });
+            });
+        },
       });
-      const page = await context.newPage();
-      if (variant === 'baseline')
-        await page.route(/\/(chart|chart-extrema|chart-buckets)\.js$/, async (route) => {
-          const file = new URL(route.request().url()).pathname.split('/').at(-1);
-          await route.fulfill({
-            contentType: 'text/javascript',
-            body: baselineSources[file],
-          });
-        });
-      const errors = [];
-      page.on('pageerror', (error) => errors.push(String(error)));
-      await page.goto(`${server.url}/app/?capture=1&theme=light&language=zh-CN`);
-      await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
-      await page.evaluate(() => window.__SHOWCASE__.freeze());
-      await page.locator('#device-select').selectOption('showcase:km003c', { force: true });
-      await page.locator('#btn-connect').click();
-      await page.waitForFunction(async () => (await import('/state.js')).state.isConnected);
+      const { page, errors } = app;
+      await app.connect();
       await page.evaluate(
         async ({ n, variant, signal, channels, filled }) => {
           window.__SHOWCASE__.freeze();
@@ -104,7 +92,7 @@ try {
           };
           const resetIndex = ExactExtremaIndex.prototype.reset;
           ExactExtremaIndex.prototype.reset = function () {
-            window.__researchIndex = this;
+            if ((this.channels ?? 8) === 8) window.__researchIndex = this;
             return resetIndex.call(this);
           };
           const cs = emptyChartColumns();
@@ -360,7 +348,6 @@ try {
         }),
       );
       await writeFile(resolve(output, 'transitions.json'), JSON.stringify(result, null, 2));
-      await context.close();
     }
   }
   result.summary = config.sizes.flatMap((n) =>
@@ -389,6 +376,5 @@ try {
   assert.ok(result.sourceStable, 'Production source changed during the benchmark');
   await writeFile(resolve(output, 'transitions.json'), JSON.stringify(result, null, 2));
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }

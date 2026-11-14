@@ -9,7 +9,7 @@
 - [Release process](#release-process)
 - [Quality checks](#quality-checks)
 - [Testing and regression boundaries](#testing-and-regression-boundaries)
-- [Optional automated browser acceptance](#optional-automated-browser-acceptance)
+- [Headless testing API](#headless-testing-api)
 - [Development showcase](#development-showcase)
 - [Performance measurements](#performance-measurements)
 - [CI gates](#ci-gates)
@@ -219,7 +219,6 @@ Choose one entry point for the scope of your changes:
 | `npm run check` | Daily frontend checks |
 | `npm run check:rust` | Rust checks, generating `out/` first |
 | `npm run check:all` | All core checks before delivery, including both groups and component-list verification |
-| `npm run test:browser` | Optional headless workflow and performance-structure acceptance |
 
 `check` runs `npm test`, `typecheck` and `lint` in sequence without building the frontend or running Cargo. `check:rust` builds the frontend once, then runs Rust formatting, workspace Clippy and tests. `check:all` combines both groups with `components:check`, builds the frontend only once, and stops on the first failure. Individual commands remain available. Component-list verification needs Cargo and may fetch uncached dependencies. The existing CI check set is unchanged.
 
@@ -255,27 +254,38 @@ done
 - Run performance benchmarks and real-device checks manually as needed, rather than browser regression on every change.
 - Keep CI's core checks fixed; individual features should not add dedicated regression workflows.
 
-## Optional automated browser acceptance
+## Headless testing API
 
-This reuses Playwright and the existing simulated-device server without new runtime dependencies. Install Chromium once with `npx playwright install chromium`, then run:
+`tools/showcase/headless.mjs` exports a headless API for other Node scripts, reusing Playwright, the simulated server and device bridge. Install Chromium once with `npx playwright install chromium`. It adds no test scenarios, runner or CI jobs; capture, existing UI checks and browser benchmarks share it. Example for a script at the repository root:
 
-```bash
-npm run test:browser
-npm run test:browser -- --case chart-idle-resize,range-worker
-npm run test:browser -- --channel msedge
+```js
+import { createHeadlessHarness } from './tools/showcase/headless.mjs';
+
+await using harness = await createHeadlessHarness();
+await using app = await harness.openApp({ language: 'zh-CN', theme: 'dark' });
+await app.connect('showcase:km003c');
+await app.record();
+await app.advance(1000);
+await app.pause();
+await app.waitForCharts();
+console.log(await app.diagnostics());
+// app.page / app.context: ordinary Playwright APIs
 ```
 
-Six isolated scenarios run serially: simulated 100/1000 samples per second, pause-tail consumption/ACK and exact CSV column/statistics/energy round trips; 100,000 history points with missing values and duplicate times, identical projections/chart PNGs after five resizes, reused indexes and no idle diagnostic frames; real browser Worker reuse, bounded 4096-row transfers and cancellation isolation; reused PD projections, rapid filters with concurrent appends and no hidden DOM commits; simulated protocol progress, expandable evidence and PDO triggering. Core `recording-spool` tests retain checkpoint deduplication, failure and durability coverage.
+- `createHeadlessHarness({ channel, distribution, timeout })` defaults to Chromium, source files and a 15-second operation timeout. Select installed `msedge`/`chrome` or a built `out/`. Returns `url`, `browser`, `openApp` and `close`.
+- `openApp({ language, theme, query, context, beforeLoad })` isolates storage, virtual devices, clock and downloads, and waits for connection controls and charts. `context` accepts Playwright context options; `query` reuses bridge parameters; async `beforeLoad(page)` installs routes, listeners or init scripts before navigation.
+- `connect(path)`, `record()` and `pause()` operate actual UI controls. `freeze()`/`resume()` control the clock, frozen by default. `advance(ms)` advances 0–300000 virtual milliseconds and waits for consumption and real ACK; freeze an automatic clock first.
+- `flush()` waits only for the consumption boundary. `waitForCharts()` waits for main-chart display work and two frames; exported `frames(page)` waits only for fonts and two frames. None promises disk durability, physical presentation or completion of all asynchronous work.
+- `diagnostics()` returns `source`, `stream`, `performance`, uncaught `errors` and `consoleErrors` without enabling full performance sampling. The caller owns assertions, screenshots, traces and error handling; existing protocol fault hooks remain accessible through `app.page.evaluate()` and `window.__SHOWCASE__`.
+- `app.close()` closes its context; `harness.close()` closes all contexts, browser and server. Both are idempotent. Node 24 `await using` cleans up on normal or exceptional scope exit; failed initialization also cleans up created resources. Errors propagate to the caller rather than becoming skips.
 
-The runner is always headless, never opens or activates desktop windows, and does not access real devices, settings or measurements. It defaults to Playwright Chromium; explicitly select installed Edge/Chrome if needed. Missing browsers fail rather than skip. Each case has a 90-second limit; failures do not stop later cases, and the final exit code is nonzero. `output/browser-tests/<timestamp>/` contains environment, metrics and errors in `report.json` and `junit.xml`, plus PNG/Playwright trace ZIP files on failure. Inspect traces manually with `npx playwright show-trace <zip>`. `--output <directory>` changes the result root; `--help` lists cases. Do not commit results. Pixels are compared within one run without a cross-machine image baseline; absolute timings are reports only.
-
-Extend core tests first. Add high-impact cases requiring actual browser scheduling, Workers or Canvas to `tools/showcase/verify-workflows.mjs`, asserting state and bounded work. Optional language/layout checks remain at `node tools/showcase/verify-i18n.mjs` and `node tools/showcase/verify-appearance.mjs`. Native GUI, real file failures, device sequence anomalies and sustained acquisition need separate hardware acceptance.
+Launch is always headless and never activates desktop windows. Virtual devices do not connect hardware or read native settings. Choose existing `verify-*.mjs` tools manually by affected area. Chart diagnostics retain `bench/chart-transitions.mjs` and `bench/chart-raster.mjs`; the overlapping historical matrix script relying on old private index behavior has been removed. Core `test/` retains data, protocol and build invariants. There is no additional full-workflow acceptance suite or browser CI. Platform behavior, native filesystems and acquisition hardware require separate validation.
 
 ## Development showcase
 
 `npm run bench:memory` compares long-recording memory against pre-change snapshots of `state.js`, `csv-codec.js`, `csv-import-core.js` and `measurement.js` in `bench/results/memory-before/`, or a directory passed with `-- --baseline <directory>`. It covers continuous appends at one/five million points, appends with retained export snapshots, streaming CSV imports and repeated clears. Per-column SHA-256 must match; column buffers must save at least 20%. Results in `bench/results/memory.json` distinguish unique column buffers, sampled Node RSS peaks and OS peaks; they do not measure the complete Tauri/WebView2 process tree.
 
-`tools/showcase/` is a separate browser development tool with virtual WITRN K2 and POWER-Z KM003C devices, deterministic measurements, PD messages and protocol-control results. Data uses the app's existing ingestion/rendering logic. The full title bar uses decorum-style control structure and the app's icons/styles with virtual window behavior. It does not connect hardware or enter `src/`, `out/` or installers. Optional browser acceptance reuses its server.
+`tools/showcase/` is a separate browser development tool with virtual WITRN K2 and POWER-Z KM003C devices, deterministic measurements, PD messages and protocol-control results. Data uses the app's existing ingestion/rendering logic. The full title bar uses decorum-style control structure and the app's icons/styles with virtual window behavior. It does not connect hardware or enter `src/`, `out/` or installers. The headless API reuses its server.
 
 Initial setup:
 
@@ -328,7 +338,7 @@ Browser settings and files are in memory and do not access real app data directo
 | `node bench/packaging.mjs` | Shipping files and embedded set in `out/` |
 | `cargo bench -p lapower` | Rust protocol decoding, encoding and selection paths |
 
-The `perf-shape` CI job enforces only shipping shape and baseline structure. Algorithm/Rust benchmarks report results rather than using single-run timing as a cross-host gate.
+Shipping-shape and baseline-structure checks run in `validate`, reusing its frontend build. Run algorithm and Rust timing benchmarks locally on demand, avoiding repeated CI builds and timings.
 
 ## CI gates
 
@@ -336,15 +346,14 @@ The `perf-shape` CI job enforces only shipping shape and baseline structure. Alg
 
 | Job | Contents |
 | --- | --- |
-| `validate` | Linux dependencies, frontend build, JS tests, typecheck, lint, Rust fmt, Clippy and workspace tests |
+| `validate` | Linux dependencies, frontend build, JS tests, typecheck, lint, Rust fmt, Clippy and workspace tests, shipping shape and baseline structure |
 | `backend-other-platforms` | Windows workspace tests; macOS workspace test |
 | `crate-features` | Clippy/tests for non-default protocol-crate feature combinations |
-| `perf-shape` | `bench/packaging.mjs`, `core.mjs --verify-baseline` and reporting benchmarks |
-| `package` | Version-tag pushes/manual runs only; depends on the four checks above, packages four targets in parallel without canceling others on one failure |
+| `package` | Version-tag pushes/manual runs only; depends on the three checks above, packages four targets in parallel without canceling others on one failure |
 | `package-summary` | Verifies seven installers and generates `SHA256SUMS` after all targets succeed |
 | `release` | Version-tag pushes only; uploads/verifies assets and publishes automatically |
 
-Ordinary branch pushes and PRs run existing checks without packaging or release. For optional browser acceptance, select Actions → **Browser acceptance** → Run workflow, using the separate `.github/workflows/browser-tests.yml`. It installs Chromium, runs `test:browser` and uploads reports/failure evidence regardless of success, retaining artifacts for 14 days without packaging or releasing. Do not use the existing **CI** manual entry for this; that entry builds installers. Browser acceptance is not added to every push/PR and does not run hardware endurance. `test/release.test.js` verifies failure, retries, asset integrity and public-release protection offline.
+Ordinary branch pushes and PRs run core checks without packaging or release. CI installs no browser and runs no UI matrix, endurance capture or timing benchmark. Use the headless API and existing tools on demand; the existing manual **CI** entry still builds installers. `test/release.test.js` verifies failure, retries, asset integrity and public-release protection offline.
 
 ## Building on Linux
 

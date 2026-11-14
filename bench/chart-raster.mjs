@@ -7,8 +7,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
-import { startServer } from '../tools/showcase/server.mjs';
+import { createHeadlessHarness } from '../tools/showcase/headless.mjs';
 
 import { options, provenance } from './common.mjs';
 
@@ -37,23 +36,23 @@ const baseline = Object.fromEntries(
 );
 const output = resolve(config.output);
 await mkdir(output, { recursive: true });
-const server = await startServer();
-const browser = await chromium.launch({ channel: config.channel, headless: true });
+const harness = await createHeadlessHarness({ channel: config.channel });
 const results = [];
 try {
   for (const variant of ['before', 'current']) {
     for (const ratio of [1, 1.25, 1.5, 2]) {
-      const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: ratio });
-      const page = await context.newPage();
-      if (variant === 'before')
-        await page.route(/\/(chart|chart-extrema|chart-buckets)\.js$/, async (route) => {
-          const file = new URL(route.request().url()).pathname.split('/').at(-1);
-          await route.fulfill({ contentType: 'text/javascript', body: baseline[file] });
-        });
-      const errors = [];
-      page.on('pageerror', (error) => errors.push(String(error)));
-      await page.goto(`${server.url}/app/?capture=1&theme=light&language=zh-CN`);
-      await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
+      await using app = await harness.openApp({
+        language: 'zh-CN',
+        context: { deviceScaleFactor: ratio },
+        beforeLoad: async (page) => {
+          if (variant === 'before')
+            await page.route(/\/(chart|chart-extrema|chart-buckets)\.js$/, async (route) => {
+              const file = new URL(route.request().url()).pathname.split('/').at(-1);
+              await route.fulfill({ contentType: 'text/javascript', body: baseline[file] });
+            });
+        },
+      });
+      const { page, errors } = app;
       await page.evaluate(async () => {
         window.__SHOWCASE__.freeze();
         const { state, emptyChartColumns } = await import('/state.js');
@@ -155,7 +154,6 @@ try {
           await page.locator('#main-chart').screenshot({ path: resolve(output, `${variant}-${ratio}-${count}.png`) });
       }
       assert.deepEqual(errors, []);
-      await context.close();
     }
   }
   await writeFile(
@@ -165,7 +163,7 @@ try {
         config,
         provenance: sourceBefore,
         sourceStable: sourceBefore.sourceSha256 === (await provenance()).sourceSha256,
-        browser: browser.version(),
+        browser: harness.browser.version(),
         limitations:
           'Synthetic steep sine, one channel, no fill. Connected components select near-stroke RGB pixels and omit a 3px boundary; antialiasing can leave tiny components. This is a rendering diagnostic, not a semantic point count or hardware test.',
         results,
@@ -175,6 +173,5 @@ try {
     ),
   );
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }

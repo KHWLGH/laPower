@@ -9,7 +9,7 @@
 - [发布流程](#发布流程)
 - [质量检查](#质量检查)
 - [测试与回归边界](#测试与回归边界)
-- [按需浏览器自动验收](#按需浏览器自动验收)
+- [无头测试接口](#无头测试接口)
 - [开发展示工具](#开发展示工具)
 - [性能测量](#性能测量)
 - [CI 门禁](#ci-门禁)
@@ -220,7 +220,6 @@ Windows 当前不做证书签名；macOS 使用 ad-hoc 签名，没有 Developer
 | `npm run check` | 日常前端检查 |
 | `npm run check:rust` | Rust 检查，自动先生成 `out/` |
 | `npm run check:all` | 交付前完整核心检查，包含前两组与组件清单核对 |
-| `npm run test:browser` | 按需无头浏览器工作流与性能结构验收 |
 
 `check` 依次运行 `npm test`、`typecheck`、`lint`，不构建前端或运行 Cargo；`check:rust` 先构建一次前端，再运行格式检查、工作区 Clippy 和测试。`check:all` 顺序组合两组检查与 `components:check`，只构建一次前端，所有入口遇错即停。单项命令仍可独立运行；组件清单核对需要 Cargo，缺少依赖缓存时可能联网。原有 CI 检查集合保持不变。
 
@@ -256,21 +255,32 @@ done
 - 性能 benchmark 和真机检查按需手动运行，不作为每次改动的浏览器自动回归。
 - CI 保持固定的核心检查集合，不因单个功能增加专用回归流程。
 
-## 按需浏览器自动验收
+## 无头测试接口
 
-沿用现有 Playwright 和模拟设备服务器，不新增运行依赖。首次执行 `npx playwright install chromium`，然后运行：
+`tools/showcase/headless.mjs` 为其他 Node 脚本提供可导入的无头接口，复用现有 Playwright、模拟服务器和设备桥接。首次准备运行 `npx playwright install chromium`。它不自带测试场景、测试调度器或 CI 任务；截图工具、现有 UI 检查和浏览器基准共用它。仓库根目录脚本示例：
 
-```bash
-npm run test:browser
-npm run test:browser -- --case chart-idle-resize,range-worker
-npm run test:browser -- --channel msedge
+```js
+import { createHeadlessHarness } from './tools/showcase/headless.mjs';
+
+await using harness = await createHeadlessHarness();
+await using app = await harness.openApp({ language: 'zh-CN', theme: 'dark' });
+await app.connect('showcase:km003c');
+await app.record();
+await app.advance(1000);
+await app.pause();
+await app.waitForCharts();
+console.log(await app.diagnostics());
+// app.page / app.context: ordinary Playwright APIs
 ```
 
-六个独立场景依次验证：模拟 100／1000 次每秒记录、暂停末包消费及 ACK、CSV 逐列与统计／积分往返；含缺测和重复时间的十万点历史，五次尺寸变化后投影与图表 PNG 一致、无索引重扫及空闲诊断帧；真实浏览器 Worker 复用、4096 行缓冲上限和取消隔离；PD 同条件投影复用、连续过滤并发追加与隐藏零 DOM 提交；模拟协议进度、依据展开和 PDO 触发。恢复文件去重、写入失败及持久化边界继续由 `recording-spool` 核心测试覆盖。
+- `createHeadlessHarness({ channel, distribution, timeout })`：默认 Chromium、源码、15 秒操作超时；可指定 `msedge`／`chrome` 或已构建的 `out/`。返回 `url`、`browser`、`openApp`、`close`。
+- `openApp({ language, theme, query, context, beforeLoad })`：新建隔离的存储、模拟设备、时钟和下载上下文，等待连接控件及图表就绪。`context` 接收 Playwright 上下文选项；`query` 复用模拟桥参数；异步 `beforeLoad(page)` 在导航前安装路由、事件或初始化脚本。
+- `connect(path)`、`record()`、`pause()` 通过真实界面控件操作；`freeze()`／`resume()` 控制虚拟时钟。默认冻结；`advance(ms)` 推进 0–300000 毫秒并等待消费及真实 ACK，自动时钟运行中需先冻结。
+- `flush()` 只等待消费边界；`waitForCharts()` 等主图显示任务完成并让出两帧；导出的 `frames(page)` 只等待字体与两帧。它们不保证磁盘持久化、显示器呈现或所有异步任务完成。
+- `diagnostics()` 返回 `source`、`stream`、`performance`、未捕获异常 `errors` 和 `consoleErrors`，不隐式开启完整性能采样。断言、截图、trace 和错误处理由调用脚本负责；协议故障等现有模拟钩子可通过 `app.page.evaluate()` 调用 `window.__SHOWCASE__`。
+- `app.close()` 关闭当前上下文；`harness.close()` 关闭全部上下文、浏览器和服务器，均可重复调用。Node 24 的 `await using` 在正常结束及异常退出作用域时自动清理；初始化失败也清理已创建资源。错误直接抛给调用者，不吞掉或记作跳过。
 
-工具固定无头运行，不打开或激活桌面窗口，不访问真实仪表、设置或测量文件。默认使用 Playwright Chromium，也可指定已安装的 Edge／Chrome；缺少浏览器直接失败。每项限时 90 秒，失败后继续收集其余场景，最终退出码非零。`output/browser-tests/<时间>/` 保存环境、指标及错误的 `report.json` 和 `junit.xml`，失败另存 PNG 和 Playwright trace ZIP；可用 `npx playwright show-trace <zip>` 人工查看。`--output <目录>` 指定结果根目录，`--help` 列出场景。结果不提交；像素在同次运行内比较，不维护跨机器图片基线，绝对耗时仅报告。
-
-维护时优先扩展对应核心测试；依赖真实浏览器调度、Worker 或 Canvas 的高影响问题才加入 `tools/showcase/verify-workflows.mjs`，使用状态和有界工作量断言。四语／布局仍可按需运行 `node tools/showcase/verify-i18n.mjs`、`node tools/showcase/verify-appearance.mjs`。原生 GUI、真实文件故障、仪表序号异常和持续采集需另做实机验收。
+固定无头启动，不激活桌面窗口；模拟设备不会连接真实仪表或读取原生设置。现有 `verify-*.mjs` 按涉及领域手动选择；图表专项保留 `bench/chart-transitions.mjs` 和 `bench/chart-raster.mjs`，移除依赖旧内部索引行为且覆盖重复的历史矩阵脚本。核心 `test/` 继续负责数据、协议和构建不变量；不再维护额外的整套工作流验收或浏览器 CI。平台、原生文件系统和硬件采集仍单独验证。
 
 ## 开发展示工具
 
@@ -278,7 +288,7 @@ npm run test:browser -- --channel msedge
 
 Windows 字体检查可运行 `node tools/showcase/verify-appearance.mjs`，覆盖繁体中文浅深主题与 100% / 125% / 150% DPI，检查 DOM 实际使用的字体、Canvas 轴字体和语言切换，截图及结果保存在 `output/appearance-verification/`。
 
-`tools/showcase/` 是独立的浏览器开发工具，提供虚拟 WITRN K2 与 POWER-Z KM003C、确定性的测量曲线、PD 报文和协议控制结果。数据仍经过软件现有摄入与渲染逻辑；完整标题栏使用 decorum 同款控件结构与软件自身的图标、样式，窗口行为虚拟化。工具不连接真实仪表，不进入 `src/`、`out/` 或安装包，按需浏览器验收复用其服务器。
+`tools/showcase/` 是独立的浏览器开发工具，提供虚拟 WITRN K2 与 POWER-Z KM003C、确定性的测量曲线、PD 报文和协议控制结果。数据仍经过软件现有摄入与渲染逻辑；完整标题栏使用 decorum 同款控件结构与软件自身的图标、样式，窗口行为虚拟化。工具不连接真实仪表，不进入 `src/`、`out/` 或安装包，无头测试接口复用其服务器。
 
 首次准备：
 
@@ -331,7 +341,7 @@ npm run showcase:capture -- --help
 | `node bench/packaging.mjs` | 检查 `out/` 的发货文件和内嵌集合 |
 | `cargo bench -p lapower` | Rust 协议解码、编码和选择路径基准 |
 
-`perf-shape` CI job 只硬性检查发货形状和基线结构；算法和 Rust benchmark 只报告结果，不把单次耗时当作跨主机门禁。
+发货形状和基线结构检查合并在 `validate`，复用前端构建；算法和 Rust 耗时基准按需在本机运行，不在每次 CI 中重复构建和计时。
 
 ## CI 门禁
 
@@ -339,15 +349,14 @@ npm run showcase:capture -- --help
 
 | Job | 内容 |
 | --- | --- |
-| `validate` | Linux 依赖、前端构建、JS 测试、typecheck、lint、Rust fmt、Clippy、workspace test |
+| `validate` | Linux 依赖、前端构建、JS 测试、typecheck、lint、Rust fmt、Clippy、workspace test、发货形状与基线结构 |
 | `backend-other-platforms` | Windows workspace test；macOS workspace test |
 | `crate-features` | 协议 crate 的非默认 feature 组合 Clippy 与 test |
-| `perf-shape` | `bench/packaging.mjs`、`core.mjs --verify-baseline`，以及报告型 benchmark |
-| `package` | 仅版本 Tag push / 手动触发；依赖以上四项检查，四目标并行打包，单个平台失败不会取消其他目标 |
+| `package` | 仅版本 Tag push / 手动触发；依赖以上三项检查，四目标并行打包，单个平台失败不会取消其他目标 |
 | `package-summary` | 四目标全部成功后验证七个安装包并生成 `SHA256SUMS` |
 | `release` | 仅版本 Tag push；上传并核对附件后自动公开 Release |
 
-普通分支 push 和 PR 只运行原有检查，不打包或发布。按需选择 Actions → **Browser acceptance** → Run workflow，运行独立的 `.github/workflows/browser-tests.yml`：安装 Chromium、执行 `test:browser`，无论成败上传报告及失败证据，保留 14 天，不打包或发布。不要为浏览器验收触发原有 **CI** 手动入口，后者会打包。浏览器验收不加入每次 push／PR 的固定检查，也不执行硬件长跑。发布脚本的失败、重跑、附件完整性和公开版本保护由 `test/release.test.js` 离线验证。
+普通分支 push 和 PR 只运行核心检查，不打包或发布；CI 不安装浏览器，不运行 UI 矩阵、长时间采集或耗时 benchmark。按需使用无头接口调用已有工具；原有 **CI** 手动入口仍会打包。发布脚本的失败、重跑、附件完整性和公开版本保护由 `test/release.test.js` 离线验证。
 
 ## Linux 自行编译
 

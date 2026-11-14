@@ -740,6 +740,7 @@ window.__SHOWCASE__ = {
   diagnostics: () => ({
     timeMs,
     frozen,
+    advancing,
     connected: !!device,
     generation,
     seq,

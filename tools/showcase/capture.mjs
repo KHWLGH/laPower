@@ -7,9 +7,8 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
-import { DURATION_MS } from './scenario.js';
-import { startServer } from './server.mjs';
+import { createHeadlessHarness, frames } from './headless.mjs';
+import { DURATION_MS, PDOS } from './scenario.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const { version } = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
@@ -39,14 +38,12 @@ for (let i = 0; i < args.length; i += 2) {
   }
 }
 
-let browser;
-let server;
+await using harness = await createHeadlessHarness();
 const faults = [];
 const output = resolve(ROOT, config.output);
 async function settled(page) {
-  await page.evaluate(async () => {
-    await document.fonts.ready;
-    await new Promise((accept) => requestAnimationFrame(() => requestAnimationFrame(accept)));
+  await frames(page);
+  await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
   await page.mouse.move(1, 799);
@@ -67,38 +64,24 @@ async function command(page, id) {
 }
 try {
   await mkdir(output, { recursive: true });
-  server = await startServer();
-  browser = await chromium.launch({ headless: true });
   for (const language of config.languages) {
     await mkdir(resolve(output, language), { recursive: true });
     for (const theme of config.themes) {
-      const context = await browser.newContext({
-        viewport: { width: 1280, height: 800 },
-        deviceScaleFactor: 2,
-        locale: language,
-        timezoneId: 'Asia/Hong_Kong',
-        colorScheme: theme,
-        userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+      await using app = await harness.openApp({
+        language,
+        theme,
+        context: {
+          deviceScaleFactor: 2,
+          timezoneId: 'Asia/Hong_Kong',
+          userAgent:
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+        },
       });
-      const page = await context.newPage();
-      page.on('pageerror', (error) => faults.push(String(error)));
-      page.on('console', (message) => {
-        if (message.type() === 'error') faults.push(message.text());
-      });
-      await page.goto(`${server.url}/app/?capture=1&theme=${theme}&language=${language}`);
-      await page.waitForFunction(
-        () => !document.getElementById('btn-connect').disabled && !!document.getElementById('tab-monitor'),
-      );
-      await page.locator('#device-select').selectOption('showcase:km003c', { force: true });
-      await page.locator('#btn-connect').click();
-      await page.waitForFunction(
-        () => window.__SHOWCASE__.diagnostics().connected && !document.getElementById('btn-record-toggle').disabled,
-      );
+      const { page } = app;
+      await app.connect();
       await page.locator('#btn-temp-toggle').click();
-      await page.locator('#btn-record-toggle').click();
-      await page.waitForFunction(() => window.__SHOWCASE__.diagnostics().segment > 0);
-      await page.evaluate((duration) => window.__SHOWCASE__.advance(duration), DURATION_MS);
+      await app.record();
+      await app.advance(DURATION_MS);
       // Visit actual controls so all views render through the same paths used by the desktop app.
       for (const view of config.pages) {
         if (view === 'settings') {
@@ -137,12 +120,15 @@ try {
         }
         if (view === 'trigger') {
           await command(page, 'btn-km-pdm-open');
+          await page.locator('#btn-km-mode-detection').click();
           await command(page, 'btn-km-scan');
+          await page.locator('#btn-km-mode-trigger').click();
           await command(page, 'btn-km-read-pdo');
           await page.locator('.trigger-pdo-row').filter({ hasText: '#5' }).click();
           await command(page, 'btn-km-trigger');
-          assert.equal(await page.locator('.trigger-pdo-row').count(), 6);
+          assert.equal(await page.locator('.trigger-pdo-row').count(), PDOS.length);
         }
+        faults.push(...app.errors.splice(0), ...app.consoleErrors.splice(0));
         await settled(page);
         assert.equal(await page.locator('html').getAttribute('lang'), language);
         assert.equal(
@@ -154,13 +140,9 @@ try {
         await page.screenshot({ path, animations: 'disabled' });
         console.log(`${theme}/${view}: ${path}`);
       }
-      await context.close();
     }
   }
 } catch (error) {
   if (faults.length) console.error(faults.join('\n'));
   throw error;
-} finally {
-  await browser?.close();
-  await server?.close();
 }

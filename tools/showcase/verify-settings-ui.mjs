@@ -6,20 +6,15 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
-import { startServer } from './server.mjs';
+import { createHeadlessHarness, frames } from './headless.mjs';
 
-const server = await startServer();
-const browser = await chromium.launch({ headless: true });
 const output = resolve('output/settings-verification');
 await mkdir(output, { recursive: true });
 const errors = [];
 const results = [];
 const sections = ['appearance', 'recording', 'shortcuts', 'recovery', 'about'];
 
-async function settle(page) {
-  await page.evaluate(() => new Promise((accept) => requestAnimationFrame(() => requestAnimationFrame(accept))));
-}
+const settle = frames;
 
 async function checkLayout(page) {
   const layout = await page.evaluate(() => {
@@ -52,6 +47,7 @@ async function checkLayout(page) {
   return layout;
 }
 
+const harness = await createHeadlessHarness();
 try {
   for (const { width, height, scale = 100 } of [
     { width: 1280, height: 800 },
@@ -63,28 +59,31 @@ try {
     const viewport = { width, height };
     const label = scale === 100 ? String(width) : `${width}-${scale}pct`;
     for (const theme of ['light', 'dark']) {
-      const context = await browser.newContext({ viewport, deviceScaleFactor: 1.5, locale: 'zh-CN' });
-      const page = await context.newPage();
-      page.on('pageerror', (error) => errors.push(String(error)));
-      await page.route('**/__showcase__/bridge.js', async (route) => {
-        const response = await route.fetch();
-        await route.fulfill({
-          response,
-          body:
-            (await response.text()) +
-            `
-const settingsTestInvoke = window.__TAURI__.core.invoke;
-window.__TAURI__.core.invoke = (command, args) => {
+      await using app = await harness.openApp({
+        theme,
+        language: 'zh-CN',
+        context: { viewport, deviceScaleFactor: 1.5 },
+        beforeLoad: async (page) => {
+          await page.route('**/__showcase__/bridge.js', async (route) => {
+            const response = await route.fetch();
+            await route.fulfill({
+              response,
+              body:
+                (await response.text()) +
+                `
+  const settingsTestInvoke = window.__TAURI__.core.invoke;
+  window.__TAURI__.core.invoke = (command, args) => {
   if (command === 'enumerate_devices') {
     if (window.__SETTINGS_TEST_ENUMERATION__ === 'empty') return Promise.resolve([]);
     if (window.__SETTINGS_TEST_ENUMERATION__ === 'error') return Promise.reject(new Error('Enumeration unavailable'));
   }
   return settingsTestInvoke(command, args);
-};`,
-        });
+  };`,
+            });
+          });
+        },
       });
-      await page.goto(`${server.url}/app/?capture=1&theme=${theme}&language=zh-CN`);
-      await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
+      const { page } = app;
       if (scale !== 100) {
         await page.evaluate(async (value) => (await import('/ui-scale.js')).applyUiScale(value), scale);
         await settle(page);
@@ -257,7 +256,7 @@ window.__TAURI__.core.invoke = (command, args) => {
       await settle(page);
       assert.equal(await info.getAttribute('aria-expanded'), 'true', 'Scrolling long details keeps the flyout open');
       await page.screenshot({ path: resolve(output, `${theme}-${label}-device-info.png`) });
-      await context.close();
+      errors.push(...app.errors);
       console.log(
         `PASS: settings navigation and toolbar, ${theme}, ${width}×${height}, ${scale}% UI scale, four languages`,
       );
@@ -266,6 +265,5 @@ window.__TAURI__.core.invoke = (command, args) => {
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }

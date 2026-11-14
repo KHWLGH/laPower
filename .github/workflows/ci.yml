@@ -42,6 +42,12 @@ jobs:
       - name: Build the frontend distribution
         run: npm run build
 
+      # Reuse the frontend above; timings and native benchmarks stay manual/on-demand.
+      - name: Verify shipping shape and core baseline structure
+        run: |
+          node bench/packaging.mjs
+          node bench/core.mjs --verify-baseline --output bench/results/verify.json
+
       - name: Test JavaScript pure logic
         run: npm test
 
@@ -89,14 +95,9 @@ jobs:
 
   backend-other-platforms:
     strategy:
+      # Both platforms have native code paths that Linux cannot cover.
       matrix:
-        include:
-          - os: windows-latest
-            run_tests: true
-          # macOS has its own code paths (App Nap activity, shared HID opens,
-          # usb_port location IDs); run the suite there, not only cargo check.
-          - os: macos-latest
-            run_tests: true
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -116,12 +117,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Test Rust workspace
-        if: matrix.run_tests
         run: cargo test --workspace
-
-      - name: Check Rust workspace
-        if: ${{ !matrix.run_tests }}
-        run: cargo check --workspace --all-targets
 
   crate-features:
     name: Crate feature combinations
@@ -159,80 +155,9 @@ jobs:
             echo "::endgroup::"
           done
 
-  # Two kinds of check, split by whether they can lie.
-  #
-  # Deterministic and therefore hard-gated: the shipped shape (byte counts, request counts,
-  # unreferenced assets that tauri-codegen would embed anyway) and the structural baseline check
-  # (input fingerprints, gated-metric set, run/pass counts). Neither reads a duration, so neither
-  # can be flapped by a noisy neighbour on a shared runner.
-  #
-  # Timing is reported, not gated: measured on one host, three back-to-back runs of UNCHANGED code
-  # spread from 1.12x to 1.50x across every gated op, and a single-pass verdict produced a false
-  # regression at adjusted x1.20 that did not repeat. bench:core --compare already defends itself
-  # against that (drift normalisation + 3-pass corroboration) but the margin is not yet known on
-  # runner hardware, so it reports for now. Flip the continue-on-error off only once it has been
-  # observed quiet, and keep --verify-baseline in `validate` so a hand-edited baseline stays red.
-  perf-shape:
-    name: Perf gate (deterministic shape + timing report)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install JavaScript tooling
-        run: npm ci
-
-      - name: Shipped shape assertions
-        run: |
-          npm run build
-          node bench/packaging.mjs
-
-      - name: Verify the committed baseline still describes this bench
-        run: node bench/core.mjs --verify-baseline --output bench/results/verify.json
-
-      - name: Algorithm timings (report only)
-        continue-on-error: true
-        # stderr goes into the summary on purpose. `2>/dev/null` here once hid the only message that
-        # explains a missing/invalid baseline ("找不到 ... 先用 --baseline 生成它"), so the step
-        # produced an empty summary and looked like "nothing to report" instead of "did not run".
-        run: |
-          node bench/core.mjs --compare --output bench/results/core-ci.json 2>&1 \
-            | tee "$GITHUB_STEP_SUMMARY"
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install HID dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: cargo bench (report only)
-        continue-on-error: true
-        timeout-minutes: 20
-        # Report-only, and not promotable to a gate as measured: three runs of an UNCHANGED tree at
-        # these settings (3s measurement, 30 samples) put decode/general_sample at +11.7% "regressed"
-        # and then -2.5% "improved", and selection/offer_select_retain at +8.4% then +19.9% -- all
-        # with criterion reporting p < 0.05. Its significance test covers sampling within a run, not
-        # host state, so the sign flips. See CHANGELOG for the same numbers.
-        run: |
-          cargo bench -p lapower --bench stream -- --warm-up-time 1 --measurement-time 3 --sample-size 30 \
-            2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: perf-results
-          path: bench/results/
-          if-no-files-found: ignore
-          overwrite: true
-
   package:
     name: Package (${{ matrix.package }})
-    needs: [validate, backend-other-platforms, crate-features, perf-shape]
+    needs: [validate, backend-other-platforms, crate-features]
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))

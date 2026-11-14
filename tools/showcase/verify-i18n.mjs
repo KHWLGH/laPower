@@ -6,13 +6,10 @@
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
 import { dictionaries, resolveLocale, systemLanguageName } from '../../src/i18n.js';
-import { startServer } from './server.mjs';
+import { createHeadlessHarness } from './headless.mjs';
 
 const languages = ['en', 'zh-CN', 'zh-TW', 'ja'];
-const server = await startServer();
-const browser = await chromium.launch({ headless: true });
 const output = resolve('output/i18n-verification');
 await mkdir(output, { recursive: true });
 const failures = [];
@@ -69,11 +66,10 @@ async function assertTriggerLayout(page, label) {
   assert.equal(metrics.historyOverflowY, 'auto', `${label}: history has independent vertical scrolling`);
 }
 
+const harness = await createHeadlessHarness();
 try {
-  const dialogsPage = await browser.newPage({ locale: 'en-US' });
-  dialogsPage.on('pageerror', (error) => failures.push(String(error)));
-  await dialogsPage.goto(`${server.url}/app/?capture=1&language=en`);
-  await dialogsPage.waitForFunction(() => !!document.getElementById('tab-monitor'));
+  const dialogsApp = await harness.openApp({ context: { locale: 'en-US' } });
+  const { page: dialogsPage } = dialogsApp;
   await dialogsPage.evaluate(async () => {
     const { toast } = await import('/ui/toast.js');
     const { t, errorText } = await import('/i18n.js');
@@ -117,13 +113,16 @@ try {
   }
   await dialogsPage.locator('.fluent-dialog-cancel').click();
   assert.equal(await dialogsPage.evaluate(() => window.__I18N_DIALOG__), false);
-  await dialogsPage.close();
+  failures.push(...dialogsApp.errors);
+  await dialogsApp.close();
   console.log('PASS: open dialog, persistent notification, actions and accessible labels switch in place');
   for (const locale of ['zh-Hans-TW', 'zh-Hant-CN', 'ja-JP', 'fr-FR', 'C']) {
-    const page = await browser.newPage({ locale: 'en-US' });
-    page.on('pageerror', (error) => failures.push(String(error)));
-    await page.goto(`${server.url}/app/?capture=1&language=auto&systemLocale=${locale}`);
-    await page.waitForFunction(() => !!document.getElementById('tab-monitor'));
+    await using app = await harness.openApp({
+      language: 'auto',
+      query: { systemLocale: locale },
+      context: { locale: 'en-US' },
+    });
+    const { page } = app;
     assert.equal(await page.locator('html').getAttribute('lang'), resolveLocale(locale));
     for (const language of languages) {
       await page.evaluate(async (language) => (await import('/i18n.js')).applyLanguage(language), language);
@@ -132,21 +131,18 @@ try {
         `${dictionaries[language].followSystem} (${systemLanguageName(locale)})`,
       );
     }
-    await page.close();
+    failures.push(...app.errors);
   }
   for (const theme of ['light', 'dark'])
     for (const [width, height] of [
       [900, 600],
       [1280, 800],
     ]) {
-      const context = await browser.newContext({ viewport: { width, height }, locale: 'en-US', colorScheme: theme });
-      const page = await context.newPage();
-      page.on('pageerror', (error) => failures.push(String(error)));
-      page.on('console', (message) => {
-        if (message.type() === 'error') failures.push(message.text());
+      await using app = await harness.openApp({
+        theme,
+        context: { viewport: { width, height }, locale: 'en-US' },
       });
-      await page.goto(`${server.url}/app/?capture=1&theme=${theme}&language=en`);
-      await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
+      const { page, context } = app;
       await page.locator('#tab-trigger').click();
       assert.equal(await page.locator('#btn-km-mode-trigger').getAttribute('aria-selected'), 'true');
       assert.equal(await page.locator('#km-pdm-status').textContent(), dictionaries.en.pdmClosed);
@@ -158,12 +154,9 @@ try {
       await assertTriggerLayout(page, `${theme}/${width}/disconnected-detection`);
       await page.locator('#btn-km-mode-trigger').click();
       await page.locator('#tab-monitor').click();
-      await page.locator('#device-select').selectOption('showcase:km003c', { force: true });
-      await page.locator('#btn-connect').click();
-      await page.waitForFunction(() => window.__SHOWCASE__.diagnostics().connected);
-      await page.locator('#btn-record-toggle').click();
-      await page.waitForFunction(() => window.__SHOWCASE__.diagnostics().segment > 0);
-      await page.evaluate(() => window.__SHOWCASE__.advance(120_000));
+      await app.connect();
+      await app.record();
+      await app.advance(120_000);
       await page.locator('#tab-pd').click();
       await page.locator('#pd-filter').fill('Source');
       await page.locator('.pd-row').first().click();
@@ -444,11 +437,10 @@ try {
         `PASS: ${theme} ${width}x${height}, four languages, active connection/recording/PDM and preserved data/selection`,
       );
       assert.deepEqual(await page.evaluate(() => window.__SHOWCASE__.diagnostics().errors), []);
-      await context.close();
+      failures.push(...app.errors, ...app.consoleErrors);
     }
   assert.deepEqual(failures, []);
   console.log('PASS: native locale mapping and English fallback');
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }

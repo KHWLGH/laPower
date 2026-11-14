@@ -9,7 +9,7 @@
 - [リリース手順](#リリース手順)
 - [品質チェック](#品質チェック)
 - [テストと回帰確認の範囲](#テストと回帰確認の範囲)
-- [必要時のブラウザー自動検証](#必要時のブラウザー自動検証)
+- [ヘッドレステスト API](#ヘッドレステスト-api)
 - [開発用プレビュー](#開発用プレビュー)
 - [性能測定](#性能測定)
 - [CI チェック](#ci-チェック)
@@ -219,7 +219,6 @@ Windows に証明書署名はなく、macOS は Developer ID・公証なしの a
 | `npm run check` | 日常のフロントエンドチェック |
 | `npm run check:rust` | Rust チェック。先に `out/` を自動生成 |
 | `npm run check:all` | 納品前の全コアチェック。両グループとコンポーネント一覧の照合を含む |
-| `npm run test:browser` | 必要時のヘッドレスブラウザーによるワークフロー・処理量検証 |
 
 `check` は `npm test`、`typecheck`、`lint` を順に実行し、フロントエンドの生成や Cargo の実行は行いません。`check:rust` はフロントエンドを 1 回生成してから Rust の形式確認、workspace Clippy、テストを実行します。`check:all` は両グループと `components:check` を順に実行し、フロントエンド生成は 1 回だけです。すべての入口は最初の失敗で停止します。個別コマンドも使用できます。一覧の照合には Cargo が必要で、キャッシュがなければ通信することがあります。既存の CI チェック構成は変更しません。
 
@@ -255,21 +254,32 @@ done
 - ベンチマークと実機確認は必要時に手動で行い、毎回のブラウザー自動回帰にはしません。
 - CI の主要チェック集合を固定し、機能ごとの専用回帰 workflow を増やしません。
 
-## 必要時のブラウザー自動検証
+## ヘッドレステスト API
 
-既存の Playwright と仮想装置サーバーを再利用し、実行時依存は追加しません。初回は `npx playwright install chromium` を実行します。
+`tools/showcase/headless.mjs` は、既存の Playwright・模擬サーバー・仮想装置を再利用する Node スクリプト向け API です。初回は `npx playwright install chromium` を実行します。テスト場面・ランナー・CI ジョブは追加せず、スクリーンショット、既存 UI チェック、ブラウザーベンチマークで共有します。リポジトリ直下のスクリプト例：
 
-```bash
-npm run test:browser
-npm run test:browser -- --case chart-idle-resize,range-worker
-npm run test:browser -- --channel msedge
+```js
+import { createHeadlessHarness } from './tools/showcase/headless.mjs';
+
+await using harness = await createHeadlessHarness();
+await using app = await harness.openApp({ language: 'zh-CN', theme: 'dark' });
+await app.connect('showcase:km003c');
+await app.record();
+await app.advance(1000);
+await app.pause();
+await app.waitForCharts();
+console.log(await app.diagnostics());
+// app.page / app.context: ordinary Playwright APIs
 ```
 
-6 つの独立した場面を順番に検証します。毎秒 100／1000 サンプルの模擬記録、一時停止時の末尾消費と ACK、CSV 全列・統計・積分の完全一致、欠測・重複時刻を含む 10 万点履歴を 5 回リサイズした後の投影・チャート PNG 一致、インデックス再利用・アイドル診断停止、実ブラウザー Worker の再利用・4096 行上限・キャンセル分離、PD 投影再利用・連続フィルターと並行追加・非表示 DOM 更新停止、模擬プロトコル進捗・根拠展開・PDO トリガーを対象とします。復旧ファイルの同期重複・書き込み失敗・永続化境界は `recording-spool` コアテストで確認します。
+- `createHeadlessHarness({ channel, distribution, timeout })`：既定は Chromium・ソース・操作タイムアウト 15 秒。インストール済み `msedge`／`chrome` やビルド済み `out/` を指定でき、`url`、`browser`、`openApp`、`close` を返します。
+- `openApp({ language, theme, query, context, beforeLoad })`：ストレージ・仮想装置・時計・ダウンロードを分離し、接続操作とチャートの準備を待ちます。`context` は Playwright オプション、`query` は既存ブリッジのパラメーター、非同期 `beforeLoad(page)` はナビゲーション前のルート・イベント・初期化設定用です。
+- `connect(path)`、`record()`、`pause()` は実 UI を操作します。`freeze()`／`resume()` は仮想時計を制御します。既定は凍結で、`advance(ms)` は 0–300000 ミリ秒進めて消費と実 ACK を待ちます。自動時計は先に凍結してください。
+- `flush()` は消費境界のみ、`waitForCharts()` はメインチャートの表示処理と 2 フレーム、公開関数 `frames(page)` はフォントと 2 フレームのみを待ちます。ディスク永続化・物理画面への提示・全非同期処理の完了は保証しません。
+- `diagnostics()` は `source`、`stream`、`performance`、未処理例外 `errors`、`consoleErrors` を返し、完全な性能サンプリングは有効にしません。アサーション・画像・trace・エラー処理は呼び出し側が管理します。既存のプロトコル障害フックは `app.page.evaluate()` から `window.__SHOWCASE__` を呼び出せます。
+- `app.close()` はコンテキスト、`harness.close()` は全コンテキスト・ブラウザー・サーバーを閉じ、繰り返し呼び出せます。Node 24 の `await using` は正常・例外どちらのスコープ終了でも解放します。初期化失敗時も作成済み資源を解放し、エラーをスキップにせず呼び出し側へ伝えます。
 
-常にヘッドレスで動作し、デスクトップウィンドウを開いたりアクティブにしたりせず、実機・実設定・測定ファイルにアクセスしません。既定は Playwright Chromium、必要ならインストール済み Edge／Chrome を指定します。ブラウザーがなければ失敗し、スキップしません。各場面は最大 90 秒、失敗後も残りを収集し、最後は非ゼロで終了します。`output/browser-tests/<時刻>/` に環境・指標・エラーの `report.json`、`junit.xml`、失敗時に PNG と Playwright trace ZIP を保存します。`npx playwright show-trace <zip>` で手動確認できます。`--output <ディレクトリ>` で出力先、`--help` で場面一覧を確認します。結果はコミットせず、画像は同一実行内で比較します。ホスト間の画像基準や絶対時間の合否判定は使いません。
-
-保守ではコアテストを優先し、実ブラウザーのスケジューリング・Worker・Canvas が必要な重大問題だけを `tools/showcase/verify-workflows.mjs` に追加し、状態と処理量の上限を確認します。4 言語とレイアウトは必要時に `node tools/showcase/verify-i18n.mjs`、`node tools/showcase/verify-appearance.mjs` を使います。ネイティブ GUI、実ファイル障害、装置のシーケンス異常、連続収集は別途実機で検証します。
+常にヘッドレスで起動し、デスクトップをアクティブにしません。仮想装置は実機へ接続せず、ネイティブ設定を読みません。既存の `verify-*.mjs` は影響範囲に応じて手動で選びます。チャート診断は `bench/chart-transitions.mjs` と `bench/chart-raster.mjs` を維持し、古い内部インデックス動作に依存する重複した履歴行列スクリプトは削除しました。コア `test/` はデータ・プロトコル・ビルド不変条件を維持します。別の全ワークフロー検証スイートやブラウザー CI は維持しません。プラットフォーム・ネイティブファイル・実機収集は別途検証します。
 
 ## 開発用プレビュー
 
@@ -328,7 +338,7 @@ npm run showcase:capture -- --help
 | `node bench/packaging.mjs` | `out/` の配布ファイルと埋め込み集合 |
 | `cargo bench -p lapower` | Rust のデコード、エンコード、選択処理 |
 
-`perf-shape` CI は配布構成と基準構造だけを必須判定にします。アルゴリズム・Rust ベンチマークは結果を報告し、単回の時間をホスト間の合否条件にはしません。
+配布構成と基準構造は `validate` に統合し、フロントエンドビルドを再利用します。アルゴリズム・Rust の時間計測は必要時にローカルで行い、CI ごとの重複ビルド・計測を省きます。
 
 ## CI チェック
 
@@ -336,15 +346,14 @@ npm run showcase:capture -- --help
 
 | Job | 内容 |
 | --- | --- |
-| `validate` | Linux 依存関係、フロントエンドビルド、JS テスト、typecheck、lint、Rust fmt、Clippy、workspace test |
+| `validate` | Linux 依存関係、フロントエンドビルド、JS テスト、typecheck、lint、Rust fmt、Clippy、workspace test、配布構成・基準構造 |
 | `backend-other-platforms` | Windows workspace test、macOS workspace test |
 | `crate-features` | 非既定 feature 組み合わせの Clippy・test |
-| `perf-shape` | `bench/packaging.mjs`、`core.mjs --verify-baseline`、報告型 benchmark |
-| `package` | バージョンタグ push／手動のみ。先の 4 チェックに依存し、4 対象を並列化、1 対象の失敗で他を中止しません |
+| `package` | バージョンタグ push／手動のみ。先の 3 チェックに依存し、4 対象を並列化、1 対象の失敗で他を中止しません |
 | `package-summary` | 全対象成功後、7 パッケージを検証し `SHA256SUMS` を生成 |
 | `release` | バージョンタグ push のみ。添付をアップロード・照合して自動公開 |
 
-通常ブランチ push／PR は既存チェックのみで、パッケージ化・公開はしません。必要時は Actions → **Browser acceptance** → Run workflow で独立した `.github/workflows/browser-tests.yml` を実行します。Chromium をインストールし `test:browser` を実行、成否にかかわらずレポート・失敗証拠を 14 日間保存し、パッケージ化・公開はしません。既存 **CI** の手動入口はインストーラーを作るため、ブラウザー検証には使わないでください。毎回の push／PR チェックや実機長時間検証には加えません。公開スクリプトの失敗・再実行・添付完全性・公開済み保護は `test/release.test.js` がオフライン検証します。
+通常ブランチ push／PR はコアチェックのみで、パッケージ化・公開はしません。CI にはブラウザーを入れず、UI 行列・長時間収集・時間ベンチマークは実行しません。必要時にヘッドレス API と既存ツールを使用します。既存 **CI** の手動入口は引き続きパッケージを作成します。公開スクリプトの失敗・再実行・添付完全性・公開済み保護は `test/release.test.js` がオフラインで検証します。
 
 ## Linux でのビルド
 

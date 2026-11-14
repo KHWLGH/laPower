@@ -28,7 +28,7 @@ This document records repeatable algorithm, storage, startup and shipped-shape b
 - `index.html` has no inline scripts and resource references resolve.
 - There are no new tracked orphan assets.
 
-These deterministic shipping invariants belong in `perf-shape` CI.
+These deterministic shipping invariants run in `validate`, reusing its frontend build without a separate performance CI job.
 
 ## Storage and data integrity
 
@@ -110,7 +110,7 @@ Recovery checkpoints track durable row counts and header content, avoiding repea
 
 ## Measurement and hardware limits
 
-Run `npm run test:browser` on demand to check idle diagnostic shutdown, index reuse across resizes, reused PD projections with no hidden DOM commits, and reused range-statistics Workers with bounded transfers and isolated cancellation. It compares projections/Canvas PNGs before and after restoring the same size within one run, and validates exact CSV column/statistics/energy round trips at simulated 100/1000 samples per second. Absolute timings are reports only. Core `recording-spool` tests in `npm test` check that an unchanged durable version is not synced again. See the [development guide](DEVELOPMENT.md#optional-automated-browser-acceptance) for commands and failure evidence. These checks do not replace same-host before/after benchmarks, the full theme/DPI matrix or hardware endurance runs.
+Browser scripts share the [headless API](DEVELOPMENT.md#headless-testing-api) for isolated sessions, virtual time, consumption/ACK waits and diagnostics, without adding fixed acceptance cases or browser CI. Select existing UI tools or benchmarks by affected area; core `recording-spool` tests retain durable-version deduplication coverage. Headless simulation does not replace same-host before/after comparisons, full theme/DPI matrices or hardware endurance.
 
 Comparisons should fix the build, host, window, DPI, channel count, sample rate, timestamp distribution and fill settings, separating recording, warm pause, cold pause and continuous interaction. Public fill settings are percentages: pass `12` for 12%, enabling fill only for voltage, current, power and temperature. Early timings that passed `0.12` and filled extra channels do not establish normal UI performance at 12% fill.
 
@@ -128,7 +128,7 @@ Frontend marks separately record `uiReady` (settings/platform applied and page i
 
 ## CI and manual verification
 
-CI retains `bench/packaging.mjs`, `bench/core.mjs --verify-baseline` and report-only algorithm/Rust benchmarks. Developers may run:
+CI retains `bench/packaging.mjs` and `bench/core.mjs --verify-baseline` in `validate`; algorithm and Rust timing benchmarks run locally on demand. Developers may run:
 
 ```bash
 npm run build

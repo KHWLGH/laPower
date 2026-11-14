@@ -13,7 +13,6 @@
     "release:prepare": "node scripts/changelog.mjs",
     "release:notes": "node scripts/release.mjs notes",
     "test": "node --test \"test/*.test.js\"",
-    "test:browser": "node tools/showcase/verify-workflows.mjs",
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "lint": "biome check --error-on-warnings .",
     "format": "biome format --write .",

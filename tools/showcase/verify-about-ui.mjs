@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
+import { createHeadlessHarness } from './headless.mjs';
 import { startServer } from './server.mjs';
 
 const output = resolve('output/about-verification');
@@ -16,8 +16,6 @@ const readerDocuments = [
   ...readerCatalog.project.documents.filter((entry) => entry.id !== 'copyright'),
   ...readerCatalog.components.flatMap((entry) => entry.documents),
 ];
-const server = await startServer();
-const browser = await chromium.launch({ headless: true });
 const errors = [];
 const results = [];
 const bridgeSuffix = `
@@ -327,7 +325,9 @@ async function verifyLegalReader(page, requestCount) {
   assert.equal(await page.locator('.fluent-dialog[open]').count(), 0);
 }
 
+const harness = await createHeadlessHarness();
 try {
+  const { browser } = harness;
   for (const { width, height, scale = 100 } of [
     { width: 1280, height: 800 },
     { width: 900, height: 600 },
@@ -335,28 +335,31 @@ try {
     { width: 1280, height: 800, scale: 150 },
   ]) {
     for (const theme of ['light', 'dark']) {
-      const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1.5 });
-      const page = await context.newPage();
       let legalRequests = 0;
       const externalRequests = [];
-      await page.route('**/*', async (route) => {
-        if (new URL(route.request().url()).origin === server.url) return route.fallback();
-        externalRequests.push(route.request().url());
-        return route.abort('internetdisconnected');
+      await using app = await harness.openApp({
+        theme,
+        language: 'zh-CN',
+        context: { viewport: { width, height }, deviceScaleFactor: 1.5 },
+        beforeLoad: async (page) => {
+          await page.route('**/*', async (route) => {
+            if (new URL(route.request().url()).origin === harness.url) return route.fallback();
+            externalRequests.push(route.request().url());
+            return route.abort('internetdisconnected');
+          });
+          await page.route('**/legal-notices.json', async (route) => {
+            legalRequests++;
+            return legalRequests === 1
+              ? route.fulfill({ status: 503, body: 'Offline load failure' })
+              : route.fulfill({ json: readerCatalog });
+          });
+          await page.route('**/__showcase__/bridge.js', async (route) => {
+            const response = await route.fetch();
+            await route.fulfill({ response, body: (await response.text()) + bridgeSuffix });
+          });
+        },
       });
-      await page.route('**/legal-notices.json', async (route) => {
-        legalRequests++;
-        return legalRequests === 1
-          ? route.fulfill({ status: 503, body: 'Offline load failure' })
-          : route.fulfill({ json: readerCatalog });
-      });
-      page.on('pageerror', (error) => errors.push(String(error)));
-      await page.route('**/__showcase__/bridge.js', async (route) => {
-        const response = await route.fetch();
-        await route.fulfill({ response, body: (await response.text()) + bridgeSuffix });
-      });
-      await page.goto(`${server.url}/app/?capture=1&theme=${theme}&language=zh-CN`);
-      await page.waitForFunction(() => !document.getElementById('btn-connect').disabled);
+      const { page } = app;
       assert.equal(await page.evaluate(() => window.__ABOUT_TEST__.checks), 0, 'No startup update request');
       if (scale !== 100)
         await page.evaluate(async (value) => (await import('/ui-scale.js')).applyUiScale(value), scale);
@@ -580,7 +583,7 @@ try {
       console.log(
         `PASS: About, offline licenses, updates and scrollbars, ${theme}, ${width}×${height}, ${scale}%, four languages`,
       );
-      await context.close();
+      errors.push(...app.errors);
     }
   }
   // The shipping bundle changes import.meta.url; exercise the bundled offline manifest as well.
@@ -643,6 +646,5 @@ try {
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
 } finally {
-  await browser.close();
-  await server.close();
+  await harness.close();
 }
