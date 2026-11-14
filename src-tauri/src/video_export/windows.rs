@@ -1143,7 +1143,13 @@ mod tests {
             &staged,
             &cancel,
             |_| attempts += 1,
-            |_| cancel.store(true, Ordering::Release),
+            |progress| {
+                // Auto mode can report zero while falling back from an unavailable GPU.
+                // Cancel only after a running encoder has submitted its first frame.
+                if progress > 0.0 {
+                    cancel.store(true, Ordering::Release);
+                }
+            },
         );
         assert!(result.unwrap_err().contains("cancelled"));
         assert_eq!(attempts, 1, "cancellation must not restart another encoder");
