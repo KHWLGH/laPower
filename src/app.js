@@ -86,6 +86,7 @@ import {
 import { applyThemePreference, setChannelColor } from './theme.js';
 import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
+import { bindDisplayStepper } from './ui/display-stepper.js';
 import { createFlyout } from './ui/flyout.js';
 import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
@@ -216,32 +217,6 @@ function setupChartToggles() {
     debouncedSaveSettings();
   });
 
-  // Fill controls — opacity input drives both opacity and fill (0 = fill off)
-  /** @type {{ opId: string, key: string }[]} */
-  const fillControls = [
-    { opId: 'opacity-voltage', key: 'Voltage' },
-    { opId: 'opacity-current', key: 'Current' },
-    { opId: 'opacity-power', key: 'Power' },
-    { opId: 'opacity-temp', key: 'Temp' },
-  ];
-
-  fillControls.forEach((ctrl, index) => {
-    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(ctrl.opId));
-
-    if (input) {
-      input.addEventListener('input', (e) => {
-        let val = Number.parseInt(/** @type {HTMLInputElement} */ (e.target).value, 10);
-        if (Number.isNaN(val)) val = 15;
-        if (val < 0) val = 0;
-        if (val > 100) val = 100;
-
-        state.settings[`opacity${ctrl.key}`] = val;
-        setSeriesFill(index, val);
-        debouncedSaveSettings();
-      });
-    }
-  });
-
   let colorFrame = 0;
   let pendingColorIndex = -1;
   const flushColorPreview = () => {
@@ -272,26 +247,24 @@ function setupChartToggles() {
     });
   }
 
-  for (const [index, key] of /** @type {const} */ ([
-    [0, 'voltage'],
-    [1, 'current'],
-    [2, 'power'],
-    [3, 'temp'],
+  for (const [index, key, opacityKey] of /** @type {const} */ ([
+    [0, 'voltage', 'opacityVoltage'],
+    [1, 'current', 'opacityCurrent'],
+    [2, 'power', 'opacityPower'],
+    [3, 'temp', 'opacityTemp'],
   ])) {
-    const width = /** @type {HTMLInputElement|null} */ (document.getElementById(`line-width-${key}`));
-    width?.addEventListener('change', () => {
-      const parsed = Number(width.value);
-      const value = Number.isFinite(parsed) ? Math.min(6, Math.max(0.5, parsed)) : 1.5;
-      width.value = String(value);
+    bindDisplayStepper(`opacity-${key}`, (value) => {
+      state.settings[opacityKey] = value;
+      setSeriesFill(index, value);
+      debouncedSaveSettings();
+    });
+    bindDisplayStepper(`line-width-${key}`, (value) => {
       state.settings.chartLineWidths[key] = value;
       setChartLineWidth(index);
       debouncedSaveSettings();
     });
-    const offset = /** @type {HTMLInputElement|null} */ (document.getElementById(`curve-offset-${key}`));
-    offset?.addEventListener('change', () => {
-      const value = Math.min(35, Math.max(-35, Number(offset.value) || 0));
-      offset.value = String(value);
-      state.settings.chartCurveShift[key] = value;
+    bindDisplayStepper(`curve-offset-${key}`, (value) => {
+      state.settings.chartCurveNudge[key] = value;
       refreshChartScales();
       debouncedSaveSettings();
     });

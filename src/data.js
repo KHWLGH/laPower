@@ -485,7 +485,7 @@ export function adoptWindowFromPermille() {
 }
 
 /**
- * 滚轮动画同步图表、时间轴和选区统计，结束时再吸附到录制边缘。
+ * 主图缩放或平移时同步时间轴，交互结束后吸附录制边缘并更新选区统计。
  * @param {number} min @param {number} max @param {boolean} settled
  */
 function applyChartXWindow(min, max, settled) {

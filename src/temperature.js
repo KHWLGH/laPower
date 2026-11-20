@@ -160,9 +160,6 @@ export function updateTempUIVisibility() {
   if (tempCard) tempCard.style.display = 'grid';
   refreshTempStatus();
 
-  const showTempContainer = document.getElementById('show-temp-container');
-  if (showTempContainer) showTempContainer.style.display = 'flex';
-
   if (state.mainChart) {
     setSeriesVisible(3, state.settings.showTemp);
   }

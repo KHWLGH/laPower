@@ -10,6 +10,7 @@ import {
   emptyChartWindow,
   minZoomSpan,
   panPermilleWindow,
+  panTimeWindow,
   resolveChartWindow,
   wheelZoomFactor,
   zoomTimeWindow,
@@ -111,4 +112,13 @@ test('panPermilleWindow keeps span and clamps to 0–1000', () => {
   assert.deepEqual(panPermilleWindow(200, 500, -500), { start: 0, end: 300 });
   assert.deepEqual(panPermilleWindow(800, 950, 200), { start: 850, end: 1000 });
   assert.deepEqual(panPermilleWindow(0, 1000, 50), { start: 0, end: 1000 });
+});
+
+test('main-plot pan preserves a short window inside a long recording and at both edges', () => {
+  const first = 0.25;
+  const last = 80_000;
+  assert.deepEqual(panTimeWindow(500, 501.25, 0.125, first, last), { min: 500.125, max: 501.375 });
+  assert.deepEqual(panTimeWindow(500, 501.25, -10_000, first, last), { min: 0.25, max: 1.5 });
+  assert.deepEqual(panTimeWindow(500, 501.25, 1e6, first, last), { min: 79_998.75, max: last });
+  assert.deepEqual(panTimeWindow(first, last, 30, first, last), { min: first, max: last });
 });

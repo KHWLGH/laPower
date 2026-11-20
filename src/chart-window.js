@@ -178,3 +178,14 @@ export function panPermilleWindow(start, end, delta) {
   if (nextStart + span > 1000) nextStart = 1000 - span;
   return { start: nextStart, end: nextStart + span };
 }
+
+/** Translate the window in seconds while keeping its span at either recording edge.
+ * @param {number} min @param {number} max @param {number} delta
+ * @param {number} dataMin @param {number} dataMax
+ */
+export function panTimeWindow(min, max, delta, dataMin, dataMax) {
+  const span = max - min;
+  if (span >= dataMax - dataMin) return { min: dataMin, max: dataMax };
+  const start = Math.max(dataMin, Math.min(dataMax - span, min + delta));
+  return { min: start, max: Math.min(dataMax, start + span) };
+}

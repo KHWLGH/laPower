@@ -33,6 +33,7 @@ import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
 import { applyThemePreference, chartTheme, echoThemeUI, refreshTheme } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
+import { echoDisplayStepper } from './ui/display-stepper.js';
 import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
@@ -71,16 +72,18 @@ function normalizeSettings(saved) {
   );
   const savedLineWidths =
     source.chartLineWidths && typeof source.chartLineWidths === 'object' ? source.chartLineWidths : {};
-  const legacyOffset = /** @type {{chartCurveOffset?: Partial<import('./state.js').Settings['chartCurveShift']>}} */ (
-    source
-  ).chartCurveOffset;
-  // Upgrade the previous default preset. Keep custom offsets when migrating.
+  /** @typedef {Partial<import('./state.js').Settings['chartCurveNudge']>} SavedCurveOffsets */
+  const { chartCurveShift, chartCurveOffset } = /** @type {{
+    chartCurveShift?: SavedCurveOffsets, chartCurveOffset?: SavedCurveOffsets
+  }} */ (source);
+  const legacyOffset = chartCurveShift ?? chartCurveOffset;
+  // Upgrade the previous default presets. Keep custom offsets as adjustments to the new layout.
   const legacyDefault =
     legacyOffset?.voltage === 0 &&
     legacyOffset?.current === 0 &&
-    legacyOffset?.power === -18 &&
+    legacyOffset?.power === (chartCurveShift ? 18 : -18) &&
     legacyOffset?.temp === 0;
-  const savedCurveShift = source.chartCurveShift ?? (legacyDefault ? undefined : legacyOffset);
+  const savedCurveNudge = source.chartCurveNudge ?? (legacyDefault ? undefined : legacyOffset);
   /** @param {Record<string, unknown>} saved @param {Record<string, number>} fallback @param {number} min @param {number} max */
   const normalizeChannelNumbers = (saved, fallback, min, max) =>
     /** @type {import('./state.js').Settings['chartLineWidths']} */ (
@@ -95,7 +98,7 @@ function normalizeSettings(saved) {
       )
     );
   merged.chartLineWidths = normalizeChannelNumbers(savedLineWidths, defaultSettings.chartLineWidths, 0.5, 6);
-  merged.chartCurveShift = normalizeChannelNumbers(savedCurveShift ?? {}, defaultSettings.chartCurveShift, -35, 35);
+  merged.chartCurveNudge = normalizeChannelNumbers(savedCurveNudge ?? {}, defaultSettings.chartCurveNudge, -35, 35);
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
   merged.videoExport = normalizeVideoExportOptions(source.videoExport);
@@ -144,6 +147,7 @@ function normalizeSettings(saved) {
   delete legacyMerged.windowMaterialUnfocused;
   delete legacyMerged.chartAxisSpacing;
   delete legacyMerged.chartCurveOffset;
+  delete legacyMerged.chartCurveShift;
   merged.realtimePanelWidth = Math.round(
     clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
   );
@@ -232,21 +236,14 @@ function echoSettingsUI() {
   syncTempSourceUI();
   echoRangeUI();
 
-  /** @param {string} id @param {number} val */
-  const setOp = (id, val) => {
-    const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-    if (el) el.value = String(val);
-  };
-  setOp('opacity-voltage', state.settings.opacityVoltage);
-  setOp('opacity-current', state.settings.opacityCurrent);
-  setOp('opacity-power', state.settings.opacityPower);
-  setOp('opacity-temp', state.settings.opacityTemp);
+  echoDisplayStepper('opacity-voltage', state.settings.opacityVoltage);
+  echoDisplayStepper('opacity-current', state.settings.opacityCurrent);
+  echoDisplayStepper('opacity-power', state.settings.opacityPower);
+  echoDisplayStepper('opacity-temp', state.settings.opacityTemp);
 
   for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
-    const width = /** @type {HTMLInputElement|null} */ (document.getElementById(`line-width-${key}`));
-    if (width) width.value = String(state.settings.chartLineWidths[key]);
-    const offset = /** @type {HTMLInputElement|null} */ (document.getElementById(`curve-offset-${key}`));
-    if (offset) offset.value = String(state.settings.chartCurveShift[key]);
+    echoDisplayStepper(`line-width-${key}`, state.settings.chartLineWidths[key]);
+    echoDisplayStepper(`curve-offset-${key}`, state.settings.chartCurveNudge[key]);
   }
 
   const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
@@ -490,7 +487,7 @@ export async function resetSettings() {
       ...defaultSettings,
       channelColors: {},
       chartLineWidths: { ...defaultSettings.chartLineWidths },
-      chartCurveShift: { ...defaultSettings.chartCurveShift },
+      chartCurveNudge: { ...defaultSettings.chartCurveNudge },
     };
     state.autoPauseSettings = { ...defaultAutoPauseSettings, triggerStartTime: null };
     await applyLanguage(state.settings.language);

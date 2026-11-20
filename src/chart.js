@@ -37,7 +37,7 @@ import {
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { rasterOrderedFill } from './chart-fill.js';
 import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
-import { minZoomSpan, wheelZoomFactor, zoomTimeWindow } from './chart-window.js';
+import { minZoomSpan, panTimeWindow, wheelZoomFactor, zoomTimeWindow } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { chartCurrent, currentAt } from './current-display.js';
 import { displayFrames } from './frame-scheduler.js';
@@ -801,6 +801,7 @@ function bindMainViews(start, end) {
 
 export function syncChartSeries() {
   stopWheelZoom?.();
+  stopChartPan?.();
   pauseContext = null;
   displayFrames.cancel('chart-navigator');
   cancelIndexWarmup();
@@ -842,9 +843,12 @@ export function syncChartSeries() {
   }
 }
 
-/** @param {boolean} dragging @param {boolean} [fromWheel] */
-export function setRangeDragging(dragging, fromWheel = false) {
-  if (!fromWheel) stopWheelZoom?.();
+/** @param {boolean} dragging @param {boolean} [fromChart] */
+export function setRangeDragging(dragging, fromChart = false) {
+  if (!fromChart) {
+    stopWheelZoom?.();
+    stopChartPan?.();
+  }
   if (dragging && !rangeDragging) {
     cancelIndexWarmup();
     selectDisplayContext('review');
@@ -1794,6 +1798,7 @@ export function handleMonitorShown() {
 
 export function handleMonitorHidden() {
   stopWheelZoom?.();
+  stopChartPan?.();
   pauseContext = null;
   displayFrames.cancel('chart-navigator');
   cancelIndexWarmup();
@@ -2138,7 +2143,7 @@ function yDivisions(u) {
 /**
  * 量程量化时实际采用的等分数。
  *
- * 刻度（uniformSplits）与次网格必须复用它，而不是各自再调一次 yDivisions：
+ * 刻度（uniformSplits）必须复用它，而不是各自再调一次 yDivisions：
  * 量程只在 setData / setScale 时重算，而 yDivisions 随窗口高度即时变化，
  * 两者若不同步就会出现「按 7 等分量化的量程被切成 5 份」——刻度落在 5.6、11.2
  * 这种非整数上。窗口高度变化后由 syncDivisionsAfterResize 补一次量程重算。
@@ -2186,7 +2191,7 @@ function quantizeRange(lo, hi, divisions) {
  * 最后量化到全局等分格（与其余 Y 轴共线）。
  * 注意：量程完全来自模块内的 seriesMax/seriesMin 增量跟踪，因此各 series 均设置
  * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
- * @param {keyof import('./state.js').Settings['chartCurveShift']} channel
+ * @param {keyof import('./state.js').Settings['chartCurveNudge']} channel
  * @param {number[]} seriesIndexes - 挂靠在该 scale 上的 series 下标
  * @param {boolean} [symmetric=false] - 温度轴：对称余量，保留负值
  */
@@ -2211,15 +2216,18 @@ function mkYRange(channel, seriesIndexes, symmetric = false) {
         [lo, hi] = paddedZeroBased(agg.min, agg.max, h);
       }
       const [min, max] = quantizeRange(lo, hi, divisions);
-      // Translate both bounds equally to keep every fluctuation at its original
-      // height. Limit the translation to the existing room around the data.
-      const offset = (state.settings.chartCurveShift?.[channel] ?? 0) / 100;
-      const shift = Math.min(
-        channel === 'current' ? min : Infinity,
-        max - agg.max,
-        Math.max(min - agg.min, offset * (max - min)),
-      );
-      return [min - shift, max - shift];
+      const initialSpan = max - min;
+      // Align peaks, not the independent zero lines. A grid row is always 1 / divisions of the plot.
+      // Signal overlays share the voltage scale but should not determine its reference peak.
+      const peak = channel === 'voltage' && u.series[1].show ? seriesMax[1] : agg.max;
+      const anchor = symmetric ? min + initialSpan / 2 : Number.isFinite(peak) ? peak : agg.max;
+      const base = symmetric ? 0.5 : 0.6 + (channel === 'voltage' ? 1 : channel === 'power' ? -1 : 0) / divisions;
+      const nudge = state.settings.chartCurveNudge[channel] / 100;
+      const room = nudge > 0 ? 0.98 - base : base - 0.02;
+      const position = base + nudge * Math.min(1, room / 0.35);
+      // Widen only when translation would clip a sample. The axis still displays real values.
+      const span = Math.max(initialSpan, (anchor - agg.min) / position, (agg.max - anchor) / (1 - position));
+      return [anchor - position * span, anchor + (1 - position) * span];
     }
   );
 }
@@ -2310,7 +2318,8 @@ function mkYAxis(scaleKey, label, color, side) {
     size: axisAutoSize,
     // 等分刻度由 uniformSplits 决定，uPlot 基于 space / incrs 的自动选点被完全覆盖
     splits: (/** @type {any} */ u) => uniformSplits(u, scaleKey),
-    values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map(smartTick),
+    values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
+      splits.map((value) => (scaleKey === 'current' && seriesMin[2] >= 0 && value < 0 ? '' : smartTick(value))),
     // 四条 Y 轴画同一套主网格：量程已量化到相同的高度比例，像素级重合；
     // 令牌是不透明色，重复描边不会叠亮（见 tokens.css 的说明）
     grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
@@ -2689,7 +2698,7 @@ function tooltipPlugin() {
   function commit(u) {
     if (!tt || !title || !monitorVisible()) return;
     const { idx, left, top } = u.cursor;
-    if (idx == null || left == null || left < 0 || top == null || top < 0) {
+    if (u.over?.classList.contains('is-panning') || idx == null || left == null || left < 0 || top == null || top < 0) {
       hide();
       return;
     }
@@ -2828,6 +2837,8 @@ function tooltipPlugin() {
 
 /** @type {(() => void)|undefined} */
 let stopWheelZoom;
+/** @type {(() => void)|undefined} */
+let stopChartPan;
 const WHEEL_ZOOM_MS = 90;
 
 /** Animate the actual viewport so the axes, curves and hit testing stay in sync. @param {any} u */
@@ -2906,6 +2917,75 @@ function bindChartWheel(u) {
     },
     { passive: false },
   );
+}
+
+/** @param {HTMLElement|undefined} over */
+function bindChartPan(over) {
+  if (!over) return;
+  /** @type {{pointer: number, origin: number, x: number, min: number, max: number, width: number, active: boolean}|null} */
+  let pan = null;
+  over.classList.add('is-pannable');
+
+  stopChartPan = () => {
+    if (!pan) return;
+    const { pointer, active } = pan;
+    pan = null;
+    displayFrames.cancel('chart-pan');
+    over.classList.remove('is-panning');
+    if (over.hasPointerCapture(pointer)) over.releasePointerCapture(pointer);
+    if (active) setRangeDragging(false, true);
+  };
+
+  /** @param {boolean} settled */
+  function drawPan(settled) {
+    if (!pan?.active) return;
+    const { origin, x, min, max, width } = pan;
+    const xs = state.chartSeries.x;
+    const next = panTimeWindow(min, max, ((origin - x) / width) * (max - min), xs.at(0), xs.at(-1));
+    if (settled) stopChartPan?.();
+    const [previousMin, previousMax] = xRange();
+    if (!settled && next.min === previousMin && next.max === previousMax) return;
+    state.__applyChartXWindow?.(next.min, next.max, settled);
+    updateCharts('interaction', { force: false, reason: settled ? 'release' : 'interaction' });
+  }
+
+  over.addEventListener('pointerdown', (event) => {
+    const xs = state.chartSeries.x;
+    if (!event.isPrimary || event.button !== 0 || pan || xs.length < 2) return;
+    const [min, max] = xRange();
+    if (max - min >= xs.at(-1) - xs.at(0)) return;
+    const { width } = over.getBoundingClientRect();
+    if (!width) return;
+    stopWheelZoom?.();
+    if (rangeDragging) return;
+    pan = { pointer: event.pointerId, origin: event.clientX, x: event.clientX, min, max, width, active: false };
+    over.setPointerCapture(event.pointerId);
+  });
+  over.addEventListener('pointermove', (event) => {
+    if (!pan || pan.pointer !== event.pointerId) return;
+    pan.x = event.clientX;
+    if (!pan.active) {
+      if (Math.abs(pan.x - pan.origin) < 3) return;
+      stopWheelZoom?.();
+      pan.active = true;
+      over.classList.add('is-panning');
+      setRangeDragging(true, true);
+    }
+    displayFrames.schedule('chart-pan', () => drawPan(false), 1);
+  });
+  /** @param {PointerEvent} event */
+  function finish(event) {
+    if (!pan || pan.pointer !== event.pointerId) return;
+    if (pan.active) {
+      if (event.type === 'pointerup') pan.x = event.clientX;
+      drawPan(true);
+    } else {
+      stopChartPan?.();
+    }
+  }
+  over.addEventListener('pointerup', finish);
+  over.addEventListener('pointercancel', finish);
+  over.addEventListener('lostpointercapture', finish);
 }
 
 let resizeDirty = false;
@@ -3069,6 +3149,7 @@ export function initChart() {
 
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
   bindChartWheel(state.mainChart);
+  bindChartPan(state.mainChart.over);
   observeResize(host, state.mainChart, () => {
     cancelFrameProbe();
   });

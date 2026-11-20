@@ -902,8 +902,8 @@
       </div>
       <div class="display-config-head">
         <span></span><span></span>
-        <span data-i18n="fillOpacity">Fill</span>
-        <span id="display-line-width-heading" data-i18n="lineWidth">Line</span>
+        <span id="display-fill-heading" data-i18n="fillOpacity">Fill</span>
+        <span id="display-line-width-heading" data-i18n="lineWidth">Line thickness</span>
         <span id="display-curve-offset-heading" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint" data-i18n="curveOffset">Y offset</span>
       </div>
       <div class="flyout-row display-channel-row">
@@ -914,15 +914,15 @@
         </label>
         <input type="color" class="channel-color-picker" id="color-voltage" title="Voltage curve color" data-i18n-title="voltageColor" aria-label="Voltage curve color" data-i18n-aria-label="voltageColor" />
         <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
-          <input type="number" id="opacity-voltage" value="15" min="0" max="100" class="ribbon-input no-spin" />
+          <output id="opacity-voltage" data-min="0" data-max="100" data-step="5" aria-labelledby="display-voltage-label display-fill-heading">15</output>
           <span class="opacity-suffix">%</span>
         </span>
         <span class="display-number-wrap">
-          <input type="number" id="line-width-voltage" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-voltage-label display-line-width-heading" />
+          <output id="line-width-voltage" data-min="0.5" data-max="6" data-step="0.25" aria-labelledby="display-voltage-label display-line-width-heading">1.5</output>
           <span class="opacity-suffix">px</span>
         </span>
         <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
-          <input type="number" id="curve-offset-voltage" value="0" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-voltage-label display-curve-offset-heading" />
+          <output id="curve-offset-voltage" data-min="-35" data-max="35" data-step="5" aria-labelledby="display-voltage-label display-curve-offset-heading">0</output>
           <span class="opacity-suffix">%</span>
         </span>
       </div>
@@ -934,15 +934,15 @@
         </label>
         <input type="color" class="channel-color-picker" id="color-current" title="Current curve color" data-i18n-title="currentColor" aria-label="Current curve color" data-i18n-aria-label="currentColor" />
         <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
-          <input type="number" id="opacity-current" value="15" min="0" max="100" class="ribbon-input no-spin" />
+          <output id="opacity-current" data-min="0" data-max="100" data-step="5" aria-labelledby="display-current-label display-fill-heading">15</output>
           <span class="opacity-suffix">%</span>
         </span>
         <span class="display-number-wrap">
-          <input type="number" id="line-width-current" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-current-label display-line-width-heading" />
+          <output id="line-width-current" data-min="0.5" data-max="6" data-step="0.25" aria-labelledby="display-current-label display-line-width-heading">1.5</output>
           <span class="opacity-suffix">px</span>
         </span>
         <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
-          <input type="number" id="curve-offset-current" value="0" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-current-label display-curve-offset-heading" />
+          <output id="curve-offset-current" data-min="-35" data-max="35" data-step="5" aria-labelledby="display-current-label display-curve-offset-heading">0</output>
           <span class="opacity-suffix">%</span>
         </span>
       </div>
@@ -954,15 +954,15 @@
         </label>
         <input type="color" class="channel-color-picker" id="color-power" title="Power curve color" data-i18n-title="powerColor" aria-label="Power curve color" data-i18n-aria-label="powerColor" />
         <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
-          <input type="number" id="opacity-power" value="15" min="0" max="100" class="ribbon-input no-spin" />
+          <output id="opacity-power" data-min="0" data-max="100" data-step="5" aria-labelledby="display-power-label display-fill-heading">15</output>
           <span class="opacity-suffix">%</span>
         </span>
         <span class="display-number-wrap">
-          <input type="number" id="line-width-power" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-power-label display-line-width-heading" />
+          <output id="line-width-power" data-min="0.5" data-max="6" data-step="0.25" aria-labelledby="display-power-label display-line-width-heading">1.5</output>
           <span class="opacity-suffix">px</span>
         </span>
         <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
-          <input type="number" id="curve-offset-power" value="18" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-power-label display-curve-offset-heading" />
+          <output id="curve-offset-power" data-min="-35" data-max="35" data-step="5" aria-labelledby="display-power-label display-curve-offset-heading">0</output>
           <span class="opacity-suffix">%</span>
         </span>
       </div>
@@ -974,15 +974,15 @@
         </label>
         <input type="color" class="channel-color-picker" id="color-temp" title="Temperature curve color" data-i18n-title="tempColor" aria-label="Temperature curve color" data-i18n-aria-label="tempColor" />
         <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
-          <input type="number" id="opacity-temp" value="15" min="0" max="100" class="ribbon-input no-spin" />
+          <output id="opacity-temp" data-min="0" data-max="100" data-step="5" aria-labelledby="display-temp-label display-fill-heading">15</output>
           <span class="opacity-suffix">%</span>
         </span>
         <span class="display-number-wrap">
-          <input type="number" id="line-width-temp" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-temp-label display-line-width-heading" />
+          <output id="line-width-temp" data-min="0.5" data-max="6" data-step="0.25" aria-labelledby="display-temp-label display-line-width-heading">1.5</output>
           <span class="opacity-suffix">px</span>
         </span>
         <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
-          <input type="number" id="curve-offset-temp" value="0" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-temp-label display-curve-offset-heading" />
+          <output id="curve-offset-temp" data-min="-35" data-max="35" data-step="5" aria-labelledby="display-temp-label display-curve-offset-heading">0</output>
           <span class="opacity-suffix">%</span>
         </span>
       </div>

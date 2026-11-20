@@ -102,7 +102,7 @@ test('the device-source reset is silent and keeps recorded temperature data', as
   assert.deepEqual(toastCalls, [], '被动注销不是用户操作失败，不该弹提示');
   assert.equal(state.hasTempData, true, '已记录的温度曲线不能被这次重置一起藏掉');
   assert.equal(document.getElementById('temp-card').style.display, 'grid');
-  assert.equal(document.getElementById('show-temp-container').style.display, 'flex');
+  assert.equal(document.getElementById('show-temp-container').hidden, false);
 });
 
 test('temperature controls remain visible and preferences survive connection transitions', () => {
@@ -113,7 +113,9 @@ test('temperature controls remain visible and preferences survive connection tra
   for (const connected of [false, true, false]) {
     setTempConnected(connected);
     assert.equal(document.getElementById('temp-card').style.display, 'grid');
-    assert.equal(document.getElementById('show-temp-container').style.display, 'flex');
+    const displayRow = document.getElementById('show-temp-container');
+    assert.equal(displayRow.hidden, false);
+    assert.equal(displayRow.style.display, undefined, 'the stylesheet owns the display menu grid');
     assert.equal(state.settings.showTemp, false);
     assert.deepEqual(state.settings.csvExportOptions, preferences);
     assert.equal(state.settings.tempSource, 'external');
