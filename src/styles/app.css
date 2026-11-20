@@ -772,7 +772,7 @@ html[data-ui-scale-css] .app-shell {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
 }
 
@@ -867,7 +867,7 @@ html[data-ui-scale-css] .flyout-panel {
 
 .marker-time {
   font: var(--type-caption);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
 }
@@ -1565,7 +1565,7 @@ html[data-ui-scale-css] .about-legal-dialog {
 
 .scale-value {
   min-width: 3.5em;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-secondary);
   text-align: right;
@@ -1674,7 +1674,7 @@ html[data-ui-scale-css] .about-legal-dialog {
 }
 
 .settings-kv-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-primary);
   user-select: text;

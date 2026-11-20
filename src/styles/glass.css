@@ -1,56 +1,85 @@
-/*
- * laPower glass skin, inspired by the AstrBot 弥亚开发工具箱 settings page.
- */
+/* laPower 磨砂玻璃外观，参考 AstrBot 弥亚开发工具箱。 */
 :root {
   --wallpaper: url("../assets/wallpapers/background-shark.jpg");
   --wallpaper-base: #fdfdfb;
-  --wallpaper-tint: rgba(12, 14, 35, 0.72);
-  --glass-chrome: rgba(24, 28, 53, 0.67);
-  --glass-panel: rgba(18, 23, 44, 0.71);
-  --glass-plot: rgba(16, 22, 39, 0.86);
-  --glass-popup: rgba(24, 30, 52, 0.94);
-  --glass-edge: rgba(214, 224, 255, 0.25);
-  --glass-reflection: rgba(235, 241, 255, 0.17);
-  --glass-lens: rgba(198, 215, 255, 0.16);
-  --glass-shadow: 0 4px 16px rgba(8, 10, 28, 0.24);
+  --wallpaper-tint: rgba(26, 37, 63, 0.66);
+  --wallpaper-frame: #646b7e;
+  --glass-chrome: rgba(29, 39, 61, 0.34);
+  --glass-panel: rgba(20, 29, 51, 0.24);
+  --glass-plot: rgba(15, 25, 43, 0.42);
+  --glass-popup: rgba(30, 41, 63, 0.82);
+  --glass-control: rgba(25, 35, 56, 0.19);
+  --glass-control-hover: rgba(217, 230, 252, 0.17);
+  --glass-edge: rgba(226, 236, 255, 0.3);
+  --glass-reflection: rgba(249, 251, 255, 0.36);
+  --glass-lens: rgba(218, 232, 255, 0.12);
+  --glass-shadow: 0 5px 18px rgba(12, 18, 40, 0.14);
+  --glass-rim: inset 0 1px var(--glass-reflection), inset 0 -1px rgba(13, 21, 46, 0.1);
+  --glass-sheen: linear-gradient(150deg, var(--glass-lens), transparent 64%);
+  --glass-radius: 12px;
   --glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 :root[data-theme="light"] {
-  --wallpaper-tint: rgba(232, 242, 252, 0.68);
-  --glass-chrome: rgba(244, 249, 255, 0.72);
-  --glass-panel: rgba(249, 252, 255, 0.73);
-  --glass-plot: rgba(252, 254, 255, 0.89);
-  --glass-popup: rgba(247, 251, 255, 0.95);
-  --glass-edge: rgba(47, 77, 128, 0.2);
+  --wallpaper-tint: rgba(220, 228, 244, 0.55);
+  --wallpaper-frame: #ebeff7;
+  --glass-chrome: rgba(248, 251, 255, 0.39);
+  --glass-panel: rgba(248, 251, 255, 0.32);
+  --glass-plot: rgba(251, 253, 255, 0.57);
+  --glass-popup: rgba(250, 252, 255, 0.88);
+  --glass-control: rgba(252, 253, 255, 0.33);
+  --glass-control-hover: rgba(252, 253, 255, 0.55);
+  --glass-edge: rgba(86, 107, 145, 0.27);
   --glass-reflection: rgba(255, 255, 255, 0.76);
-  --glass-lens: rgba(255, 255, 255, 0.53);
-  --glass-shadow: 0 4px 16px rgba(37, 67, 113, 0.14);
+  --glass-lens: rgba(255, 255, 255, 0.23);
+  --glass-shadow: 0 5px 18px rgba(49, 69, 104, 0.12);
 }
 
+/* 只模糊壁纸层：文本、实时曲线与滚动报文不会进入滤镜。 */
 .app-shell {
+  position: relative;
+  isolation: isolate;
+  background: var(--wallpaper-frame);
+}
+
+.app-shell::before,
+.app-shell::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+}
+
+.app-shell::before {
   background-color: var(--wallpaper-base);
   background-image: linear-gradient(var(--wallpaper-tint), var(--wallpaper-tint)), var(--wallpaper);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover, contain;
+  filter: blur(14px);
+  clip-path: inset(0);
 }
 
-.app-shell::before {
-  position: fixed;
-  inset: 5%;
-  content: "";
-  pointer-events: none;
-  background: radial-gradient(ellipse at 46% 36%, var(--glass-lens), transparent 60%);
-  opacity: 0.55;
+.app-shell::after {
+  background: radial-gradient(ellipse at 18% 0, var(--glass-lens), transparent 61%);
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+
+:root:not([data-theme="light"]) {
+  --text-secondary: #e8edf7;
+  --text-tertiary: #dae2f1;
+  --text-disabled: #a9b1c0;
+  --accent-text: #b6dcff;
 }
 
 .titlebar,
 .commandbar,
-.statusbar {
-  background: var(--glass-chrome);
+.statusbar,
+.pd-table-head {
+  background: var(--glass-sheen), var(--glass-chrome);
   border-color: var(--glass-edge);
-  box-shadow: inset 0 1px var(--glass-reflection);
+  box-shadow: var(--glass-rim);
 }
 
 .realtime-panel,
@@ -59,57 +88,111 @@
 .settings-nav,
 .trigger-log-pane,
 .pd-detail-pane {
-  background: linear-gradient(145deg, var(--glass-lens), transparent 46%), var(--glass-panel);
+  background: var(--glass-sheen), var(--glass-panel);
   border-color: var(--glass-edge);
-  box-shadow:
-    inset 0 1px var(--glass-reflection),
-    var(--glass-shadow);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+
+.realtime-panel,
+.timeline-container,
+.chart-container,
+.settings-group,
+.settings-nav {
+  border-radius: var(--glass-radius);
+}
+
+/* 同一块磨砂底板覆盖列表与协议表单，保持内容滚动顺滑。 */
+.pd-master,
+.trigger-controls {
+  background: var(--glass-panel);
 }
 
 .chart-container {
-  /* Keep canvas text and grid lines legible against bright areas of the wallpaper. */
-  background: var(--glass-plot);
+  background: var(--glass-sheen), var(--glass-plot);
   border-color: var(--glass-edge);
-  box-shadow:
-    inset 0 1px var(--glass-reflection),
-    var(--glass-shadow);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
 }
 
 .flyout-panel,
 .fluent-dialog,
 .cs-menu,
+.menu,
 .toast {
-  background-color: var(--glass-popup);
+  background: var(--glass-sheen), var(--glass-popup);
   border-color: var(--glass-edge);
-  box-shadow:
-    inset 0 1px var(--glass-reflection),
-    var(--shadow-64);
+  box-shadow: var(--glass-rim), var(--shadow-64);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  backdrop-filter: blur(12px) saturate(1.15);
 }
 
 .fluent-dialog::backdrop {
   backdrop-filter: blur(5px);
 }
 
+.btn:not(.btn-accent, .btn-danger),
+.ribbon-select,
+.ribbon-input:not([readonly]),
+.status-metrics,
+.seg,
+.toggle-track {
+  background-color: var(--glass-control);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-rim);
+}
+
+.btn:not(.btn-accent, .btn-danger),
+.ribbon-select,
+.ribbon-input,
+.tab {
+  border-radius: var(--radius-surface);
+}
+
+.btn:not(.btn-accent, .btn-danger):hover:not(:disabled),
+.ribbon-select:hover:not(:disabled),
+.ribbon-input:hover:not(:disabled, [readonly]),
+.toggle:hover .toggle-track {
+  background-color: var(--glass-control-hover);
+}
+
+.seg-item input:checked + span,
+.trigger-history-item[open] {
+  background: var(--glass-control-hover);
+  box-shadow: var(--glass-rim);
+}
+
+.ribbon-input::placeholder {
+  color: var(--text-tertiary);
+  opacity: 1;
+}
+
+.toggle-track::after {
+  box-shadow: 0 1px 3px rgba(14, 24, 46, 0.32);
+}
+
+.toggle input:checked + .toggle-track {
+  background: var(--accent-fill);
+  border-color: var(--accent-stroke);
+}
+
+.ribbon-select:focus,
+.ribbon-input:focus {
+  box-shadow: inset 0 -2px var(--accent-fill);
+}
+
+.tab[aria-selected="true"],
+.tab.active {
+  background-color: var(--glass-control-hover);
+}
+
 .tab[aria-selected="true"],
 .tab.active,
 .cmd-btn:hover:not(:disabled) {
-  background-image: linear-gradient(135deg, var(--glass-lens), transparent);
-  box-shadow: inset 0 1px var(--glass-reflection);
-}
-
-/* Keep filters off the live chart and table, which repaint during capture. */
-.titlebar,
-.statusbar,
-.realtime-panel,
-.flyout-panel,
-.fluent-dialog,
-.settings-nav {
-  -webkit-backdrop-filter: blur(14px) saturate(1.24);
-  backdrop-filter: blur(14px) saturate(1.24);
+  background-image: var(--glass-sheen);
+  box-shadow: var(--glass-rim);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .app-shell::before {
+  .app-shell::after {
     animation: glass-ambient-light 18s ease-in-out infinite alternate;
   }
 
@@ -157,24 +240,57 @@
 
   @keyframes glass-ambient-light {
     from {
-      opacity: 0.35;
-      transform: translate3d(-3%, -2%, 0);
+      opacity: 0.66;
     }
     to {
-      opacity: 0.8;
-      transform: translate3d(3%, 2%, 0);
+      opacity: 1;
     }
   }
 }
 
-@media (forced-colors: active) {
-  .app-shell,
-  .tab[aria-selected="true"],
-  .tab.active {
-    background-image: none;
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme="light"] {
+    --wallpaper-frame: var(--surface-content);
+    --glass-chrome: var(--surface-base);
+    --glass-panel: var(--surface-card);
+    --glass-plot: var(--surface-card);
+    --glass-popup: var(--surface-flyout);
+    --glass-control: var(--fill-control);
+    --glass-control-hover: var(--fill-control-hover);
+    --glass-sheen: none;
   }
 
-  .app-shell::before {
+  .app-shell::before,
+  .app-shell::after {
     display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .app-shell::before,
+  .app-shell::after {
+    display: none;
+  }
+
+  .titlebar,
+  .commandbar,
+  .statusbar,
+  .realtime-panel,
+  .chart-container,
+  .timeline-container,
+  .pd-master,
+  .pd-detail-pane,
+  .trigger-controls,
+  .trigger-log-pane,
+  .settings-nav,
+  .settings-group {
+    background: Canvas;
+  }
+
+  .tab[aria-selected="true"],
+  .tab.active {
+    background: Highlight;
+    color: HighlightText;
   }
 }

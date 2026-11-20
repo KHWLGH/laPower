@@ -65,12 +65,7 @@ function chartAxisTitle(key, unit) {
 /** 各 series 挂靠的 scale：D+/D-/CC1/CC2 复用电压 scale（不新增轴）。 */
 const SERIES_SCALES = ['voltage', 'current', 'power', 'temp', 'voltage', 'voltage', 'voltage', 'voltage'];
 
-const CHART_FONT_FALLBACK =
-  "'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', sans-serif";
-const MONO_FONT_FALLBACK =
-  "ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, 'Noto Sans Mono', 'DejaVu Sans Mono', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', monospace";
-let CHART_FONT = CHART_FONT_FALLBACK;
-let MONO_FONT = MONO_FONT_FALLBACK;
+let CHART_FONT = "'Microsoft YaHei', 'Microsoft YaHei UI', system-ui, sans-serif";
 
 /**
  * Canvas 字体不会自动解析 CSS 的 var()，因此从同一组 CSS 令牌读取字体栈，
@@ -80,9 +75,7 @@ function syncChartFonts() {
   if (typeof document === 'undefined') return;
   const styles = getComputedStyle(document.documentElement);
   const uiFont = styles.getPropertyValue('--font-ui').trim();
-  const monoFont = styles.getPropertyValue('--font-mono').trim();
   if (uiFont) CHART_FONT = uiFont;
-  if (monoFont) MONO_FONT = monoFont;
 }
 
 /** X 轴刻度步长候选（秒）— 时间友好的取值（覆盖 0.1 秒到月级跨度）。 */
@@ -2257,7 +2250,7 @@ function mkYAxis(scaleKey, label, color, side) {
     stroke: color,
     axisTitle: label,
     labelFont: `12px ${CHART_FONT}`,
-    font: `12px ${MONO_FONT}`,
+    font: `12px ${CHART_FONT}`,
     // 数字与竖脊之间的空隙；默认朝数字伸出的 ticks 已关闭（见 drawYAxisChrome）
     gap: 6,
     size: axisAutoSize,
@@ -2594,8 +2587,8 @@ export function refreshChartLanguage() {
   for (let i = 0; i < axes.length; i++) {
     // uPlot normalises fonts to [scaled CSS font, scaled size, original size].
     // Preserve its DPI bookkeeping when replacing the family of an existing axis.
-    if (Array.isArray(axes[i].font)) axes[i].font[0] = `${axes[i].font[1]}px ${MONO_FONT}`;
-    else axes[i].font = `12px ${MONO_FONT}`;
+    if (Array.isArray(axes[i].font)) axes[i].font[0] = `${axes[i].font[1]}px ${CHART_FONT}`;
+    else axes[i].font = `12px ${CHART_FONT}`;
     if (i > 0) {
       if (Array.isArray(axes[i].labelFont)) axes[i].labelFont[0] = `${axes[i].labelFont[1]}px ${CHART_FONT}`;
       else axes[i].labelFont = `12px ${CHART_FONT}`;
@@ -3008,10 +3001,10 @@ export function initChart() {
       {
         scale: 'x',
         stroke: () => chartTheme.axisText,
-        font: `12px ${MONO_FONT}`,
+        font: `12px ${CHART_FONT}`,
         size: 34,
         gap: 4,
-        // 80：HH:MM:SS.d 标签约 10 字符（等宽 12px ≈ 72px），64 会在任意宽度下互相碰撞
+        // 80：给 12px 的 HH:MM:SS.d 时间标签留足空间，64 会在任意宽度下互相碰撞
         space: 80,
         incrs: TIME_INCRS,
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
@@ -3050,7 +3043,8 @@ export function initChart() {
 
   // Canvas 不解析 CSS var()；与令牌对齐后再 load 一次，避免首帧用了回退栈。系统字体通常立刻 resolve。
   if (document.fonts?.load) {
-    Promise.all([document.fonts.load(`12px ${CHART_FONT}`), document.fonts.load(`12px ${MONO_FONT}`)])
+    document.fonts
+      .load(`12px ${CHART_FONT}`)
       .then(() => {
         state.mainChart?.redraw();
         state.navigatorChart?.redraw();

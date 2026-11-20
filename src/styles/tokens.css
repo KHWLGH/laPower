@@ -249,15 +249,9 @@
   --ease-accel: cubic-bezier(0.7, 0, 1, 0.5); /* 出场 */
   --ease-standard: cubic-bezier(0.33, 0, 0.67, 1);
 
-  /* 字体：:root 为跨平台默认栈；[data-os] 覆盖为该平台原生等宽英数 + 中文黑体。
-     按字符回退，读数里的 12.34 走等宽、旁边的「电压」走中文。 */
-  --font-ui:
-    "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, "Microsoft YaHei UI",
-    "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC",
-    sans-serif;
-  --font-mono:
-    ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, "Noto Sans Mono", "DejaVu Sans Mono",
-    "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", monospace;
+  /* 优先使用系统中的微软雅黑；缺少该字体时由当前语言的无衬线字体补齐。 */
+  --font-ui: "Microsoft YaHei", "Microsoft YaHei UI", var(--font-local-fallback), system-ui, sans-serif;
+  --font-local-fallback: "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC";
 
   /* 字阶（仪表类高密度 UI：正文基准 13px，刻意小于 Fluent 默认 14px） */
   --type-caption: 400 12px / 16px var(--font-ui);
@@ -294,7 +288,7 @@
 
   /* 监控视图布局旋钮 — styles/compact.css 的紧凑档按视口重赋这些值 */
   --panel-realtime-width: 250px; /* 实时读数侧栏宽 */
-  --rt-numeral: 700 28px / 1 var(--font-mono); /* 读数栏大字读数，贴满电平条 */
+  --rt-numeral: 700 28px / 1 var(--font-ui); /* 读数栏大字读数，贴满电平条 */
   --timeline-height: 80px; /* 时间线导航器高 */
   --monitor-gutter: 12px; /* 监控主体 padding / gap */
   --chart-min-height: 300px;
@@ -351,32 +345,12 @@
   --pd-object-table-fg: var(--green-tint40);
 }
 
-:root[data-os="windows"] {
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-  --font-mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace;
+:root[lang="ja"] {
+  --font-local-fallback: "Yu Gothic UI", "Hiragino Sans", "Noto Sans CJK JP";
 }
 
-/* 小字号下正黑体常规字重偏细，繁体与简体统一优先微软雅黑 UI。
-   正黑体与繁体无衬线字体补齐缺字，英数仍保留平台 UI / 等宽字体。 */
-:root[data-os="windows"][lang="zh-TW"] {
-  --font-ui:
-    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Microsoft JhengHei UI",
-    "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", sans-serif;
-  --font-mono:
-    "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", "Microsoft JhengHei UI", "Microsoft JhengHei",
-    "Noto Sans CJK TC", "Noto Sans TC", monospace;
-}
-
-:root[data-os="macos"] {
-  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
-  --font-mono: "SF Mono", Menlo, Monaco, "PingFang SC", "Hiragino Sans GB", monospace;
-}
-
-:root[data-os="linux"] {
-  --font-ui: system-ui, "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif;
-  --font-mono:
-    ui-monospace, "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono", "Noto Sans CJK SC",
-    "Noto Sans SC", "Source Han Sans SC", monospace;
+:root[lang="zh-TW"] {
+  --font-local-fallback: "Microsoft JhengHei", "PingFang TC", "Noto Sans CJK TC";
 }
 
 /* 亮色：只重赋语义层。通道 / PD 徽章改走 Foreground2 / Background2 浅色侧。 */
