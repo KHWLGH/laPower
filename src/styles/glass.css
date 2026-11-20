@@ -1,0 +1,158 @@
+/*
+ * laPower glass skin, inspired by the AstrBot 弥亚开发工具箱 settings page.
+ * Wallpaper source and license: assets/wallpapers/NOTICE.txt.
+ */
+:root {
+  --wallpaper: url("../assets/wallpapers/background-luminous.png");
+  --wallpaper-base: #171b34;
+  --wallpaper-tint: rgba(12, 14, 35, 0.45);
+  --glass-chrome: rgba(24, 28, 53, 0.67);
+  --glass-panel: rgba(18, 23, 44, 0.71);
+  --glass-plot: rgba(16, 22, 39, 0.86);
+  --glass-popup: rgba(24, 30, 52, 0.94);
+  --glass-edge: rgba(214, 224, 255, 0.25);
+  --glass-reflection: rgba(235, 241, 255, 0.17);
+  --glass-lens: rgba(198, 215, 255, 0.16);
+  --glass-shadow: 0 4px 16px rgba(8, 10, 28, 0.24);
+  --glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root[data-theme="light"] {
+  --wallpaper: url("../assets/wallpapers/background-sky.jpg");
+  --wallpaper-base: #e0ebf6;
+  --wallpaper-tint: rgba(232, 242, 252, 0.3);
+  --glass-chrome: rgba(244, 249, 255, 0.72);
+  --glass-panel: rgba(249, 252, 255, 0.73);
+  --glass-plot: rgba(252, 254, 255, 0.89);
+  --glass-popup: rgba(247, 251, 255, 0.95);
+  --glass-edge: rgba(47, 77, 128, 0.2);
+  --glass-reflection: rgba(255, 255, 255, 0.76);
+  --glass-lens: rgba(255, 255, 255, 0.53);
+  --glass-shadow: 0 4px 16px rgba(37, 67, 113, 0.14);
+}
+
+/* Use the reference's coral wallpaper for the active trigger workspace. */
+:root:has(#view-trigger:not([hidden])) {
+  --wallpaper: url("../assets/wallpapers/background-coral.png");
+}
+
+.app-shell {
+  background-color: var(--wallpaper-base);
+  background-image: linear-gradient(var(--wallpaper-tint), var(--wallpaper-tint)), var(--wallpaper);
+  background-position: center;
+  background-size: cover;
+}
+
+.app-shell::before {
+  position: fixed;
+  inset: 5%;
+  content: "";
+  pointer-events: none;
+  background: radial-gradient(ellipse at 46% 36%, var(--glass-lens), transparent 60%);
+  opacity: 0.55;
+}
+
+.titlebar,
+.commandbar,
+.statusbar {
+  background: var(--glass-chrome);
+  border-color: var(--glass-edge);
+  box-shadow: inset 0 1px var(--glass-reflection);
+}
+
+.realtime-panel,
+.timeline-container,
+.settings-group,
+.settings-nav,
+.trigger-log-pane,
+.pd-detail-pane {
+  background: linear-gradient(145deg, var(--glass-lens), transparent 46%), var(--glass-panel);
+  border-color: var(--glass-edge);
+  box-shadow:
+    inset 0 1px var(--glass-reflection),
+    var(--glass-shadow);
+}
+
+.chart-container {
+  /* Keep canvas text and grid lines legible against bright areas of the wallpaper. */
+  background: var(--glass-plot);
+  border-color: var(--glass-edge);
+  box-shadow:
+    inset 0 1px var(--glass-reflection),
+    var(--glass-shadow);
+}
+
+.flyout-panel,
+.fluent-dialog,
+.cs-menu,
+.toast {
+  background-color: var(--glass-popup);
+  border-color: var(--glass-edge);
+  box-shadow:
+    inset 0 1px var(--glass-reflection),
+    var(--shadow-64);
+}
+
+.fluent-dialog::backdrop {
+  backdrop-filter: blur(5px);
+}
+
+.tab[aria-selected="true"],
+.tab.active,
+.cmd-btn:hover:not(:disabled) {
+  background-image: linear-gradient(135deg, var(--glass-lens), transparent);
+  box-shadow: inset 0 1px var(--glass-reflection);
+}
+
+/* Keep filters off the live chart and table, which repaint during capture. */
+.titlebar,
+.statusbar,
+.realtime-panel,
+.flyout-panel,
+.fluent-dialog,
+.settings-nav {
+  -webkit-backdrop-filter: blur(14px) saturate(1.24);
+  backdrop-filter: blur(14px) saturate(1.24);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell::before {
+    animation: glass-ambient-light 18s ease-in-out infinite alternate;
+  }
+
+  .tab:not(:disabled),
+  .cmd-btn:not(:disabled) {
+    transition:
+      scale 220ms var(--glass-ease),
+      background-color 180ms ease,
+      color 180ms ease;
+  }
+
+  .tab:not(:disabled):active,
+  .cmd-btn:not(:disabled):active {
+    scale: 0.965;
+  }
+
+  @keyframes glass-ambient-light {
+    from {
+      opacity: 0.35;
+      transform: translate3d(-3%, -2%, 0);
+    }
+    to {
+      opacity: 0.8;
+      transform: translate3d(3%, 2%, 0);
+    }
+  }
+}
+
+@media (forced-colors: active) {
+  .app-shell,
+  .tab[aria-selected="true"],
+  .tab.active {
+    background-image: none;
+  }
+
+  .app-shell::before {
+    display: none;
+  }
+}
