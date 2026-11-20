@@ -70,7 +70,6 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
  * @property {'auto'|'zh-CN'|'zh-TW'|'en'|'ja'} language - 界面语言；auto=跟随系统
- * @property {'windows'|'macos'} windowStyle - 窗口风格；与真实平台及窗口动作分离
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
  * @property {{ pdType: number, em: number, sink: number }} km003cPdm - POWER-Z PDM 参数（PD 类型 / 线缆模拟 / Sink）
@@ -379,7 +378,6 @@ export const defaultSettings = {
   uiScalePercent: 100,
   theme: 'system',
   language: 'auto',
-  windowStyle: 'windows',
   realtimePanelWidth: 250,
   pdSplitSide: false,
   km003cPdm: { pdType: 1, em: 1, sink: 0 },

@@ -828,12 +828,6 @@ export const messages = {
   sendCommand: ['Send command', '发送命令', '傳送命令', 'コマンドを送信'],
   responseLog: ['Response log', '返回日志', '回應記錄', '応答ログ'],
   protocolLog: ['Protocol response log', '协议返回日志', '協定回應記錄', 'プロトコル応答ログ'],
-  windowStyleHint: [
-    'Changes only the appearance of title bar buttons, without changing window behavior.',
-    '仅改变标题栏按钮的外观，不改变窗口行为。',
-    '僅改變標題列按鈕的外觀，不改變視窗行為。',
-    'タイトルバーのボタンの外観のみを変更し、ウィンドウの動作は変えません。',
-  ],
   uiScale: ['UI scale', '界面缩放', '介面縮放', 'UI の拡大率'],
   uiScaleHint: [
     'Scale the whole interface, including charts and the title bar. Reduce it if system scaling crowds the window; 100% follows the system.',

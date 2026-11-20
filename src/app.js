@@ -109,7 +109,6 @@ import {
   syncTriggerConnection,
   syncTriggerView,
 } from './views/trigger.js';
-import { applyWindowStyle } from './window-style.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -589,16 +588,6 @@ function setupControls() {
     document.dispatchEvent(new CustomEvent('witrn:language-changed'));
   });
 
-  // 窗口风格只更新 CSS 属性；动作始终由真实 OS 决定。
-  for (const choice of ['windows', 'macos']) {
-    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`window-style-${choice}`));
-    input?.addEventListener('change', () => {
-      if (!input.checked) return;
-      state.settings.windowStyle = applyWindowStyle(choice);
-      debouncedSaveSettings();
-    });
-  }
-
   // 界面缩放（设置页 外观 卡）
   // 拖动只改读数：整页缩放会改滑条几何，原生 range 再跟指针就会抽搐。
   // 松手 / 键盘步进走 change，再 setZoom。
@@ -966,7 +955,6 @@ function setupShell() {
   wireFlyout('btn-flyout-temp', 'flyout-temp');
   wireFlyout('btn-device-info', 'flyout-device-info');
 
-  applyWindowStyle(state.settings.windowStyle);
   initWindowControls();
 
   restoreView(state.settings.activeView);

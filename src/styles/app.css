@@ -54,15 +54,6 @@ html[data-ui-scale-css] .app-shell {
   padding-right: calc(3 * var(--window-control-width));
 }
 
-:root[data-os="windows"][data-window-style="macos"] .titlebar {
-  padding-left: var(--window-mac-controls-width);
-}
-
-/* 窗口控制挪到左侧后设置钮成为最右一项，补上与之对称的右内缩。 */
-:root[data-window-style="macos"] .titlebar {
-  padding-right: var(--window-mac-control-inset);
-}
-
 .titlebar-tabs {
   display: flex;
   align-items: center;
@@ -251,91 +242,13 @@ html[data-ui-scale-css] .app-shell {
   outline-offset: -3px;
 }
 
-/* macOS 风格：左侧红黄绿，24px 命中区包住 12px 色点；非原生交通灯。 */
-:root[data-window-style="macos"] .titlebar-controls {
-  order: -1;
-  width: var(--window-mac-controls-width);
-  padding: 0 var(--window-mac-control-inset);
-  align-items: center;
-  justify-content: center;
-}
-
-:root[data-window-style="macos"] div[data-tauri-decorum-tb] {
-  left: 0 !important;
-  right: auto !important;
-  width: var(--window-mac-controls-width) !important;
-  padding: 0 var(--window-mac-control-inset) !important;
-  align-items: center !important;
-  justify-content: center !important;
-  box-sizing: border-box;
-}
-
-:root[data-window-style="macos"] #decorum-tb-close:hover,
-:root[data-window-style="macos"] :is(.wc-btn, #decorum-tb-minimize, #decorum-tb-maximize, #decorum-tb-close) {
-  position: relative;
-  width: var(--window-mac-control-target) !important;
-  flex: 0 0 var(--window-mac-control-target) !important;
-  height: var(--window-mac-control-target) !important;
-  border-radius: var(--radius-full) !important;
-  background: transparent !important;
-  color: var(--window-control-symbol) !important;
-  /* decorum 会往按钮里写 \uE9xx 私用区文本并注入 font-size:10px；
-     交通灯皮肤下这颗字形按黑色绘制，10px 方框半对角线 7.07px > 色点半径 6px，四角会戳出圆外。
-     置零只压掉按钮自身文本，.fi 用的是自己的显式 font-size。 */
-  font-size: 0;
-}
-
-:root[data-window-style="macos"] :is(.wc-btn-close, #decorum-tb-close) {
-  order: -3;
-  --window-control-dot-fill: var(--window-close-fill);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn-minimize, #decorum-tb-minimize) {
-  order: -2;
-  --window-control-dot-fill: var(--window-minimize-fill);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn-maximize, #decorum-tb-maximize) {
-  order: -1;
-  --window-control-dot-fill: var(--window-maximize-fill);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn)::before {
-  content: "";
-  position: absolute;
-  /* 四边归零 + auto 外边距居中：abspos flex 子项的静态位置规则 WebKit 并不遵守。 */
-  inset: 0;
-  margin: auto;
-  width: var(--window-mac-control-dot);
-  height: var(--window-mac-control-dot);
-  border-radius: var(--radius-full);
-  background: var(--window-control-dot-fill);
-  box-shadow: inset 0 0 0 1px var(--black-alpha-20);
-  pointer-events: none;
-}
-
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):active::before {
-  filter: brightness(0.88);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn) .fi {
-  position: relative;
-  font-size: var(--window-mac-control-symbol);
-  opacity: 0;
-  pointer-events: none;
-}
-
-:root[data-window-style="macos"] :is(.titlebar-controls, [data-tauri-decorum-tb]):hover .fi,
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):focus-visible .fi {
-  opacity: 1;
-}
-
 /* ── macOS：系统原生红绿灯 ──
    按钮由系统绘制在标题栏左侧（tauri.macos.conf.json），这里只留出位置、不自绘。
    原生按钮不随界面缩放：预留宽度按 --ui-scale 反比换算；缩小界面时标题栏的物理高度
    不低于 100% 时的高度，按钮始终落在标题栏内。放大界面时标题栏变高、按钮仍在原处。
    全屏时系统隐藏红绿灯，预留随之收起。 */
 :root[data-os="macos"] .titlebar {
+  padding-right: 12px;
   height: max(var(--titlebar-height), calc(var(--titlebar-height) / var(--ui-scale, 1)));
 }
 
@@ -346,11 +259,6 @@ html[data-ui-scale-css] .app-shell {
 }
 
 :root[data-os="macos"].is-fullscreen .titlebar-controls {
-  display: none;
-}
-
-/* 原生按钮不能换皮肤，设置里的窗口风格只对 Windows / Linux 有意义。 */
-:root[data-os="macos"] #window-style-row {
   display: none;
 }
 

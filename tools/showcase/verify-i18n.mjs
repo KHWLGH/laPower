@@ -330,8 +330,7 @@ try {
       assert.equal(await page.locator('#km-history-list .trigger-history-item.is-cancelled').count(), 1);
       await page.locator('#btn-km-mode-trigger').click();
       await page.locator('#btn-settings-tab').click();
-      assert.equal(await page.locator('#window-style-auto').count(), 0);
-      assert.equal(await page.locator('#window-style-windows').isChecked(), true);
+      assert.equal(await page.locator('#window-style-row').count(), 0);
       await page.evaluate(async () => {
         const { state } = await import('/state.js');
         state.settings.rangeStart = 200;

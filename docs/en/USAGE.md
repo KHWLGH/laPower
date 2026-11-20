@@ -28,7 +28,7 @@ This guide covers laPower **0.2.6**. Screenshots were taken on Windows with simu
 
 ### Title bar
 
-`Monitor`, `PD analysis` and `Protocol control` are always available on the left. On the right are device selection, refresh, information, connect/disconnect and the Settings gear. The position of window controls depends on the operating system and window style.
+`Monitor`, `PD analysis` and `Protocol control` are always available on the left. On the right are device selection, refresh, information, connect/disconnect and the Settings gear. Windows and Linux use Windows-style controls on the right. macOS uses native controls on the left.
 
 | Entry | Purpose |
 | --- | --- |
@@ -286,7 +286,6 @@ The directory stays on the left in wide windows and moves to a horizontal top ba
 | --- | --- |
 | `Theme` | `Follow system` (default), `Light`, `Dark` |
 | `Language` | `Follow system` (default), 简体中文, 繁體中文, English, 日本語 |
-| `Window style` | Windows/Linux: `Windows style` (default) or `macOS style`. macOS uses native window buttons and hides this option |
 | `UI scale` | 50–200%, default 100%; applied when the slider is released. Reduce it if the window is crowded |
 
 Language changes apply immediately and retain recording/data. Unsupported system languages fall back to English. The detected language shown beside Follow system does not change with manual UI language selection. See [Development](DEVELOPMENT.md#language-selection) for detection and Linux launch examples.

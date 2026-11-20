@@ -4,11 +4,11 @@
   --wallpaper-base: #fdfdfb;
   --wallpaper-tint: rgba(26, 37, 63, 0.66);
   --wallpaper-frame: #646b7e;
-  --glass-chrome: rgba(29, 39, 61, 0.34);
-  --glass-panel: rgba(20, 29, 51, 0.24);
-  --glass-plot: rgba(15, 25, 43, 0.42);
-  --glass-popup: rgba(30, 41, 63, 0.82);
-  --glass-control: rgba(25, 35, 56, 0.19);
+  --glass-chrome: rgba(29, 39, 61, 0.24);
+  --glass-panel: rgba(20, 29, 51, 0.16);
+  --glass-plot: rgba(15, 25, 43, 0.3);
+  --glass-popup: rgba(30, 41, 63, 0.76);
+  --glass-control: rgba(25, 35, 56, 0.13);
   --glass-control-hover: rgba(217, 230, 252, 0.17);
   --glass-edge: rgba(226, 236, 255, 0.3);
   --glass-reflection: rgba(249, 251, 255, 0.36);
@@ -23,11 +23,11 @@
 :root[data-theme="light"] {
   --wallpaper-tint: rgba(220, 228, 244, 0.55);
   --wallpaper-frame: #ebeff7;
-  --glass-chrome: rgba(248, 251, 255, 0.39);
-  --glass-panel: rgba(248, 251, 255, 0.32);
-  --glass-plot: rgba(251, 253, 255, 0.57);
-  --glass-popup: rgba(250, 252, 255, 0.88);
-  --glass-control: rgba(252, 253, 255, 0.33);
+  --glass-chrome: rgba(248, 251, 255, 0.28);
+  --glass-panel: rgba(248, 251, 255, 0.21);
+  --glass-plot: rgba(251, 253, 255, 0.42);
+  --glass-popup: rgba(250, 252, 255, 0.81);
+  --glass-control: rgba(252, 253, 255, 0.22);
   --glass-control-hover: rgba(252, 253, 255, 0.55);
   --glass-edge: rgba(86, 107, 145, 0.27);
   --glass-reflection: rgba(255, 255, 255, 0.76);
@@ -101,7 +101,7 @@
   border-radius: var(--glass-radius);
 }
 
-/* 同一块磨砂底板覆盖列表与协议表单，保持内容滚动顺滑。 */
+/* 列表与协议表单复用磨砂壁纸层，避免滚动内容参与滤镜合成。 */
 .pd-master,
 .trigger-controls {
   background: var(--glass-panel);

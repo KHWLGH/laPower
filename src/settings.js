@@ -30,7 +30,6 @@ import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
 import { normalizeVideoExportOptions } from './video-export-options.js';
-import { applyWindowStyle, echoWindowStyleUI, normalizeWindowStyle } from './window-style.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
@@ -97,9 +96,9 @@ function normalizeSettings(saved) {
     merged.theme = defaultSettings.theme;
   }
   merged.language = normalizeLanguagePreference(merged.language);
-  merged.windowStyle = normalizeWindowStyle(merged.windowStyle);
-  // Mica settings were removed; discard them when loading older LazyStore data.
+  // 丢弃旧版的窗口风格和 Mica 设置。
   const legacyMerged = /** @type {Record<string, unknown>} */ (merged);
+  delete legacyMerged.windowStyle;
   delete legacyMerged.windowMaterial;
   delete legacyMerged.windowMaterialUnfocused;
   merged.realtimePanelWidth = Math.round(
@@ -353,8 +352,6 @@ export async function loadSettings() {
   } finally {
     echoUiScaleUI();
     echoThemeUI();
-    echoWindowStyleUI(state.settings.windowStyle);
-    applyWindowStyle(state.settings.windowStyle);
     echoRealtimePanelWidth();
     fillUiScaleHint();
     try {
@@ -381,7 +378,6 @@ export async function saveSettings() {
     const store = await getStore();
     const settingsToSave = {
       ...state.settings,
-      windowStyle: normalizeWindowStyle(state.settings.windowStyle),
       autoPause: {
         enabled: state.autoPauseSettings.enabled,
         basis: state.autoPauseSettings.basis,
@@ -436,8 +432,6 @@ export async function resetSettings() {
     echoSettingsUI();
     echoUiScaleUI();
     echoThemeUI();
-    echoWindowStyleUI(state.settings.windowStyle);
-    applyWindowStyle(state.settings.windowStyle);
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
     await applyUiScale(state.settings.uiScalePercent);

@@ -214,7 +214,7 @@ test('old and invalid language preferences use auto; valid choices survive a sto
   }
 });
 
-test('legacy window style migrates, persists and resets to Windows while explicit macOS survives reload', async () => {
+test('retired window style is dropped when loading, saving and resetting settings', async () => {
   installStoreStub();
   const previous = state.settings;
   const invoke = window.__TAURI__.core.invoke;
@@ -228,19 +228,15 @@ test('legacy window style migrates, persists and resets to Windows while explici
       };
       state.settings = { ...defaultSettings };
       await loadSettings();
-      assert.equal(state.settings.windowStyle, windowStyle === 'macos' ? 'macos' : 'windows');
-      assert.equal(el(`window-style-${state.settings.windowStyle}`).checked, true);
+      assert.equal(Object.hasOwn(state.settings, 'windowStyle'), false);
     }
     window.__TAURI__.core.invoke = invoke;
-    for (const choice of ['macos', 'windows']) {
-      state.settings.windowStyle = choice;
-      assert.equal(await saveSettings(), true);
-      state.settings = { ...defaultSettings };
-      await loadSettings();
-      assert.equal(state.settings.windowStyle, choice);
-    }
+    assert.equal(await saveSettings(), true);
+    const saved = calls.findLast(({ command }) => command === 'plugin:store|set');
+    assert.ok(saved);
+    assert.equal(Object.hasOwn(saved.args.value, 'windowStyle'), false);
     assert.equal(await resetSettings(), true);
-    assert.equal(state.settings.windowStyle, 'windows');
+    assert.equal(Object.hasOwn(state.settings, 'windowStyle'), false);
   } finally {
     state.settings = previous;
     window.__TAURI__.core.invoke = invoke;

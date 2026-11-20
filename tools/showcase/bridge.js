@@ -49,7 +49,6 @@ const stored = new Map([
     {
       theme: options.get('theme') === 'dark' ? 'dark' : options.get('theme') === 'system' ? 'system' : 'light',
       language: options.get('language') || 'auto',
-      windowStyle: 'windows',
       sampleRate: 10,
       showDpDn: true,
       showCc: true,
@@ -72,7 +71,6 @@ window.Date = class extends RealDate {
   }
 };
 localStorage.setItem('lapower-theme', stored.get('appSettings').theme);
-localStorage.setItem('lapower-window-style', 'windows');
 
 function emit(name, payload) {
   for (const handler of handlers.get(name) ?? []) handler({ event: name, payload });
