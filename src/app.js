@@ -9,14 +9,14 @@
  */
 
 import {
-  applyChartTheme,
+  applyChartChannelColor,
   handleMonitorHidden,
   handleMonitorShown,
   initChart,
   refreshChartLanguage,
   refreshChartScales,
-  scheduleChartUpdate,
   setChartFillEnabled,
+  setChartLineWidth,
   setRangeDragging,
   setSeriesFill,
   setSeriesVisible,
@@ -55,6 +55,7 @@ import {
 import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
 import { initExportUI } from './export-ui.js';
+import { displayFrames } from './frame-scheduler.js';
 import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
 import { addMarkerFromShortcut, initMarkerUI } from './marker-ui.js';
 import { canExportBoth, exportBoth } from './paired-export.js';
@@ -82,7 +83,7 @@ import {
   syncTempSourceUI,
   updateTempUIVisibility,
 } from './temperature.js';
-import { applyThemePreference, refreshTheme } from './theme.js';
+import { applyThemePreference, setChannelColor } from './theme.js';
 import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
@@ -241,13 +242,57 @@ function setupChartToggles() {
     }
   });
 
-  for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
+  let colorFrame = 0;
+  let pendingColorIndex = -1;
+  const flushColorPreview = () => {
+    if (colorFrame) cancelAnimationFrame(colorFrame);
+    colorFrame = 0;
+    if (pendingColorIndex < 0) return;
+    applyChartChannelColor(pendingColorIndex);
+    pendingColorIndex = -1;
+  };
+
+  for (const [index, key] of /** @type {const} */ ([
+    [0, 'voltage'],
+    [1, 'current'],
+    [2, 'power'],
+    [3, 'temp'],
+  ])) {
     const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`color-${key}`));
     if (!input) continue;
     input.addEventListener('input', () => {
       state.settings.channelColors[key] = input.value;
-      refreshTheme();
-      applyChartTheme();
+      setChannelColor(key, input.value);
+      pendingColorIndex = index;
+      if (!colorFrame) colorFrame = requestAnimationFrame(flushColorPreview);
+    });
+    input.addEventListener('change', () => {
+      flushColorPreview();
+      debouncedSaveSettings();
+    });
+  }
+
+  for (const [index, key] of /** @type {const} */ ([
+    [0, 'voltage'],
+    [1, 'current'],
+    [2, 'power'],
+    [3, 'temp'],
+  ])) {
+    const width = /** @type {HTMLInputElement|null} */ (document.getElementById(`line-width-${key}`));
+    width?.addEventListener('change', () => {
+      const parsed = Number(width.value);
+      const value = Number.isFinite(parsed) ? Math.min(6, Math.max(0.5, parsed)) : 1.5;
+      width.value = String(value);
+      state.settings.chartLineWidths[key] = value;
+      setChartLineWidth(index);
+      debouncedSaveSettings();
+    });
+    const offset = /** @type {HTMLInputElement|null} */ (document.getElementById(`curve-offset-${key}`));
+    offset?.addEventListener('change', () => {
+      const value = Math.min(35, Math.max(-35, Number(offset.value) || 0));
+      offset.value = String(value);
+      state.settings.chartCurveShift[key] = value;
+      refreshChartScales();
       debouncedSaveSettings();
     });
   }
@@ -312,21 +357,33 @@ function setupControls() {
       else end = start;
     }
 
-    rangeStart.value = String(start);
-    rangeEnd.value = String(end);
     state.settings.rangeStart = start;
     state.settings.rangeEnd = end;
     adoptWindowFromPermille();
 
-    updateSliderFill();
     updateChartRange();
-    // 拖动中曲线已经换窗，数字不能停在旧窗口；scheduleStatsUpdate 自带 250ms 节流。
+    if (!preview && state.settings.statsRange) scheduleStatsUpdate();
+    updateCharts('interaction', { force: false, reason: preview ? 'interaction' : 'release' });
+  }
+
+  /** @type {(() => void)|null} */
+  let pendingRangeInput = null;
+  function commitRangeInput() {
+    const apply = pendingRangeInput;
+    pendingRangeInput = null;
+    displayFrames.cancel('range-pointer');
+    apply?.();
+  }
+  /** @param {() => void} apply */
+  function queueRangeInput(apply) {
+    pendingRangeInput = apply;
+    displayFrames.schedule('range-pointer', commitRangeInput);
+  }
+  function finishRangeGesture() {
+    setRangeDragging(false);
+    if (pendingRangeInput) commitRangeInput();
+    else updateCharts('interaction', { force: false, reason: 'release' });
     if (state.settings.statsRange) scheduleStatsUpdate();
-    if (preview) {
-      scheduleChartUpdate('interaction');
-      return;
-    }
-    updateCharts('interaction', { force: false, reason: 'release' });
   }
 
   /** @param {'start'|'end'} leader */
@@ -337,14 +394,6 @@ function setupControls() {
   rangeStart.addEventListener('input', () => onSliderChange('start'));
   rangeEnd.addEventListener('input', () => onSliderChange('end'));
 
-  /** @param {PointerEvent|MouseEvent} event @returns {number} */
-  function valueFromPointerEvent(event) {
-    if (!sliderContainer) return 0;
-    const rect = sliderContainer.getBoundingClientRect();
-    const ratio = (event.clientX - rect.left) / rect.width;
-    return clamp(Math.round(ratio * 1000), 0, 1000);
-  }
-
   /**
    * @param {HTMLElement|null} handle
    * @param {'start'|'end'} which
@@ -352,41 +401,37 @@ function setupControls() {
   function setupHandleInteractions(handle, which) {
     if (!handle) return;
 
-    let handleDragActive = false;
-    const beginHandleDrag = () => {
-      handleDragActive = true;
-      setRangeDragging(true);
-    };
+    /** @type {{pointer: number, rect: DOMRect}|null} */
+    let drag = null;
     const endHandleDrag = () => {
-      if (!handleDragActive) return;
-      handleDragActive = false;
-      setRangeDragging(false);
-      if (state.settings.statsRange) {
-        updateStatsDisplay();
-        updateEnergyDisplay();
-      }
-      updateCharts('interaction', { force: false, reason: 'release' });
+      if (!drag) return;
+      drag = null;
+      finishRangeGesture();
+    };
+    /** @param {PointerEvent} event */
+    const moveHandle = (event) => {
+      if (drag?.pointer !== event.pointerId || !drag.rect.width) return;
+      const value = clamp(Math.round(((event.clientX - drag.rect.left) / drag.rect.width) * 1000), 0, 1000);
+      queueRangeInput(() => {
+        if (which === 'start') applyRangeValues(value, rangeEnd.value, 'start', !!drag);
+        else applyRangeValues(rangeStart.value, value, 'end', !!drag);
+      });
     };
 
     handle.addEventListener('pointerdown', (event) => {
+      if (!sliderContainer || !event.isPrimary || event.button !== 0) return;
       event.preventDefault();
       handle.focus();
       handle.setPointerCapture(event.pointerId);
-      beginHandleDrag();
-
-      const newValue = valueFromPointerEvent(event);
-      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
-      else applyRangeValues(rangeStart.value, newValue, 'end', true);
+      drag = { pointer: event.pointerId, rect: sliderContainer.getBoundingClientRect() };
+      setRangeDragging(true);
     });
 
-    handle.addEventListener('pointermove', (event) => {
-      if (!handle.hasPointerCapture(event.pointerId)) return;
-      const newValue = valueFromPointerEvent(event);
-      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
-      else applyRangeValues(rangeStart.value, newValue, 'end', true);
+    handle.addEventListener('pointermove', moveHandle);
+    handle.addEventListener('pointerup', (event) => {
+      if (drag?.pointer !== event.pointerId) return;
+      endHandleDrag();
     });
-
-    handle.addEventListener('pointerup', endHandleDrag);
     handle.addEventListener('lostpointercapture', endHandleDrag);
 
     handle.addEventListener('keydown', (event) => {
@@ -419,44 +464,41 @@ function setupControls() {
 
   const sliderFill = /** @type {HTMLElement|null} */ (document.getElementById('slider-fill'));
   if (sliderFill && sliderContainer) {
-    let panActive = false;
-    let panOriginX = 0;
-    let panOriginStart = 0;
-    let panOriginEnd = 0;
+    /** @type {{pointer: number, x: number, width: number, start: number, end: number}|null} */
+    let pan = null;
 
     const endFillPan = () => {
-      if (!panActive) return;
-      panActive = false;
+      if (!pan) return;
+      pan = null;
       sliderFill.classList.remove('is-panning');
-      setRangeDragging(false);
-      if (state.settings.statsRange) {
-        updateStatsDisplay();
-        updateEnergyDisplay();
-      }
-      updateCharts('interaction', { force: false, reason: 'release' });
+      finishRangeGesture();
     };
 
     sliderFill.addEventListener('pointerdown', (event) => {
-      if (state.settings.rangeEnd - state.settings.rangeStart >= 1000) return;
+      const { rangeStart: start, rangeEnd: end } = state.settings;
+      if (!event.isPrimary || event.button !== 0 || end - start >= 1000) return;
       event.preventDefault();
       sliderFill.setPointerCapture(event.pointerId);
-      panActive = true;
-      panOriginX = event.clientX;
-      panOriginStart = Number.parseInt(rangeStart.value, 10);
-      panOriginEnd = Number.parseInt(rangeEnd.value, 10);
+      pan = {
+        pointer: event.pointerId,
+        x: event.clientX,
+        width: sliderContainer.getBoundingClientRect().width,
+        start,
+        end,
+      };
       sliderFill.classList.add('is-panning');
       setRangeDragging(true);
     });
 
     sliderFill.addEventListener('pointermove', (event) => {
-      if (!panActive || !sliderFill.hasPointerCapture(event.pointerId)) return;
-      const width = sliderContainer.getBoundingClientRect().width;
-      const delta = width > 0 ? ((event.clientX - panOriginX) / width) * 1000 : 0;
-      const next = panPermilleWindow(panOriginStart, panOriginEnd, delta);
-      applyRangeValues(next.start, next.end, 'start', true);
+      if (pan?.pointer !== event.pointerId || !pan.width) return;
+      const next = panPermilleWindow(pan.start, pan.end, ((event.clientX - pan.x) / pan.width) * 1000);
+      queueRangeInput(() => applyRangeValues(next.start, next.end, 'start', !!pan));
     });
 
-    sliderFill.addEventListener('pointerup', endFillPan);
+    sliderFill.addEventListener('pointerup', (event) => {
+      if (pan?.pointer === event.pointerId) endFillPan();
+    });
     sliderFill.addEventListener('lostpointercapture', endFillPan);
   }
 

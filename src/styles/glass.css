@@ -205,6 +205,11 @@
   background-color: var(--glass-control-hover);
 }
 
+.tab:hover {
+  background: var(--glass-sheen), var(--glass-control-hover);
+  box-shadow: var(--glass-rim);
+}
+
 .tab[aria-selected="true"],
 .tab.active,
 .cmd-btn:hover:not(:disabled) {

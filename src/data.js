@@ -268,10 +268,10 @@ export function addDataPoint(data, segment) {
     tempValue = state.settings.tempSource === 'device' ? hidTemp : (state.currentTemp ?? Number.NaN);
   }
 
-  const realtime = { ...data, current: currentValue, power: powerAbs, temp: tempValue };
+  const realtime = { ...data, current: data.current, current_abs: currentAbs, power: powerAbs, temp: tempValue };
   lastRealtime = realtime;
   trackMeterPeak('voltage', data.voltage);
-  trackMeterPeak('current', currentValue);
+  trackMeterPeak('current', currentAbs);
   trackMeterPeak('power', powerAbs);
   trackMeterPeak('temp', tempValue);
 
@@ -326,7 +326,7 @@ export function addDataPoint(data, segment) {
   cols.x.push(relSeconds);
 
   updateStats('voltage', data.voltage);
-  updateStats('current', currentValue);
+  updateStats('current', currentAbs);
   updateStats('power', powerAbs);
   const firstTemp = !state.hasTempData && Number.isFinite(tempValue);
   if (state.isTempConnected && Number.isFinite(tempValue)) {
@@ -502,7 +502,7 @@ function applyChartXWindow(min, max, settled) {
     updateSliderFill();
     writeRangeLabels(xs);
   }
-  if (state.settings.statsRange) scheduleStatsUpdate();
+  if (settled && state.settings.statsRange) scheduleStatsUpdate();
 }
 
 state.__applyChartXWindow = applyChartXWindow;
@@ -612,7 +612,7 @@ export function updateStats(field, value) {
 
 /**
  * 更新实时数据显示面板。
- * @param {{ voltage: number, current: number, power: number, temp: number, dp?: number, dn?: number, cc1?: number, cc2?: number }} data
+ * @param {{ voltage: number, current: number, power: number, temp: number, current_abs?: number, dp?: number, dn?: number, cc1?: number, cc2?: number }} data
  */
 export function updateRealtimeDisplay(data) {
   lastRealtime = data;
@@ -622,7 +622,7 @@ export function updateRealtimeDisplay(data) {
   const pEl = document.getElementById('rt-power');
   setTextIfChanged(vEl, data.voltage.toFixed(4));
   // 电流数值恒显示幅值，方向由箭头表达（需求：不用正负号）
-  setTextIfChanged(cEl, Math.abs(data.current).toFixed(4));
+  setTextIfChanged(cEl, currentMagnitude(data.current, data.current_abs).toFixed(4));
   setTextIfChanged(pEl, data.power.toFixed(4));
 
   setMeter('lv-voltage', 'voltage', data.voltage, 'x');
@@ -1048,7 +1048,7 @@ export function updateStatsDisplay() {
   const avgVoltageEl = document.getElementById('avg-voltage');
   const avgCurrentEl = document.getElementById('avg-current');
   setTextIfChanged(avgVoltageEl, isAvg(avgVoltage) ? avgVoltage.toFixed(3) : '--');
-  setTextIfChanged(avgCurrentEl, isAvg(avgCurrent) ? Math.abs(avgCurrent).toFixed(3) : '--');
+  setTextIfChanged(avgCurrentEl, isAvg(avgCurrent) ? avgCurrent.toFixed(3) : '--');
 
   const avgPowerEl = document.getElementById('avg-power');
   setTextIfChanged(avgPowerEl, isAvg(displayPowerAvg) ? displayPowerAvg.toFixed(3) : '--');
@@ -1243,12 +1243,14 @@ export function scheduleStatsUpdate() {
     return;
   }
   if (!state.settings.statsRange) cancelRangeStatsJob();
+  else if (state.__rangeDragging) return;
   if (__statsUpdateTimer !== null) return;
   if (state.settings.statsRange) markStaleRangeStatsPending();
   __statsUpdateTimer = setTimeout(
     () => {
       const startedAt = performance.now();
       __statsUpdateTimer = null;
+      if (state.settings.statsRange && state.__rangeDragging) return;
       updateStatsDisplay();
       updateEnergyDisplay();
       performanceDiagnostics.domCommit('stats-ui', startedAt);

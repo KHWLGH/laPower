@@ -160,8 +160,8 @@ export class ExactExtremaIndex {
         count += finite;
         const a = page[offset + s],
           b = page[offset + this.channels + s];
-        const v = chunks ? chunks[a >>> 12][a & 4095] : col[a];
-        const w = chunks ? chunks[b >>> 12][b & 4095] : col[b];
+        const v = chunks ? chunks[a >>> 12][a & 4095] : columnValue(col, a);
+        const w = chunks ? chunks[b >>> 12][b & 4095] : columnValue(col, b);
         if (v < min) {
           min = v;
           mi = a;

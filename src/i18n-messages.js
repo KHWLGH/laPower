@@ -869,10 +869,10 @@ export const messages = {
   ],
   signedCurrent: ['Record current direction', '记录电流方向', '記錄電流方向', '電流の方向を記録'],
   signedCurrentHint: [
-    'Keep the current sign in new recordings and imports (forward positive, reverse negative). When disabled, record absolute values. Existing data stays unchanged; exports keep recorded values.',
-    '开启后新记录/导入的数据保留电流符号（正向为正、反向为负），侧栏以箭头指示方向；关闭时记录绝对值。不改写已有数据，导出跟随当前记录值。',
-    '新記錄／匯入保留電流正負號（正向為正、反向為負）。關閉時記錄絕對值；已有資料不變，匯出保留記錄值。',
-    '新しい記録とインポートで電流の符号を保持します（順方向は正、逆方向は負）。無効時は絶対値を記録します。既存データは変更せず、記録値をエクスポートします。',
+    'Keep the current sign in new recordings (forward positive, reverse negative). The monitor shows magnitude and indicates direction with an arrow. Exports retain recorded values.',
+    '开启后新记录保留电流符号（正向为正、反向为负）。监控显示电流幅值，侧栏以箭头指示方向。导出保留记录值。',
+    '開啟後新記錄保留電流正負號（正向為正、反向為負）。監控顯示電流幅值，側欄以箭頭指示方向。匯出保留記錄值。',
+    '有効にすると新しい記録に電流の符号を保持します（順方向は正、逆方向は負）。モニターには絶対値と方向の矢印を表示し、エクスポートには記録値を使います。',
   ],
   recordLimit: ['Recording limit', '单次记录上限', '單次記錄上限', '記録容量の上限'],
   recordLimitTitle: [
@@ -913,6 +913,15 @@ export const messages = {
   currentColor: ['Current curve color', '电流曲线颜色', '電流曲線顏色', '電流曲線の色'],
   powerColor: ['Power curve color', '功率曲线颜色', '功率曲線顏色', '電力曲線の色'],
   tempColor: ['Temperature curve color', '温度曲线颜色', '溫度曲線顏色', '温度曲線の色'],
+  fillOpacity: ['Fill', '填充', '填色', '塗り'],
+  lineWidth: ['Line width', '线宽', '線寬', '線幅'],
+  curveOffset: ['Y offset', '上下错开', '上下錯開', '上下ずらし'],
+  curveOffsetHint: [
+    'Move the curve up (+) or down (−) within the available space. Enter 0 to restore its original position.',
+    '正值上移，负值下移。移动幅度受图表留白限制，设为 0 恢复原位。',
+    '正值上移，負值下移。移動幅度受圖表留白限制，設為 0 恢復原位。',
+    '正の値で上に、負の値で下に余白の範囲内で移動します。0 で元の位置に戻ります。',
+  ],
   opacity: [
     'Fill opacity (0 disables fill)',
     '填充不透明度（0 = 关闭填充）',

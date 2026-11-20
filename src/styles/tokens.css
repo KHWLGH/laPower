@@ -217,7 +217,6 @@
   /* 图表基建：必须不透明（四条 Y 轴会叠画同一像素） */
   --chart-axis-text: var(--text-tertiary);
   --chart-grid: var(--stroke-control);
-  --chart-grid-minor: var(--stroke-divider);
   --chart-marker: var(--text-secondary); /* 打点标签文字：中性墨色，不占用通道色；竖线用 --chart-axis-text */
   --chart-marker-bg: var(--surface-card); /* 标签底：与图表容器同色，压在曲线上仍可读 */
 

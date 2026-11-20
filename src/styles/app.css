@@ -698,6 +698,62 @@ html[data-ui-scale-css] .app-shell {
   box-shadow: var(--shadow-16);
 }
 
+#flyout-display {
+  box-sizing: border-box;
+  width: min(396px, calc(100vw - 16px));
+  min-width: 0;
+}
+
+.display-config-head,
+.display-channel-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) 32px repeat(3, 58px);
+  align-items: center;
+  column-gap: 8px;
+}
+
+.display-config-head {
+  min-height: 22px;
+  color: var(--text-tertiary);
+  font: var(--type-caption);
+  text-align: center;
+}
+
+.display-channel-row {
+  justify-content: initial;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.display-channel-row .ribbon-checkbox {
+  min-width: 0;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.display-channel-row .ribbon-checkbox > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.display-number-wrap {
+  position: relative;
+  width: 58px;
+  min-width: 0;
+}
+
+.display-number-wrap .ribbon-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 26px;
+  padding-right: 18px;
+}
+
+.display-number-wrap .opacity-suffix {
+  right: 5px;
+}
+
 .flyout-title {
   font: var(--type-body-strong);
   margin-bottom: 12px;

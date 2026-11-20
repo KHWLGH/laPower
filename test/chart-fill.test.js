@@ -45,12 +45,13 @@ function verify(
   base,
   connect = xs.map((_, i) => Number(i > 0 && Number.isFinite(ys[i]) && Number.isFinite(ys[i - 1]))),
   opacity = 0.12,
+  scale = 1,
 ) {
   const width = 8,
     height = 6,
     leftOffset = 11.25,
     topOffset = 7.5;
-  const points = Float64Array.from(xs.flatMap((x, i) => [x + leftOffset, ys[i] + topOffset]));
+  const points = Float64Array.from(xs.flatMap((x, i) => [x / scale + leftOffset, ys[i] / scale + topOffset]));
   const pixels = new Uint32Array(width * height),
     coverage = new Float64Array((height + 1) * 3);
   const actual = rasterOrderedFill({
@@ -59,6 +60,7 @@ function verify(
     base,
     leftOffset,
     topOffset,
+    scale,
     width,
     height,
     pixels,
@@ -109,6 +111,10 @@ test('analytic fill matches clipped polygon area across ramps, steps, baseline c
       verify([0, 2, 2, 5, 8], [1, 1, 4, 4, 2], base, undefined, opacity);
       verify([0, 1.5, 3, 4, 5.3, 7, 8], [1, 3, NaN, NaN, -2, 4, 1], base, undefined, opacity);
     }
+});
+
+test('gesture bitmap scales both axes without shifting fill, clipping, or gaps', () => {
+  verify([-1, 0.6, 2, 3.4, 4.2, 6, 8.5], [5, -2, 4, NaN, 3, -3, 8], 2.4, undefined, 0.33, 0.46);
 });
 
 test('many subpixel segments accumulate area before one alpha composition and preserve missing gaps', () => {

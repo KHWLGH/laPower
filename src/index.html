@@ -73,6 +73,9 @@
                 <option value="5000" data-i18n="rate02">0.2 samples/s (1 every 5s)</option>
                 <option value="10000" data-i18n="rate01">0.1 samples/s (1 every 10s)</option>
               </select>
+              <button type="button" class="cmd-btn monitor-compact-action" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
+                <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="reset">Reset</span>
+              </button>
             </div>
             <div class="status-metrics" role="group" aria-label="Recording status" data-i18n-aria-label="statsRecording">
               <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="Start or pause recording" data-i18n-title="toggleRecording">
@@ -92,9 +95,6 @@
               </button>
               <button type="button" class="cmd-btn monitor-compact-action" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
                 <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
-              </button>
-              <button type="button" class="cmd-btn monitor-compact-action" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
-                <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="reset">Reset</span>
               </button>
               <button type="button" class="cmd-btn monitor-compact-action" id="btn-flyout-display" title="Display channel settings" data-i18n-title="displayChannels"><i class="fi fi-eye" aria-hidden="true"></i><span data-i18n="display">Display</span></button>
               <div class="cmd-action-group split-button" id="auto-pause-actions">
@@ -900,51 +900,89 @@
           <span data-i18n="chartFillEnabled">Curve shading</span>
         </label>
       </div>
-      <div class="flyout-row">
+      <div class="display-config-head">
+        <span></span><span></span>
+        <span data-i18n="fillOpacity">Fill</span>
+        <span id="display-line-width-heading" data-i18n="lineWidth">Line</span>
+        <span id="display-curve-offset-heading" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint" data-i18n="curveOffset">Y offset</span>
+      </div>
+      <div class="flyout-row display-channel-row">
         <label class="ribbon-checkbox" title="Show/hide voltage curve" data-i18n-title="showVoltage">
           <input type="checkbox" id="show-voltage" checked />
           <span class="checkmark voltage"></span>
-          <span data-i18n="voltage">Voltage</span>
+          <span id="display-voltage-label" data-i18n="voltage">Voltage</span>
         </label>
         <input type="color" class="channel-color-picker" id="color-voltage" title="Voltage curve color" data-i18n-title="voltageColor" aria-label="Voltage curve color" data-i18n-aria-label="voltageColor" />
-        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
+        <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-voltage" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
+        <span class="display-number-wrap">
+          <input type="number" id="line-width-voltage" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-voltage-label display-line-width-heading" />
+          <span class="opacity-suffix">px</span>
+        </span>
+        <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
+          <input type="number" id="curve-offset-voltage" value="0" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-voltage-label display-curve-offset-heading" />
+          <span class="opacity-suffix">%</span>
+        </span>
       </div>
-      <div class="flyout-row">
+      <div class="flyout-row display-channel-row">
         <label class="ribbon-checkbox" title="Show/hide current curve" data-i18n-title="showCurrent">
           <input type="checkbox" id="show-current" checked />
           <span class="checkmark current"></span>
-          <span data-i18n="current">Current</span>
+          <span id="display-current-label" data-i18n="current">Current</span>
         </label>
         <input type="color" class="channel-color-picker" id="color-current" title="Current curve color" data-i18n-title="currentColor" aria-label="Current curve color" data-i18n-aria-label="currentColor" />
-        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
+        <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-current" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
         </span>
-      </div>
-      <div class="flyout-row">
-        <label class="ribbon-checkbox" title="Show/hide power curve" data-i18n-title="showPower">
-          <input type="checkbox" id="show-power" checked />
-          <span class="checkmark power"></span>
-          <span data-i18n="power">Power</span>
-        </label>
-        <input type="color" class="channel-color-picker" id="color-power" title="Power curve color" data-i18n-title="powerColor" aria-label="Power curve color" data-i18n-aria-label="powerColor" />
-        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
-          <input type="number" id="opacity-power" value="15" min="0" max="100" class="ribbon-input no-spin" />
+        <span class="display-number-wrap">
+          <input type="number" id="line-width-current" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-current-label display-line-width-heading" />
+          <span class="opacity-suffix">px</span>
+        </span>
+        <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
+          <input type="number" id="curve-offset-current" value="0" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-current-label display-curve-offset-heading" />
           <span class="opacity-suffix">%</span>
         </span>
       </div>
-      <div class="flyout-row" id="show-temp-container">
+      <div class="flyout-row display-channel-row">
+        <label class="ribbon-checkbox" title="Show/hide power curve" data-i18n-title="showPower">
+          <input type="checkbox" id="show-power" checked />
+          <span class="checkmark power"></span>
+          <span id="display-power-label" data-i18n="power">Power</span>
+        </label>
+        <input type="color" class="channel-color-picker" id="color-power" title="Power curve color" data-i18n-title="powerColor" aria-label="Power curve color" data-i18n-aria-label="powerColor" />
+        <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
+          <input type="number" id="opacity-power" value="15" min="0" max="100" class="ribbon-input no-spin" />
+          <span class="opacity-suffix">%</span>
+        </span>
+        <span class="display-number-wrap">
+          <input type="number" id="line-width-power" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-power-label display-line-width-heading" />
+          <span class="opacity-suffix">px</span>
+        </span>
+        <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
+          <input type="number" id="curve-offset-power" value="18" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-power-label display-curve-offset-heading" />
+          <span class="opacity-suffix">%</span>
+        </span>
+      </div>
+      <div class="flyout-row display-channel-row" id="show-temp-container">
         <label class="ribbon-checkbox" title="Show/hide temperature curve" data-i18n-title="showTemp">
           <input type="checkbox" id="show-temp" checked />
           <span class="checkmark temp"></span>
-          <span data-i18n="temperature">Temperature</span>
+          <span id="display-temp-label" data-i18n="temperature">Temperature</span>
         </label>
         <input type="color" class="channel-color-picker" id="color-temp" title="Temperature curve color" data-i18n-title="tempColor" aria-label="Temperature curve color" data-i18n-aria-label="tempColor" />
-        <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
+        <span class="display-number-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-temp" value="15" min="0" max="100" class="ribbon-input no-spin" />
+          <span class="opacity-suffix">%</span>
+        </span>
+        <span class="display-number-wrap">
+          <input type="number" id="line-width-temp" value="1.5" min="0.5" max="6" step="0.25" class="ribbon-input no-spin" aria-labelledby="display-temp-label display-line-width-heading" />
+          <span class="opacity-suffix">px</span>
+        </span>
+        <span class="display-number-wrap" title="Move the curve up (+) or down (−)" data-i18n-title="curveOffsetHint">
+          <input type="number" id="curve-offset-temp" value="0" min="-35" max="35" step="1" class="ribbon-input no-spin" aria-labelledby="display-temp-label display-curve-offset-heading" />
           <span class="opacity-suffix">%</span>
         </span>
       </div>

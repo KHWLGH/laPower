@@ -7,7 +7,7 @@
 /** Rasterize the area between monotone ordered line segments and their baseline.
  * Each pixel receives its analytic coverage once, including baseline crossings.
  * Scratch storage is three row arrays, independent of the number of samples.
- * @param {{points:Float64Array,connect:Uint8Array,base:number,leftOffset:number,topOffset:number,width:number,height:number,pixels:Uint32Array,coverage:Float64Array,rgb:number,opacity:number,transposed?:boolean,opaque?:{spans:Uint32Array,offsets:Uint32Array},composite?:boolean}} options
+ * @param {{points:Float64Array,connect:Uint8Array,base:number,leftOffset:number,topOffset:number,scale?:number,width:number,height:number,pixels:Uint32Array,coverage:Float64Array,rgb:number,opacity:number,transposed?:boolean,opaque?:{spans:Uint32Array,offsets:Uint32Array},composite?:boolean}} options
  */
 export function rasterOrderedFill({
   points,
@@ -15,6 +15,7 @@ export function rasterOrderedFill({
   base,
   leftOffset,
   topOffset,
+  scale = 1,
   width,
   height,
   pixels,
@@ -112,7 +113,7 @@ export function rasterOrderedFill({
     dirtyTop = height,
     dirtyBottom = 0;
   for (let x = 0; x < width; x++) {
-    while (first < connect.length && points[first * 2] - leftOffset <= x) first++;
+    while (first < connect.length && (points[first * 2] - leftOffset) * scale <= x) first++;
     const spanStart = opaque?.offsets[x] ?? 0,
       spanEnd = opaque?.offsets[x + 1] ?? 0;
     if (spanEnd - spanStart === 2) {
@@ -121,15 +122,15 @@ export function rasterOrderedFill({
       let total = 0,
         enclosed = true;
       for (let i = first; i < connect.length; i++) {
-        const x0 = points[(i - 1) * 2] - leftOffset,
-          x1 = points[i * 2] - leftOffset;
+        const x0 = (points[(i - 1) * 2] - leftOffset) * scale,
+          x1 = (points[i * 2] - leftOffset) * scale;
         if (x0 >= x + 1) break;
         if (!connect[i] || !(x1 > x0)) continue;
         const left = Math.max(x, x0),
           right = Math.min(x + 1, x1);
         if (!(right > left)) continue;
-        const y0 = points[(i - 1) * 2 + 1] - topOffset,
-          y1 = points[i * 2 + 1] - topOffset,
+        const y0 = (points[(i - 1) * 2 + 1] - topOffset) * scale,
+          y1 = (points[i * 2 + 1] - topOffset) * scale,
           a = y0 + ((left - x0) / (x1 - x0)) * (y1 - y0),
           b = y0 + ((right - x0) / (x1 - x0)) * (y1 - y0);
         if (Math.max(0, Math.min(a, b)) < top || Math.min(height, Math.max(a, b)) > bottom) {
@@ -159,15 +160,15 @@ export function rasterOrderedFill({
     events.length = 0;
     events.push(0, height);
     for (let i = first; i < connect.length; i++) {
-      const x0 = points[(i - 1) * 2] - leftOffset,
-        x1 = points[i * 2] - leftOffset;
+      const x0 = (points[(i - 1) * 2] - leftOffset) * scale,
+        x1 = (points[i * 2] - leftOffset) * scale;
       if (x0 >= x + 1) break;
       if (!connect[i] || !(x1 > x0)) continue;
       const left = Math.max(x, x0),
         right = Math.min(x + 1, x1);
       if (!(right > left)) continue;
-      const y0 = points[(i - 1) * 2 + 1] - topOffset,
-        y1 = points[i * 2 + 1] - topOffset;
+      const y0 = (points[(i - 1) * 2 + 1] - topOffset) * scale,
+        y1 = (points[i * 2 + 1] - topOffset) * scale;
       const a = y0 + ((left - x0) / (x1 - x0)) * (y1 - y0),
         b = y0 + ((right - x0) / (x1 - x0)) * (y1 - y0);
       if ((a - base) * (b - base) < 0) {

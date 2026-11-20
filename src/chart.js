@@ -39,6 +39,7 @@ import { rasterOrderedFill } from './chart-fill.js';
 import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
 import { minZoomSpan, wheelZoomFactor, zoomTimeWindow } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
+import { chartCurrent, currentAt } from './current-display.js';
 import { displayFrames } from './frame-scheduler.js';
 import { getResolvedLanguage, t } from './i18n.js';
 import { markersOf, onMarkersChange } from './markers.js';
@@ -145,7 +146,7 @@ let preparationTarget = null;
 
 function chartRevision() {
   const cs = state.chartSeries;
-  return cs.x.revision + FIELDS.reduce((sum, key) => sum + cs[key].revision, 0);
+  return cs.x.revision + cs.currentMagnitudes.revision + FIELDS.reduce((sum, key) => sum + cs[key].revision, 0);
 }
 
 /** @param {PreparationTarget} target */
@@ -388,8 +389,12 @@ function bindNavData() {
 let linearBuilder = null;
 /** @type {import('./chart-buckets.js').OrderedGeometry[]} */
 let mainGeometry = [];
-/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number,paintTop:number,paintBottom:number,columns:number[][],columnLengths:Uint32Array,coverage:Float64Array,pending:boolean}|null} */
+/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number,paintTop:number,paintBottom:number,columns:number[][],columnLengths:Uint32Array,coverage:Float64Array,pending:boolean,scale:number}|null} */
 let bucketRaster = null;
+let restingRaster = null;
+let gestureRaster = null;
+const GESTURE_RASTER_PIXELS = 480_000;
+const GESTURE_SERIES_BUCKETS = 3072;
 /** @type {WeakMap<object, Map<number, any>>} */
 let orderedPaints = new WeakMap();
 
@@ -484,7 +489,7 @@ function drawBucketFill(u, seriesIdx) {
     series = u.series[seriesIdx];
   const fill = series.fill(u, seriesIdx);
   if (!geometry || !fill || !Number.isFinite(geometry.base)) return;
-  if (geometry.rasterFill && useBucketRaster(u) && /^rgba\(/.test(fill)) return;
+  if (useBucketRaster(u) && useRasterFill(geometry, fill)) return;
   if (bucketRaster?.pending) flushBucketRaster(u);
   const started = performance.now();
   const { points, connect, base } = geometry,
@@ -537,6 +542,12 @@ function useBucketRaster(u) {
   );
 }
 
+/** @param {{rasterFill: boolean}} geometry @param {unknown} fill */
+function useRasterFill(geometry, fill) {
+  // One upload for all supported strokes and shadows in a moving viewport.
+  return (rangeDragging || geometry.rasterFill) && typeof fill === 'string' && fill.startsWith('rgba(');
+}
+
 /** Scan-convert by x column, then union covered intervals before writing any pixels. */
 function drawBucketRaster(u, seriesIdx) {
   if (!useBucketRaster(u)) {
@@ -565,9 +576,12 @@ function drawBucketRaster(u, seriesIdx) {
   const geometry = orderedPaints.get(u)?.get(seriesIdx);
   if (!geometry) return;
   const started = performance.now();
-  const bbox = u.bbox,
-    width = Math.ceil(bbox.width),
-    height = Math.ceil(bbox.height);
+  const bbox = u.bbox;
+  // Bound bitmap upload and blending while the viewport is moving, not at rest.
+  const scale = rangeDragging ? Math.min(1, Math.sqrt(GESTURE_RASTER_PIXELS / (bbox.width * bbox.height))) : 1;
+  const width = Math.ceil(bbox.width * scale);
+  const height = Math.ceil(bbox.height * scale);
+  bucketRaster = scale < 1 ? gestureRaster : restingRaster;
   if (!bucketRaster || bucketRaster.canvas.width !== height || bucketRaster.canvas.height !== width) {
     // Transpose the scratch: each screen column becomes one contiguous row.
     const canvas = new OffscreenCanvas(height, width);
@@ -589,7 +603,10 @@ function drawBucketRaster(u, seriesIdx) {
       columnLengths: new Uint32Array(width),
       coverage: new Float64Array((height + 1) * 3),
       pending: false,
+      scale,
     };
+    if (scale < 1) gestureRaster = bucketRaster;
+    else restingRaster = bucketRaster;
   }
   const { pixels, columns, columnLengths } = bucketRaster;
   if (!bucketRaster.pending) {
@@ -603,17 +620,17 @@ function drawBucketRaster(u, seriesIdx) {
     hex = Number.parseInt(series.stroke(u, seriesIdx).slice(1), 16);
   const color = new Uint32Array(Uint8Array.of(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255).buffer)[0];
   const fill = series.fill(u, seriesIdx);
-  const half = (series.width * plotPixelRatio()) / 2;
+  const half = (series.width * plotPixelRatio() * scale) / 2;
   const intervalStarted = performance.now();
-  if (!geometry.raster || geometry.raster.half !== half) {
+  if (!geometry.raster || geometry.raster.half !== half || geometry.raster.scale !== scale) {
     columnLengths.fill(0);
     const { points, connect } = geometry;
     for (let i = 0; i < connect.length; i++) {
-      const x1 = points[i * 2] - bbox.left,
-        y1 = points[i * 2 + 1] - bbox.top;
+      const x1 = (points[i * 2] - bbox.left) * scale,
+        y1 = (points[i * 2 + 1] - bbox.top) * scale;
       if (!Number.isFinite(x1) || !Number.isFinite(y1)) continue;
-      const x0 = connect[i] ? points[(i - 1) * 2] - bbox.left : x1;
-      const y0 = connect[i] ? points[(i - 1) * 2 + 1] - bbox.top : y1;
+      const x0 = connect[i] ? (points[(i - 1) * 2] - bbox.left) * scale : x1;
+      const y0 = connect[i] ? (points[(i - 1) * 2 + 1] - bbox.top) * scale : y1;
       const dx = x1 - x0,
         dy = y1 - y0;
       const left = Math.max(0, Math.floor(Math.min(x0, x1) - half)),
@@ -680,12 +697,11 @@ function drawBucketRaster(u, seriesIdx) {
       for (let i = 0; i < columnLengths[x]; i++) spans[cursor++] = columns[x][i];
     }
     offsets[width] = cursor;
-    geometry.raster = { half, spans, offsets };
+    geometry.raster = { half, spans, offsets, scale };
     recordPaintStage(u, 'intervals', intervalStarted);
   } else recordPaintStage(u, 'intervalsCached', intervalStarted);
   const { spans, offsets } = geometry.raster;
-  if (geometry.rasterFill && Number.isFinite(geometry.base) && fill && /^rgba\(/.test(fill))
-    rasterBucketFill(u, geometry, fill);
+  if (Number.isFinite(geometry.base) && useRasterFill(geometry, fill)) rasterBucketFill(u, geometry, fill);
   let { dirtyTop, dirtyBottom } = bucketRaster;
   for (let x = 0; x < width; x++) {
     for (let i = offsets[x]; i < offsets[x + 1]; i += 2) {
@@ -709,7 +725,7 @@ function flushBucketRaster(u) {
   bucketRaster.pending = false;
   const { dirtyTop, dirtyBottom } = bucketRaster,
     bbox = u.bbox,
-    width = Math.ceil(bbox.width);
+    width = bucketRaster.canvas.height;
   if (dirtyBottom <= dirtyTop) return;
   const uploadStarted = performance.now();
   const scratch = bucketRaster.ctx;
@@ -723,7 +739,8 @@ function flushBucketRaster(u) {
   ctx.beginPath();
   ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
   ctx.clip();
-  ctx.transform(0, 1, 1, 0, bbox.left, bbox.top);
+  const factor = 1 / bucketRaster.scale;
+  ctx.transform(0, factor, factor, 0, bbox.left, bbox.top);
   ctx.drawImage(
     bucketRaster.canvas,
     dirtyTop,
@@ -745,12 +762,14 @@ function rasterBucketFill(u, geometry, fill) {
   const rgba = fill.match(/[\d.]+/g)?.map(Number);
   if (!rgba || rgba.length !== 4 || !bucketRaster) return;
   const rgb = new Uint32Array(Uint8Array.of(rgba[0], rgba[1], rgba[2], 0).buffer)[0];
+  const { scale } = bucketRaster;
   const bounds = rasterOrderedFill({
     points: geometry.points,
     connect: geometry.connect,
-    base: geometry.base - u.bbox.top,
+    base: (geometry.base - u.bbox.top) * scale,
     leftOffset: u.bbox.left,
     topOffset: u.bbox.top,
+    scale,
     width: bucketRaster.canvas.height,
     height: bucketRaster.canvas.width,
     pixels: bucketRaster.pixels,
@@ -777,17 +796,7 @@ function bindMainViews(start, end) {
   const cs = state.chartSeries;
   rawStart = Math.max(0, start - 1);
   rawEnd = Math.min(cs.x.length, end + 1);
-  mainData = [
-    cs.x.copyRange(rawStart, rawEnd),
-    cs.voltage.copyRange(rawStart, rawEnd),
-    cs.current.copyRange(rawStart, rawEnd),
-    cs.power.copyRange(rawStart, rawEnd),
-    cs.temp.copyRange(rawStart, rawEnd),
-    cs.dp.copyRange(rawStart, rawEnd),
-    cs.dn.copyRange(rawStart, rawEnd),
-    cs.cc1.copyRange(rawStart, rawEnd),
-    cs.cc2.copyRange(rawStart, rawEnd),
-  ];
+  mainData = [cs.x, ...channelBufs()].map((column) => column.copyRange(rawStart, rawEnd));
 }
 
 export function syncChartSeries() {
@@ -802,6 +811,8 @@ export function syncChartSeries() {
   reviewRenderPolicy.reset();
   sourceRevision = chartRevision();
   bucketRaster = null;
+  restingRaster = null;
+  gestureRaster = null;
   orderedPaints = new WeakMap();
   mainGeometry = [];
   submittedSourceLen = state.chartSeries.x.length;
@@ -854,7 +865,7 @@ function trackNewPoints(through = state.chartSeries.x.length) {
     scannedLen = len;
     return false;
   }
-  const cols = [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
+  const cols = channelBufs();
   let changed = false;
   for (let si = 0; si < cols.length; si++) {
     const arr = cols[si];
@@ -920,10 +931,18 @@ function displayResolution(width = plotCssWidth()) {
   return width * (displayContext === 'review' ? plotPixelRatio() : 1);
 }
 
+function gestureBucketLimit() {
+  const chart = state.mainChart;
+  if (!rangeDragging || !chart?.ctx?.canvas || !chart.series) return Infinity;
+  const count = chart.series.slice(1).filter((series) => series.show).length;
+  return Math.floor(GESTURE_SERIES_BUCKETS / Math.max(1, count));
+}
+
 /** Sparse windows retain raw samples even after a dense recording reduced its budget. @param {number} count */
 function mainBucketCap(count) {
   const width = plotCssWidth();
-  return bucketCap(displayResolution(width) / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1));
+  const cap = displayResolution(width) / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1);
+  return bucketCap(Math.min(cap, gestureBucketLimit()));
 }
 
 /** Keep medium zooms on real sample geometry with a bounded copy/vertex budget. */
@@ -936,7 +955,7 @@ function mainRawLimit() {
 /** Bound retraced Canvas strokes as well as vertices; fixed data keeps the same choice through a gesture. */
 function useRawWindow(start, end) {
   const count = end - start;
-  if (count > mainRawLimit()) return false;
+  if (count > Math.min(mainRawLimit(), gestureBucketLimit())) return false;
   if (count <= displayResolution()) return true;
   const chart = state.mainChart;
   if (!chart?.series || !chart.bbox?.height) return true;
@@ -998,7 +1017,7 @@ function liveRefreshInterval() {
 
 function channelBufs() {
   const cs = state.chartSeries;
-  return [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
+  return [cs.voltage, chartCurrent(cs), cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
 }
 
 /** @param {SeriesBuckets} buckets @param {BoundKind} kind */
@@ -1012,7 +1031,7 @@ function bindFlattenedBuckets(buckets, kind) {
 /**
  * 条带折叠的**速度选择器**：只决定耗时，不决定产出值 —— 金字塔 fold 与逐样本扫描对同一条带
  * 得到同一组 min/max（`test/chart-extrema.test.js` 的 `compare()` 逐桶钉着这条等价）。
- * 所以拖动中 / 松手后 / 冷启动走到不同分支，画出来的曲线也必须一模一样。
+ * At a given display density, warm and cold projections retain the same extrema.
  * @param {import('./chart-buckets.js').NumericColumn[]} series @param {number} end @param {number} ppb
  * @returns {ExactExtremaIndex|null}
  */
@@ -1648,7 +1667,7 @@ function applyData(opts = {}) {
   const yChanged = trackNewPoints(srcLen);
   const force = !!opts.force;
   const dataChanged = appended || appliedMainGen !== dataGen;
-  // 拖动中唯一被推迟的是导航图重扫：它与主图画什么无关。
+  // The overview is static during a gesture; only the main viewport moves.
   const preview = rangeDragging && !force;
 
   const nextXRange = target?.xRange ?? xRange();
@@ -1661,6 +1680,10 @@ function applyData(opts = {}) {
     if (!sameXRange) {
       expectChartDraw(state.mainChart, request);
       applyXScale(nextXRange);
+    } else if (!rangeDragging && boundKind === 'window' && bucketRaster && bucketRaster.scale < 1) {
+      // Even when the same buckets cover both windows, restore full raster resolution.
+      expectChartDraw(state.mainChart, request);
+      state.mainChart.redraw(true, false);
     }
   } else {
     if (!coarsePreview) bindDisplayData({ cap, start, end, windowCount, force });
@@ -1688,12 +1711,12 @@ function applyData(opts = {}) {
   }
   appliedXRange = nextXRange;
 
-  if (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen) {
+  if (!preview && (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
     syncNavBuckets(srcLen);
     const nav = state.navigatorChart;
     const now = performance.now();
     const live = state.isRecording && !force && !preview;
-    const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS || appliedNavGen !== dataGen;
+    const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS;
     if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
       const generation = dataGen;
       const submit = () => {
@@ -1934,9 +1957,10 @@ export function setChartXWindow(min, max) {
 export function setSeriesVisible(datasetIndex, show) {
   const chart = state.mainChart;
   const si = datasetIndex + 1;
-  if (!chart || !chart.series[si]) return;
+  if (!chart || !chart.series[si] || chart.series[si].show === !!show) return;
   cancelFrameProbe();
-  chart.setSeries(si, { show: !!show });
+  // Flush visibility before a first data submission can inherit its empty scale.
+  chart.batch(() => chart.setSeries(si, { show: !!show }));
   renderLegend();
 }
 
@@ -1983,6 +2007,32 @@ export function applyChartTheme() {
   state.mainChart?.redraw();
   state.navigatorChart?.redraw();
   renderLegend();
+}
+
+/** Redraw a color-only edit while reusing cached series paths. @param {number} datasetIndex */
+export function applyChartChannelColor(datasetIndex) {
+  const field = FIELDS[datasetIndex];
+  if (!field) return;
+  const opacity = [
+    state.settings.opacityVoltage,
+    state.settings.opacityCurrent,
+    state.settings.opacityPower,
+    state.settings.opacityTemp,
+  ][datasetIndex];
+  fillStyles[datasetIndex + 1] = opacity > 0 ? hexToRgba(/** @type {any} */ (chartTheme)[field], opacity) : null;
+  state.mainChart?.redraw(false, false);
+  if (datasetIndex === 2) state.navigatorChart?.redraw(false, false);
+  renderLegend();
+}
+
+/** Update a live series width without recalculating scales or axes. @param {number} datasetIndex */
+export function setChartLineWidth(datasetIndex) {
+  const field = FIELDS[datasetIndex];
+  if (!field || datasetIndex > 3 || !state.mainChart) return;
+  const series = state.mainChart.series[datasetIndex + 1];
+  if (!series) return;
+  series.width = state.settings.chartLineWidths[field];
+  state.mainChart.redraw(true, false);
 }
 
 // ─── Scale ranges ────────────────────────────────────────────────────────────
@@ -2050,18 +2100,21 @@ function aggregateVisible(u, seriesIndexes) {
 }
 
 /**
- * 0 基线 + 顶部余量；出现负值时（有符号电流）底部按同比例外扩。
+ * Use a tighter scale for steady nonzero signals so real ripple is visible.
+ * A minimum span limits amplification of the least significant ADC digits.
  * @param {number} min @param {number} max @param {number} h
  * @returns {[number, number]}
  */
 function paddedZeroBased(min, max, h) {
+  const span = max - min;
+  if (min > 0 && span > 0 && span <= max * 0.08) {
+    const padding = Math.max(span * Math.max(0.18, h), max * 0.005 - span / 2);
+    return [Math.max(0, min - padding), max + padding];
+  }
   const lo = min < 0 ? min * (1 + h) : 0;
   const hi = max > 0 ? max * (1 + h) : min < 0 ? 0 : 1;
   return lo < hi ? [lo, hi] : [lo - 0.5, hi + 0.5];
 }
-
-/** 挂在纵轴上的全部 scale（网格 / 等分对齐的作用域）。 */
-const Y_SCALES = ['voltage', 'current', 'power', 'temp'];
 
 /**
  * 全部 Y 轴共用的等分格数。
@@ -2129,14 +2182,15 @@ function quantizeRange(lo, hi, divisions) {
 }
 
 /**
- * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，0 起点 + 可配置余量，
+ * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，可配置余量，
  * 最后量化到全局等分格（与其余 Y 轴共线）。
  * 注意：量程完全来自模块内的 seriesMax/seriesMin 增量跟踪，因此各 series 均设置
  * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
+ * @param {keyof import('./state.js').Settings['chartCurveShift']} channel
  * @param {number[]} seriesIndexes - 挂靠在该 scale 上的 series 下标
  * @param {boolean} [symmetric=false] - 温度轴：对称余量，保留负值
  */
-function mkYRange(seriesIndexes, symmetric = false) {
+function mkYRange(channel, seriesIndexes, symmetric = false) {
   return /** @type {any} */ (
     /** @param {any} u */
     (u) => {
@@ -2156,7 +2210,16 @@ function mkYRange(seriesIndexes, symmetric = false) {
       } else {
         [lo, hi] = paddedZeroBased(agg.min, agg.max, h);
       }
-      return quantizeRange(lo, hi, divisions);
+      const [min, max] = quantizeRange(lo, hi, divisions);
+      // Translate both bounds equally to keep every fluctuation at its original
+      // height. Limit the translation to the existing room around the data.
+      const offset = (state.settings.chartCurveShift?.[channel] ?? 0) / 100;
+      const shift = Math.min(
+        channel === 'current' ? min : Infinity,
+        max - agg.max,
+        Math.max(min - agg.min, offset * (max - min)),
+      );
+      return [min - shift, max - shift];
     }
   );
 }
@@ -2178,8 +2241,7 @@ function smartTick(value) {
 
 /**
  * 生成与其余 Y 轴共线的等分刻度（配合 quantizeRange 量化后的整齐量程使用）。
- * 用 min + (max-min)·i/N 而非逐格累加步长：与 drawMinorGrid 的几何算式同源，
- * 浮点结果逐位一致，刻度线与网格线不会差半个像素。
+ * 用 min + (max-min)·i/N，避免逐格累加造成跨轴刻度错位。
  * @param {any} u @param {string} scaleKey
  * @returns {number[]}
  */
@@ -2255,77 +2317,6 @@ function mkYAxis(scaleKey, label, color, side) {
     // 关掉 uPlot 朝数字伸出的横刻度：右侧会像负号。竖脊 + 朝图内的短刻度由 drawYAxisChrome 画
     ticks: { show: false },
   };
-}
-
-// ─── Minor grid ──────────────────────────────────────────────────────────────
-
-/** 是否至少有一条 Y 轴在显示（挂靠曲线全部隐藏时该 scale 的 min 为 null）。 */
-function hasVisibleYScale(/** @type {any} */ u) {
-  return Y_SCALES.some((key) => u.scales?.[key]?.min != null);
-}
-
-/**
- * 在主刻度之间画次网格：每个主格均分成 5 格（4 条次线）。
- *
- * 纵向次线取自 X 轴实际刻度（时间步长非等距，只能读 _splits）；
- * 横向次线按几何等分推出——全部 Y 轴共用 yDivisions 等分，次线与任一条轴的刻度
- * 都对齐，因此不依赖某条具体的轴，隐藏电压曲线后横向次网格依然在位。
- * @param {any} u
- */
-function drawMinorGrid(u) {
-  const { ctx, bbox } = u;
-  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
-
-  const left = bbox.left;
-  const right = bbox.left + bbox.width;
-  const top = bbox.top;
-  const bottom = bbox.top + bbox.height;
-  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  // 主刻度间距低于此值时不再插次线，避免窄图上重新糊成一片（设备像素）
-  const minGapPx = 36 * pxRatio;
-  const minorCells = 5;
-
-  ctx.save();
-  ctx.lineWidth = pxRatio;
-  ctx.strokeStyle = chartTheme.gridMinor;
-  // 与 uPlot 画网格线同款的清晰化手法：奇数线宽整体平移半像素
-  const offset = (ctx.lineWidth % 2) / 2;
-  ctx.translate(offset, offset);
-  ctx.beginPath();
-
-  // ── 纵向次线（X 轴主刻度之间） ──
-  const xSplits = u.axes?.[0]?._splits;
-  if (Array.isArray(xSplits) && xSplits.length >= 2) {
-    for (let i = 0; i < xSplits.length - 1; i++) {
-      const a = u.valToPos(xSplits[i], 'x', true);
-      const b = u.valToPos(xSplits[i + 1], 'x', true);
-      if (Math.abs(b - a) < minGapPx) continue;
-      for (let k = 1; k < minorCells; k++) {
-        const x = Math.round(a + ((b - a) * k) / minorCells);
-        if (x >= left && x <= right) {
-          ctx.moveTo(x, top);
-          ctx.lineTo(x, bottom);
-        }
-      }
-    }
-  }
-
-  // ── 横向次线（Y 轴等分格之间） ──
-  const divisions = appliedYDivisions || yDivisions(u);
-  if (bbox.height / divisions >= minGapPx && hasVisibleYScale(u)) {
-    for (let i = 0; i < divisions; i++) {
-      for (let k = 1; k < minorCells; k++) {
-        const y = Math.round(top + (bbox.height * (i + k / minorCells)) / divisions);
-        if (y >= top && y <= bottom) {
-          ctx.moveTo(left, y);
-          ctx.lineTo(right, y);
-        }
-      }
-    }
-  }
-
-  ctx.stroke();
-  ctx.restore();
 }
 
 /**
@@ -2631,7 +2622,7 @@ function realIndexFromCursor(u, hoveredIdx) {
 function cursorPointBox(u, seriesIdx) {
   const index = realIndexFromCursor(u, u.cursor.idx);
   const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[seriesIdx - 1]);
-  const value = index == null ? Number.NaN : state.chartSeries[field].valueAt(index);
+  const value = index == null ? Number.NaN : displayValueAt(field, index);
   if (index == null || !Number.isFinite(value)) return { left: -100, top: -100, width: 0, height: 0 };
   return {
     left: u.valToPos(state.chartSeries.x.valueAt(index), 'x') - 4,
@@ -2641,13 +2632,19 @@ function cursorPointBox(u, seriesIdx) {
   };
 }
 
+/** @param {string} field @param {number} index */
+function displayValueAt(field, index) {
+  const columns = state.chartSeries;
+  return field === 'current' ? currentAt(columns, index) : columns[field]?.valueAt(index);
+}
+
 function cursorDataIdx(u, seriesIdx, hoveredIdx) {
   if (hoveredIdx == null) return null;
   const realIdx = realIndexFromCursor(u, hoveredIdx);
   if (realIdx == null) return null;
   if (seriesIdx === 0) return hoveredIdx;
   const field = FIELDS[seriesIdx - 1];
-  const y = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.valueAt(realIdx);
+  const y = displayValueAt(field, realIdx);
   return Number.isFinite(y) ? hoveredIdx : null;
 }
 
@@ -2721,7 +2718,7 @@ function tooltipPlugin() {
       for (let i = 0; i < rows.length; i++) {
         const { row, swatch, text } = rows[i];
         const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[i]);
-        const value = state.chartSeries[field]?.valueAt(realIdx);
+        const value = displayValueAt(field, realIdx);
         const show = !!(mask & (1 << i)) && Number.isFinite(value);
         const display = show ? '' : 'none';
         if (row.style.display !== display) row.style.display = display;
@@ -2831,7 +2828,7 @@ function tooltipPlugin() {
 
 /** @type {(() => void)|undefined} */
 let stopWheelZoom;
-const WHEEL_ZOOM_MS = 150;
+const WHEEL_ZOOM_MS = 90;
 
 /** Animate the actual viewport so the axes, curves and hit testing stay in sync. @param {any} u */
 function bindChartWheel(u) {
@@ -2841,9 +2838,12 @@ function bindChartWheel(u) {
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   /** @type {{fromMin: number, fromMax: number, min: number, max: number, initialDataMax: number, startedAt: number}|null} */
   let zoom = null;
+  /** @type {DOMRect|null} */
+  let wheelBounds = null;
   stopWheelZoom = () => {
     if (!zoom) return;
     zoom = null;
+    wheelBounds = null;
     displayFrames.cancel('chart-wheel');
     setRangeDragging(false, true);
   };
@@ -2863,12 +2863,13 @@ function bindChartWheel(u) {
       if (min > state.chartSeries.x.at(0)) min += latest - max;
       max = latest;
     }
+    const { fromMin, fromMax } = zoom;
+    if (finished) stopWheelZoom?.();
     state.__applyChartXWindow?.(
-      finished ? min : zoom.fromMin + (min - zoom.fromMin) * eased,
-      finished ? max : zoom.fromMax + (max - zoom.fromMax) * eased,
+      finished ? min : fromMin + (min - fromMin) * eased,
+      finished ? max : fromMax + (max - fromMax) * eased,
       finished,
     );
-    if (finished) stopWheelZoom?.();
     updateCharts('interaction', { force: false, reason: finished ? 'release' : 'interaction' });
     if (!finished) displayFrames.schedule('chart-wheel', drawZoomFrame, 1);
   }
@@ -2885,7 +2886,8 @@ function bindChartWheel(u) {
       const min = zoom?.min ?? fromMin;
       const max = zoom?.max ?? fromMax;
       const dataMax = xs.at(-1);
-      const rect = over.getBoundingClientRect();
+      const rect = zoom && wheelBounds ? wheelBounds : over.getBoundingClientRect();
+      if (!rect.width) return;
       const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
       const next = zoomTimeWindow({
         min,
@@ -2897,6 +2899,7 @@ function bindChartWheel(u) {
         minSpan: minZoomSpan(state.settings.sampleRate),
       });
       if (next.min === min && next.max === max) return;
+      wheelBounds = rect;
       zoom = { fromMin, fromMax, ...next, initialDataMax: dataMax, startedAt: performance.now() };
       setRangeDragging(true, true);
       displayFrames.schedule('chart-wheel', drawZoomFrame, 1);
@@ -3014,10 +3017,10 @@ export function initChart() {
     },
     scales: {
       x: { time: false, range: /** @type {any} */ (xRange) },
-      voltage: { range: mkYRange(VOLTAGE_SCALE_SERIES) },
-      current: { range: mkYRange([2]) },
-      power: { range: mkYRange([3]) },
-      temp: { range: mkYRange([4], true) },
+      voltage: { range: mkYRange('voltage', VOLTAGE_SCALE_SERIES) },
+      current: { range: mkYRange('current', [2]) },
+      power: { range: mkYRange('power', [3]) },
+      temp: { range: mkYRange('temp', [4], true) },
     },
     series: [
       {},
@@ -3027,7 +3030,7 @@ export function initChart() {
         auto: false,
         stroke: () => /** @type {any} */ (chartTheme)[field],
         // D+/D-/CC 叠加曲线更细，避免与主通道曲线抢焦点
-        width: i >= 4 ? 1 : 1.5,
+        width: i >= 4 ? 1 : (s.chartLineWidths[field] ?? 1.5),
         points: { show: false },
         ...(hasPaths ? { paths: adaptivePaths } : {}),
         // Every render path uses the same user-controlled shading switch.
@@ -3056,7 +3059,7 @@ export function initChart() {
       mkYAxis('temp', chartAxisTitle('temperature', '°C'), () => chartTheme.tempAxis, 1),
     ],
     hooks: {
-      drawAxes: [drawMinorGrid, drawYAxisChrome, drawYAxisLabels],
+      drawAxes: [drawYAxisChrome, drawYAxisLabels],
       drawSeries: [drawBucketFill, drawBucketRaster],
       draw: [drawMarkers],
       setSize: [syncDivisionsAfterResize],

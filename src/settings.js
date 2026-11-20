@@ -8,7 +8,14 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { applyChartTheme, refreshChartScales, setChartFillEnabled, setSeriesFill, setSeriesVisible } from './chart.js';
+import {
+  applyChartTheme,
+  refreshChartScales,
+  setChartFillEnabled,
+  setChartLineWidth,
+  setSeriesFill,
+  setSeriesVisible,
+} from './chart.js';
 import {
   refreshRecordLimitUI,
   updateEnergyDisplay,
@@ -62,6 +69,33 @@ function normalizeSettings(saved) {
       return typeof value === 'string' && /^#[\da-f]{6}$/i.test(value) ? [[key, value]] : [];
     }),
   );
+  const savedLineWidths =
+    source.chartLineWidths && typeof source.chartLineWidths === 'object' ? source.chartLineWidths : {};
+  const legacyOffset = /** @type {{chartCurveOffset?: Partial<import('./state.js').Settings['chartCurveShift']>}} */ (
+    source
+  ).chartCurveOffset;
+  // Upgrade the previous default preset. Keep custom offsets when migrating.
+  const legacyDefault =
+    legacyOffset?.voltage === 0 &&
+    legacyOffset?.current === 0 &&
+    legacyOffset?.power === -18 &&
+    legacyOffset?.temp === 0;
+  const savedCurveShift = source.chartCurveShift ?? (legacyDefault ? undefined : legacyOffset);
+  /** @param {Record<string, unknown>} saved @param {Record<string, number>} fallback @param {number} min @param {number} max */
+  const normalizeChannelNumbers = (saved, fallback, min, max) =>
+    /** @type {import('./state.js').Settings['chartLineWidths']} */ (
+      Object.fromEntries(
+        ['voltage', 'current', 'power', 'temp'].map((key) => {
+          const value = saved[key];
+          return [
+            key,
+            typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback[key],
+          ];
+        }),
+      )
+    );
+  merged.chartLineWidths = normalizeChannelNumbers(savedLineWidths, defaultSettings.chartLineWidths, 0.5, 6);
+  merged.chartCurveShift = normalizeChannelNumbers(savedCurveShift ?? {}, defaultSettings.chartCurveShift, -35, 35);
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
   merged.videoExport = normalizeVideoExportOptions(source.videoExport);
@@ -108,6 +142,8 @@ function normalizeSettings(saved) {
   delete legacyMerged.windowStyle;
   delete legacyMerged.windowMaterial;
   delete legacyMerged.windowMaterialUnfocused;
+  delete legacyMerged.chartAxisSpacing;
+  delete legacyMerged.chartCurveOffset;
   merged.realtimePanelWidth = Math.round(
     clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
   );
@@ -205,6 +241,13 @@ function echoSettingsUI() {
   setOp('opacity-current', state.settings.opacityCurrent);
   setOp('opacity-power', state.settings.opacityPower);
   setOp('opacity-temp', state.settings.opacityTemp);
+
+  for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
+    const width = /** @type {HTMLInputElement|null} */ (document.getElementById(`line-width-${key}`));
+    if (width) width.value = String(state.settings.chartLineWidths[key]);
+    const offset = /** @type {HTMLInputElement|null} */ (document.getElementById(`curve-offset-${key}`));
+    if (offset) offset.value = String(state.settings.chartCurveShift[key]);
+  }
 
   const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
   if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
@@ -443,7 +486,12 @@ export function debouncedSaveSettings(delay = 500) {
  */
 export async function resetSettings() {
   try {
-    state.settings = { ...defaultSettings, channelColors: {} };
+    state.settings = {
+      ...defaultSettings,
+      channelColors: {},
+      chartLineWidths: { ...defaultSettings.chartLineWidths },
+      chartCurveShift: { ...defaultSettings.chartCurveShift },
+    };
     state.autoPauseSettings = { ...defaultAutoPauseSettings, triggerStartTime: null };
     await applyLanguage(state.settings.language);
 
@@ -476,6 +524,7 @@ export async function resetSettings() {
     setSeriesFill(1, state.settings.opacityCurrent);
     setSeriesFill(2, state.settings.opacityPower);
     setSeriesFill(3, state.settings.opacityTemp);
+    for (let index = 0; index < 4; index++) setChartLineWidth(index);
     refreshChartScales();
 
     updateStatsDisplay();

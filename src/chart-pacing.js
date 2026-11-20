@@ -12,7 +12,7 @@ export function liveChartIntervalMs(workMs, dense = false, nextFrameDelayMs = 0,
   const raster = dense && Number.isFinite(nextFrameDelayMs) ? Math.max(0, nextFrameDelayMs - frameBudget) : 0;
   const work = cpu + raster;
   if (work <= Math.min(8, frameBudget / 2)) return 0;
-  return Math.min(100, Math.max(20, work * 3));
+  return Math.min(100, Math.max(20, work * 2));
 }
 
 /** Display-only feedback; acquisition and the stored samples never use this policy. */

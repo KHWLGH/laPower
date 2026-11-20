@@ -35,7 +35,6 @@ const TOKEN_MAP = /** @type {const} */ ({
   energy: '--ch-energy',
   axisText: '--chart-axis-text',
   grid: '--chart-grid',
-  gridMinor: '--chart-grid-minor',
   marker: '--chart-marker',
   markerBg: '--chart-marker-bg',
 });
@@ -54,7 +53,6 @@ const FALLBACK = {
   energy: '#d161c4',
   axisText: '#adadad',
   grid: '#666666',
-  gridMinor: '#3d3d3d',
   marker: '#d6d6d6',
   markerBg: '#333333',
 };
@@ -96,6 +94,17 @@ export function refreshTheme() {
       root.style?.setProperty?.('--ch-temp-axis', custom);
       chartTheme.tempAxis = custom;
     }
+  }
+}
+
+/** Apply one user-picked channel color without rereading every computed theme token. */
+export function setChannelColor(key, color) {
+  if (!CHANNEL_COLOR_KEYS.includes(key) || !isHexColor(color)) return;
+  chartTheme[key] = color;
+  document.documentElement.style.setProperty(TOKEN_MAP[key], color);
+  if (key === 'temp') {
+    chartTheme.tempAxis = color;
+    document.documentElement.style.setProperty('--ch-temp-axis', color);
   }
 }
 

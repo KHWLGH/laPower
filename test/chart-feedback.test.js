@@ -88,6 +88,7 @@ function seed(recording = true, count = 5000, interval = 1) {
     if (key === 'x') for (let i = 0; i < count; i++) values[i] = (i * interval) / 1000;
     else if (key === 'voltage') for (let i = 0; i < count; i++) values[i] = i % 2;
     else if (key === 'sampleIntervals') values.fill(interval);
+    else if (key === 'currentMagnitudes') values.fill(NaN);
     else values.fill(1);
     col.set(values);
   }

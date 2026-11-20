@@ -76,7 +76,7 @@ test('hidden, sparse, invalid and interrupted feedback never establish recovery'
 test('live charts follow the display cadence while work fits and back off under raster pressure', () => {
   assert.equal(liveChartIntervalMs(0.4, true, 16, 16), 0);
   assert.equal(liveChartIntervalMs(0.4, true, 85, 16), 100);
-  assert.equal(liveChartIntervalMs(12, true, 16, 16), 36);
+  assert.equal(liveChartIntervalMs(12, true, 16, 16), 24);
   assert.equal(liveChartIntervalMs(0.4), 0);
   assert.equal(liveChartIntervalMs(NaN, true), 0);
   assert.equal(liveChartIntervalMs(0.4, true, 8, 8), 0);

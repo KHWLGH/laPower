@@ -89,6 +89,7 @@ function seed({ powerPeak = false } = {}) {
   state.isRecording = false;
   const cs = state.chartSeries;
   for (const col of [cs.x, cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2]) col.length = 0;
+  cs.currentMagnitudes.length = 0;
   for (let i = 0; i < SAMPLES; i++) {
     cs.x.push(i * 0.02);
     cs.voltage.push(5 + Math.sin(i / 97) * 0.4);
@@ -199,6 +200,36 @@ test('sparse windows bind only visible raw samples and neighbours in both states
   assert.deepEqual(whileDragging, u.data);
 });
 
+test('raw and indexed chart windows keep current magnitude spikes without changing the signed source', async () => {
+  seed();
+  const cs = state.chartSeries;
+  const start = 16_000;
+  const spike = start + 96;
+  cs.current.setAt(spike, -12);
+  const u = stubChart();
+  state.mainChart = u;
+  chart.syncChartSeries();
+
+  await commit(windowOf(start, start + 199));
+  assert.equal(u.data[2][spike - start + 1], 12);
+  let plottedCurrent;
+  const flatten = SeriesBuckets.prototype.flatten;
+  SeriesBuckets.prototype.flatten = function () {
+    const result = flatten.call(this);
+    if (result.channels.length === 8) plottedCurrent = result.channels[1];
+    return result;
+  };
+  try {
+    await commit(windowOf(0, SAMPLES - 1));
+    assert.ok(plottedCurrent);
+    assert.equal(plottedCurrent.y[plottedCurrent.indices.indexOf(spike)], 12);
+    assert.ok(plottedCurrent.y.every((value) => !Number.isFinite(value) || value >= 0));
+  } finally {
+    SeriesBuckets.prototype.flatten = flatten;
+  }
+  assert.equal(cs.current.valueAt(spike), -12);
+});
+
 test('review detail tracks the actual canvas resolution and matches a short recording of the same window', async () => {
   const savedRatio = globalThis.devicePixelRatio;
   try {
@@ -253,6 +284,28 @@ function appendSample({ voltage = 5, current = 2, power = 10 } = {}) {
     cs[field].push(value);
   }
 }
+
+test('range preview defers navigator submission until release', async () => {
+  seed();
+  const u = stubChart();
+  const nav = stubChart();
+  state.mainChart = u;
+  state.navigatorChart = nav;
+  const full = windowOf(0, SAMPLES - 1);
+  await commit(full);
+  const navSubmissions = nav.submissions;
+
+  chart.setRangeDragging(true);
+  appendSample();
+  await dragFrame(u, full);
+  assert.equal(nav.submissions, navSubmissions, 'drag paints update only the main chart');
+
+  chart.setRangeDragging(false);
+  chart.updateCharts('interaction', { force: false, reason: 'release' });
+  await settle();
+  assert.equal(nav.submissions, navSubmissions + 1, 'release commits the latest full-history overview');
+  assert.equal(nav.data[0].at(-1), state.chartSeries.x.at(-1));
+});
 
 for (const [label, start, end] of [
   ['dense', 40_000, 90_000],
@@ -472,7 +525,9 @@ test('no second bucket set hides behind the drag preview', async () => {
 test('applyData does not branch on the interaction state when binding', async () => {
   const apply = bodyOf('applyData');
   assert.doesNotMatch(apply, /if \(preview/, 'preview 不得决定主图绑哪批条带');
-  assert.equal(apply.match(/\bpreview\b/g)?.length, 2, 'preview 只应出现在声明与导航图 live 判断两处');
+  assert.match(apply, /if \(!preview && \(dataChanged \|\| appliedNavGen/);
+  assert.match(apply, /const due = !live \|\| now - lastNavPaint >= NAV_PAINT_MIN_MS/);
+  assert.doesNotMatch(apply, /appliedNavGen !== dataGen;\s*\n\s*const due/);
 });
 
 test('the extrema index is a speed selector with a single build entry', async () => {

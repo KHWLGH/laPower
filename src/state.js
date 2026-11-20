@@ -57,6 +57,8 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {number}  opacityPower
  * @property {number}  opacityTemp
  * @property {Partial<Record<'voltage'|'current'|'power'|'temp', string>>} channelColors
+ * @property {Record<'voltage'|'current'|'power'|'temp', number>} chartLineWidths
+ * @property {Record<'voltage'|'current'|'power'|'temp', number>} chartCurveShift
  * @property {boolean} statsRange
  * @property {string}  tempIp
  * @property {number}  tempPort
@@ -366,6 +368,8 @@ export const defaultSettings = {
   opacityPower: 15,
   opacityTemp: 15,
   channelColors: {},
+  chartLineWidths: { voltage: 1.5, current: 1.5, power: 1.5, temp: 1.5 },
+  chartCurveShift: { voltage: 0, current: 0, power: 18, temp: 0 },
   statsRange: false,
   tempIp: '127.0.0.1',
   tempPort: 1573,
