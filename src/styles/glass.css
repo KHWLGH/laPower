@@ -1,11 +1,10 @@
 /*
  * laPower glass skin, inspired by the AstrBot 弥亚开发工具箱 settings page.
- * Wallpaper source and license: assets/wallpapers/NOTICE.txt.
  */
 :root {
-  --wallpaper: url("../assets/wallpapers/background-luminous.png");
-  --wallpaper-base: #171b34;
-  --wallpaper-tint: rgba(12, 14, 35, 0.45);
+  --wallpaper: url("../assets/wallpapers/background-shark.jpg");
+  --wallpaper-base: #fdfdfb;
+  --wallpaper-tint: rgba(12, 14, 35, 0.72);
   --glass-chrome: rgba(24, 28, 53, 0.67);
   --glass-panel: rgba(18, 23, 44, 0.71);
   --glass-plot: rgba(16, 22, 39, 0.86);
@@ -18,9 +17,7 @@
 }
 
 :root[data-theme="light"] {
-  --wallpaper: url("../assets/wallpapers/background-sky.jpg");
-  --wallpaper-base: #e0ebf6;
-  --wallpaper-tint: rgba(232, 242, 252, 0.3);
+  --wallpaper-tint: rgba(232, 242, 252, 0.68);
   --glass-chrome: rgba(244, 249, 255, 0.72);
   --glass-panel: rgba(249, 252, 255, 0.73);
   --glass-plot: rgba(252, 254, 255, 0.89);
@@ -31,16 +28,12 @@
   --glass-shadow: 0 4px 16px rgba(37, 67, 113, 0.14);
 }
 
-/* Use the reference's coral wallpaper for the active trigger workspace. */
-:root:has(#view-trigger:not([hidden])) {
-  --wallpaper: url("../assets/wallpapers/background-coral.png");
-}
-
 .app-shell {
   background-color: var(--wallpaper-base);
   background-image: linear-gradient(var(--wallpaper-tint), var(--wallpaper-tint)), var(--wallpaper);
   background-position: center;
-  background-size: cover;
+  background-repeat: no-repeat;
+  background-size: cover, contain;
 }
 
 .app-shell::before {

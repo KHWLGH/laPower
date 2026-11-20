@@ -84,12 +84,6 @@ const meterPeak = {
   current: 0,
   power: 0,
   temp: 0,
-  energy: 0,
-  capacity: 0,
-  dp: 0,
-  dn: 0,
-  cc1: 0,
-  cc2: 0,
 };
 
 /** 监控视图隐藏期间只积累数据，恢复时从最新状态一次性补齐显示。 */
@@ -135,18 +129,7 @@ function setMeter(id, channel, value, axis) {
 
 function resetMeters() {
   for (const key of Object.keys(meterPeak)) meterPeak[key] = 0;
-  for (const id of [
-    'lv-voltage',
-    'lv-current',
-    'lv-power',
-    'lv-temp',
-    'lv-energy',
-    'lv-capacity',
-    'lv-dp',
-    'lv-dn',
-    'lv-cc1',
-    'lv-cc2',
-  ]) {
+  for (const id of ['lv-voltage', 'lv-current', 'lv-power', 'lv-temp']) {
     const el = document.getElementById(id);
     setTransformIfChanged(el, 'scaleX(0)');
   }
@@ -297,9 +280,6 @@ export function addDataPoint(data, segment) {
   trackMeterPeak('current', currentValue);
   trackMeterPeak('power', powerAbs);
   trackMeterPeak('temp', tempValue);
-  for (const channel of /** @type {const} */ (['dp', 'dn', 'cc1', 'cc2'])) {
-    trackMeterPeak(channel, /** @type {number} */ (data[channel]));
-  }
 
   // Live preview coalesces too; native segment gating is independent of arrival-time UI state.
   if (!record) {
@@ -380,8 +360,6 @@ export function addDataPoint(data, segment) {
   }
   if (segment) segment.lastX = relSeconds;
   state.energy.lastX = state.isRecording ? relSeconds : null;
-  trackMeterPeak('energy', state.energy.wh);
-  trackMeterPeak('capacity', state.energy.mah);
 
   scheduleStatsUpdate();
 
@@ -699,10 +677,6 @@ export function updateRealtimeDisplay(data) {
   setSignal('rt-dn', data.dn);
   setSignal('rt-cc1', data.cc1);
   setSignal('rt-cc2', data.cc2);
-  setMeter('lv-dp', 'dp', Number.isFinite(data.dp) ? /** @type {number} */ (data.dp) : Number.NaN, 'x');
-  setMeter('lv-dn', 'dn', Number.isFinite(data.dn) ? /** @type {number} */ (data.dn) : Number.NaN, 'x');
-  setMeter('lv-cc1', 'cc1', Number.isFinite(data.cc1) ? /** @type {number} */ (data.cc1) : Number.NaN, 'x');
-  setMeter('lv-cc2', 'cc2', Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN, 'x');
 }
 
 /**
@@ -1016,10 +990,6 @@ function setRangeStatsPending(pending) {
       if (el && el.title !== '') el.title = '';
     }
   }
-  if (pending) {
-    setMeter('lv-energy', 'energy', Number.NaN, 'x');
-    setMeter('lv-capacity', 'capacity', Number.NaN, 'x');
-  }
 }
 
 /** @type {boolean|null} */
@@ -1130,15 +1100,9 @@ export function updateEnergyDisplay() {
   if (state.settings.statsRange && state.chartSeries.x.length > 0) {
     const range = getDisplayRangeStats();
     setRangeStatsPending(!range);
-    if (!range) {
-      setMeter('lv-energy', 'energy', Number.NaN, 'x');
-      setMeter('lv-capacity', 'capacity', Number.NaN, 'x');
-      return;
-    }
-    if (range) {
-      wh = range.wh;
-      mah = range.mah;
-    }
+    if (!range) return;
+    wh = range.wh;
+    mah = range.mah;
   } else {
     cancelRangeStatsJob();
     setRangeStatsPending(false);
@@ -1148,8 +1112,6 @@ export function updateEnergyDisplay() {
   const mahEl = document.getElementById('rt-capacity');
   setTextIfChanged(whEl, wh.toFixed(4));
   setTextIfChanged(mahEl, mah.toFixed(2));
-  setMeter('lv-energy', 'energy', wh, 'x');
-  setMeter('lv-capacity', 'capacity', mah, 'x');
 }
 
 // ─── Throttled stats refresh ─────────────────────────────────────────────────

@@ -478,7 +478,6 @@ input[type="number"]::-webkit-outer-spin-button {
   padding: 6px 10px 6px 8px;
   text-align: left;
   border: none;
-  border-bottom: 1px solid var(--stroke-divider);
   transition: background var(--dur-fast) var(--ease-standard);
   position: relative;
   overflow: hidden;
@@ -543,20 +542,6 @@ input[type="number"]::-webkit-outer-spin-button {
   border-radius: inherit;
 }
 
-.level-bar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent calc(25% - 1px),
-    color-mix(in srgb, var(--stroke-control) 55%, transparent) calc(25% - 1px),
-    color-mix(in srgb, var(--stroke-control) 55%, transparent) 25%
-  );
-}
-
 .level-bar-fill {
   position: absolute;
   inset: 0;
@@ -597,40 +582,6 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .realtime-card.temperature .realtime-dot {
   background: var(--ch-temp);
-}
-
-.mini-bar {
-  display: block;
-  height: 3px;
-  margin-top: 4px;
-  border-radius: 2px;
-  background: var(--fill-recess);
-  overflow: hidden;
-}
-
-.mini-bar-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform var(--dur-fast) var(--ease-standard);
-}
-
-.mini-bar-fill.energy {
-  background: var(--ch-energy);
-}
-.mini-bar-fill.dp {
-  background: var(--ch-dp);
-}
-.mini-bar-fill.dn {
-  background: var(--ch-dn);
-}
-.mini-bar-fill.cc1 {
-  background: var(--ch-cc1);
-}
-.mini-bar-fill.cc2 {
-  background: var(--ch-cc2);
 }
 
 .realtime-card:hover {
@@ -722,7 +673,6 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text-primary);
   margin-top: 2px;
   padding-top: 3px;
-  border-top: 1px solid var(--stroke-divider);
 }
 
 .realtime-stats > span {
@@ -819,10 +769,6 @@ input[type="number"]::-webkit-outer-spin-button {
   line-height: 1.25;
   letter-spacing: 0.25px;
   min-width: 0;
-}
-
-.signal-cell .mini-bar {
-  grid-column: 1 / -1;
 }
 
 .signal-name {

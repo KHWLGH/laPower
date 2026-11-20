@@ -1,4 +1,0 @@
-The three wallpapers in this directory are from the AstrBot 弥亚开发工具箱 settings UI.
-Copyright (C) 2026 伊尔弥亚 (irmia2026).
-Source: https://github.com/irmia2026/irmia_devkit_open/tree/062082065b1e2260c92aad2599f046605f0ffbc0/pages/settings
-The images are redistributed under the source repository's GNU AGPL v3 license (see LICENSE.txt).
