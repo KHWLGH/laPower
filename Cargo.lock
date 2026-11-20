@@ -2506,7 +2506,7 @@ name = "lapower"
 version = "0.2.8"
 dependencies = [
  "ab_glyph",
- "base64",
+ "base64 0.22.1",
  "criterion",
  "fontdb",
  "fs2",
