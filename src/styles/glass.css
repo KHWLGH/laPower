@@ -1,6 +1,7 @@
 /* laPower 磨砂玻璃外观，参考 AstrBot 弥亚开发工具箱。 */
 :root {
   --wallpaper: url("../assets/wallpapers/background-shark.jpg");
+  --wallpaper-size: contain;
   --wallpaper-base: #fdfdfb;
   --wallpaper-tint: rgba(26, 37, 63, 0.66);
   --wallpaper-frame: #646b7e;
@@ -56,7 +57,7 @@
   background-image: linear-gradient(var(--wallpaper-tint), var(--wallpaper-tint)), var(--wallpaper);
   background-position: center;
   background-repeat: no-repeat;
-  background-size: cover, contain;
+  background-size: cover, var(--wallpaper-size, contain);
   filter: blur(14px);
   clip-path: inset(0);
 }
@@ -75,14 +76,24 @@
 
 .titlebar,
 .commandbar,
-.statusbar,
 .pd-table-head {
   background: var(--glass-sheen), var(--glass-chrome);
   border-color: var(--glass-edge);
   box-shadow: var(--glass-rim);
 }
 
-.realtime-panel,
+.monitor-commandbar {
+  box-shadow: inset 0 1px var(--glass-reflection);
+}
+
+.chart-area {
+  gap: 0;
+  background: var(--glass-sheen), var(--glass-plot);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+
 .timeline-container,
 .settings-group,
 .settings-nav,
@@ -93,7 +104,6 @@
   box-shadow: var(--glass-rim), var(--glass-shadow);
 }
 
-.realtime-panel,
 .timeline-container,
 .chart-container,
 .settings-group,
@@ -108,9 +118,21 @@
 }
 
 .chart-container {
-  background: var(--glass-sheen), var(--glass-plot);
-  border-color: var(--glass-edge);
-  box-shadow: var(--glass-rim), var(--glass-shadow);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.timeline-container {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.timeline-track {
+  background: var(--glass-control);
 }
 
 .flyout-panel,
@@ -132,7 +154,6 @@
 .btn:not(.btn-accent, .btn-danger),
 .ribbon-select,
 .ribbon-input:not([readonly]),
-.status-metrics,
 .seg,
 .toggle-track {
   background-color: var(--glass-control);
@@ -209,8 +230,18 @@
     scale: 0.965;
   }
 
-  .view:not([hidden]) {
+  .view[data-view-enter]:not([hidden]) {
     animation: glass-view-in 210ms var(--glass-ease);
+  }
+
+  /* Keep the live canvas and its pointer coordinates stationary. */
+  .view[data-view-enter]:not([hidden]):not(#view-monitor),
+  #view-monitor[data-view-enter]:not([hidden]) > .monitor-commandbar {
+    animation: glass-workspace-in 210ms var(--glass-ease);
+  }
+
+  .trigger-panel:not([hidden]) {
+    animation: glass-workspace-in 160ms var(--glass-ease);
   }
 
   .fluent-dialog[open],
@@ -224,6 +255,17 @@
     }
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes glass-workspace-in {
+    from {
+      opacity: 0.68;
+      translate: 0 7px;
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
     }
   }
 
@@ -275,10 +317,7 @@
 
   .titlebar,
   .commandbar,
-  .statusbar,
-  .realtime-panel,
-  .chart-container,
-  .timeline-container,
+  .chart-area,
   .pd-master,
   .pd-detail-pane,
   .trigger-controls,

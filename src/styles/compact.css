@@ -24,6 +24,26 @@
  * 边界取 .98px 小数，避免整数视口边界双触发；不用 range 语法，兼容旧 WebKitGTK。
  */
 
+/* Keep recording metrics between the control groups at the default window size. */
+@media (max-width: 1499.98px) {
+  .monitor-compact-action {
+    gap: 0;
+    padding-inline: 7px;
+    font-size: 0;
+  }
+}
+
+/* At higher zoom or in a narrow window, keep the full readout within the toolbar. */
+@media (max-width: 1199.98px) {
+  .monitor-commandbar {
+    grid-template-columns: auto 1fr;
+  }
+
+  .monitor-commandbar .status-metrics {
+    grid-area: 2 / 1 / 3 / -1;
+  }
+}
+
 /* ── W1：视口 < 1080，收紧间距 ───────────────────────────────── */
 
 @media (max-width: 1079.98px) {
@@ -104,16 +124,6 @@
   /* 复选框收为纯勾选框（三个均已带 title 说明） */
   .commandbar .ribbon-checkbox {
     font-size: 0;
-  }
-
-  .statusbar {
-    gap: 8px;
-  }
-
-  .status-metrics {
-    grid-template-columns: 74px 104px 88px 80px minmax(120px, 1fr);
-    gap: 6px;
-    padding-inline: 6px;
   }
 }
 

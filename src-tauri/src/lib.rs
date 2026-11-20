@@ -9,6 +9,7 @@ mod app_nap;
 mod locale;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
+mod custom_background;
 mod file_io;
 mod km003c_session;
 mod pd_capture;
@@ -1290,6 +1291,9 @@ pub fn run() {
             boot_timing::report_boot_timing,
             get_runtime_platform,
             get_system_locale,
+            custom_background::choose_custom_background,
+            custom_background::load_custom_background,
+            custom_background::clear_custom_background,
             titlebar::titlebar_double_click,
             connect_device_by_path,
             disconnect_device,

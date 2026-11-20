@@ -92,7 +92,7 @@ PD 补洞以连续消费游标推进，后台每页最多克隆 512 条并固定
 
 `drawClear` 到 `draw` 只反映 JS 绘制耗时，不能代表 Canvas 栅格化结束。诊断同时保留 `draw` 到下一次 rAF 的延迟，以及请求以来的实际帧间隔；显示策略只依据绘制及绘制后的压力。空闲基线取最近 32 个候选帧间隔的第 20 百分位，排除包含图表绘制的帧。录制中超过 `max(33 ms, 空闲帧间隔 × 2)` 两次降一档，单次超过 100 ms 降两档；稳定两秒后尝试恢复，每五秒最多恢复一次。回看不降密度。密集实时和静止回看最多观察三个后续 rAF，连续交互逐帧消费反馈。反馈仅用于显示密度和刷新节流，不改变阴影开关。
 
-绘图请求区分 `live`、`interaction` 和 `maintenance`。实际采样间隔为 1 ms 时，自动绘图在 50–100 ms 间调节；100 Hz 的健康绘图不因可见点数较多而设置固定刷新间隔。交互会打断待执行的实时限帧计时器，按 rAF 合并最新窗口；显示设置及反馈重绘同样绕过采样限帧。实际采样间隔读取记录尾部的 `sampleIntervals`，没有有效值时使用当前设置；这些策略不参与采样、保存、统计或积分。
+绘图请求区分 `live`、`interaction` 和 `maintenance`。实时主图在绘图工作量适合当前帧预算时按 rAF 合帧，负载较高时按准备、绘制及后续帧延迟调节刷新间隔。录制中的时间轴概览采用独立的刷新间隔。交互打断待执行的实时限帧计时器，滚轮缩放逐帧更新真实的 X 窗口与选区，系统开启减少动态效果时直接定位。采样、保存、统计和积分继续使用原始测量数据。
 
 `window.__WITRN_PERF__()` 的 `charts.main.last` 包含 `sourcePointCount`、`displayPointCount`、`pixelsPerBucket`、`displayDense`、`fillEnabled`、`fillSuppressed`、`fillSuppressionReason`、`recentAppendCount`、`refreshSource`、`refreshIntervalMs`、`drawMs`、`nextFrameDelayMs` 和 `frameDelayMs`。其中 `nextFrameDelayMs` 是第一次后续 rAF 的延迟，`frameDelayMs` 还包含请求以来的实际帧间隔；历史仍以 512 项为上限。`refreshIntervalMs` 为该请求的自动绘图间隔，交互与维护请求为 0。`fillEnabled` 表示用户阴影总开关；兼容字段 `fillSuppressed` 与 `fillSuppressionReason` 固定为 false 和 null。`recentAppendCount` 从上次主图提交计数，导入或预载历史不计作实时新批次。这些指标只参与显示调节，不影响采样、CSV、统计或能量积分。
 

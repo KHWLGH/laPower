@@ -42,6 +42,10 @@
           <button type="button" class="cmd-btn" id="btn-connect" title="Device event listeners are not ready" data-i18n-title="listenerNotReady" disabled>
             <i class="fi fi-plug" id="btn-connect-icon" aria-hidden="true"></i><span id="btn-connect-label"><span data-i18n="connect">Connect</span></span>
           </button>
+          <span class="status-item status-connection" role="status" title="Connection status" data-i18n-title="connectionState">
+            <span class="status-indicator" id="connection-status" aria-hidden="true"></span>
+            <span id="connection-text"><span data-i18n="disconnectedStatus">Disconnected</span></span>
+          </span>
         </div>
         <button type="button" class="tab tab-icon-only" id="btn-settings-tab" title="Settings" data-i18n-title="settings" aria-label="Settings" data-i18n-aria-label="settings">
           <i class="fi fi-settings" aria-hidden="true"></i>
@@ -52,64 +56,77 @@
       <div class="view-host">
         <!-- ── 监控工作区 ── -->
         <section class="view" id="view-monitor" role="tabpanel" aria-labelledby="tab-monitor">
-          <div class="commandbar">
-            <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
-              <i class="fi fi-record" aria-hidden="true"></i><span data-i18n="startRecording">Start recording</span>
-            </button>
-            <span class="cmd-sep"></span>
-            <span class="cmd-label"><span data-i18n="samplingRate">Sample rate</span></span>
-            <select id="sample-rate" class="ribbon-select" title="Choose how many samples to record per second" data-i18n-title="sampleRateHint">
-              <option value="1" hidden data-i18n="rate1000">1000 samples/s</option>
-              <option value="10" data-i18n="rate100">100 samples/s</option>
-              <option value="100" data-i18n="rate10">10 samples/s</option>
-              <option value="250" selected data-i18n="rate4">4 samples/s</option>
-              <option value="500" data-i18n="rate2">2 samples/s</option>
-              <option value="1000" data-i18n="rate1">1 sample/s</option>
-              <option value="5000" data-i18n="rate02">0.2 samples/s (1 every 5s)</option>
-              <option value="10000" data-i18n="rate01">0.1 samples/s (1 every 10s)</option>
-            </select>
-            <span class="cmd-sep"></span>
-            <div class="cmd-action-group split-button" id="export-actions"><button type="button" class="cmd-btn" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button><button type="button" class="cmd-btn cmd-btn-icon cmd-settings-btn" id="btn-export-options" aria-label="Export options" data-i18n-aria-label="exportOptions" title="Export options" data-i18n-title="exportOptions"><i class="fi fi-chevron-down" aria-hidden="true"></i></button></div>
-            <button type="button" class="cmd-btn" id="btn-export-video" title="Export report" data-i18n-title="videoExportTitle" disabled>
-              <i class="fi fi-report" aria-hidden="true"></i><span data-i18n="videoExport">Export report</span>
-            </button>
-            <button type="button" class="cmd-btn" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
-              <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
-            </button>
-            <button type="button" class="cmd-btn" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
-              <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="reset">Reset</span>
-            </button>
-            <span class="cmd-spacer"></span>
-            <button type="button" class="cmd-btn" id="btn-flyout-display" title="Display channel settings" data-i18n-title="displayChannels"><i class="fi fi-eye" aria-hidden="true"></i><span data-i18n="display">Display</span></button>
-            <div class="cmd-action-group split-button" id="auto-pause-actions">
-              <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
-                <i class="fi fi-pause" aria-hidden="true"></i>
-                <span><span data-i18n="autoPause">Auto pause</span></span>
+          <div class="commandbar monitor-commandbar">
+            <div class="monitor-command-group">
+              <button type="button" class="cmd-btn cmd-state-btn cmd-primary-btn" id="btn-record-toggle" disabled>
+                <i class="fi fi-record" aria-hidden="true"></i><span data-i18n="startRecording">Start recording</span>
               </button>
-              <button
-                type="button"
-                class="cmd-btn cmd-btn-icon cmd-settings-btn"
-                id="btn-flyout-autopause"
-                aria-label="Auto pause settings" data-i18n-aria-label="autoPauseSettings"
-                title="Auto pause settings" data-i18n-title="autoPauseSettings"
-              >
-                <i class="fi fi-chevron-down" aria-hidden="true"></i>
-              </button>
+              <span class="cmd-sep"></span>
+              <span class="cmd-label"><span data-i18n="samplingRate">Sample rate</span></span>
+              <select id="sample-rate" class="ribbon-select" title="Choose how many samples to record per second" data-i18n-title="sampleRateHint">
+                <option value="1" hidden data-i18n="rate1000">1000 samples/s</option>
+                <option value="10" data-i18n="rate100">100 samples/s</option>
+                <option value="100" data-i18n="rate10">10 samples/s</option>
+                <option value="250" selected data-i18n="rate4">4 samples/s</option>
+                <option value="500" data-i18n="rate2">2 samples/s</option>
+                <option value="1000" data-i18n="rate1">1 sample/s</option>
+                <option value="5000" data-i18n="rate02">0.2 samples/s (1 every 5s)</option>
+                <option value="10000" data-i18n="rate01">0.1 samples/s (1 every 10s)</option>
+              </select>
             </div>
-            <div class="cmd-action-group split-button" id="temperature-actions">
-              <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
-                <i class="fi fi-fire" aria-hidden="true"></i>
-                <span id="temp-toggle-label"><span data-i18n="temperatureService">Temperature service</span></span>
+            <div class="status-metrics" role="group" aria-label="Recording status" data-i18n-aria-label="statsRecording">
+              <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="Start or pause recording" data-i18n-title="toggleRecording">
+                <span class="status-label"><span data-i18n="statusRecording">Recording:</span></span><span id="record-status"><span data-i18n="stopRecording">Stopped</span></span>
+              </span>
+              <span class="status-item status-duration"><span class="status-label"><span data-i18n="statusDuration">Duration:</span></span><span id="record-duration">--</span></span>
+              <span class="status-item status-rate"><span class="status-label"><span data-i18n="statusSample">Sample:</span></span><span id="status-sample-rate"><span data-i18n="rate4">4 samples/s</span></span></span>
+              <span class="status-item status-count"><span class="status-label"><span data-i18n="statusPoints">Points:</span></span><span id="data-count">0</span></span>
+              <span class="status-item status-remaining" id="status-remaining" title="Remaining recording capacity" data-i18n-title="remainingCapacity">
+                <span class="status-label"><span data-i18n="remainingLabel">Remaining:</span></span><span id="record-remaining">--</span>
+              </span>
+            </div>
+            <div class="monitor-command-group monitor-command-actions">
+              <div class="cmd-action-group split-button" id="export-actions"><button type="button" class="cmd-btn monitor-compact-action" id="btn-export" title="Export CSV" data-i18n-title="exportCsv"><i class="fi fi-export" aria-hidden="true"></i><span data-i18n="exportCsv">Export CSV</span></button><button type="button" class="cmd-btn cmd-btn-icon cmd-settings-btn" id="btn-export-options" aria-label="Export options" data-i18n-aria-label="exportOptions" title="Export options" data-i18n-title="exportOptions"><i class="fi fi-chevron-down" aria-hidden="true"></i></button></div>
+              <button type="button" class="cmd-btn monitor-compact-action" id="btn-export-video" title="Export report" data-i18n-title="videoExportTitle" disabled>
+                <i class="fi fi-report" aria-hidden="true"></i><span data-i18n="videoExport">Export report</span>
               </button>
-              <button
-                type="button"
-                class="cmd-btn cmd-btn-icon cmd-settings-btn"
-                id="btn-flyout-temp"
-                aria-label="Temperature service settings" data-i18n-aria-label="temperatureSettings"
-                title="Temperature service settings" data-i18n-title="temperatureSettings"
-              >
-                <i class="fi fi-chevron-down" aria-hidden="true"></i>
+              <button type="button" class="cmd-btn monitor-compact-action" id="btn-import" title="Import CSV" data-i18n-title="importCsv">
+                <i class="fi fi-download" aria-hidden="true"></i><span data-i18n="importCsv">Import CSV</span>
               </button>
+              <button type="button" class="cmd-btn monitor-compact-action" id="btn-clear-chart" title="Clear chart and reset statistics and energy" data-i18n-title="clearChart">
+                <i class="fi fi-clear" aria-hidden="true"></i><span data-i18n="reset">Reset</span>
+              </button>
+              <button type="button" class="cmd-btn monitor-compact-action" id="btn-flyout-display" title="Display channel settings" data-i18n-title="displayChannels"><i class="fi fi-eye" aria-hidden="true"></i><span data-i18n="display">Display</span></button>
+              <div class="cmd-action-group split-button" id="auto-pause-actions">
+                <button type="button" class="cmd-btn cmd-state-btn" id="btn-auto-pause-command" aria-pressed="false">
+                  <i class="fi fi-pause" aria-hidden="true"></i>
+                  <span><span data-i18n="autoPause">Auto pause</span></span>
+                </button>
+                <button
+                  type="button"
+                  class="cmd-btn cmd-btn-icon cmd-settings-btn"
+                  id="btn-flyout-autopause"
+                  aria-label="Auto pause settings" data-i18n-aria-label="autoPauseSettings"
+                  title="Auto pause settings" data-i18n-title="autoPauseSettings"
+                >
+                  <i class="fi fi-chevron-down" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div class="cmd-action-group split-button" id="temperature-actions">
+                <button type="button" class="cmd-btn cmd-state-btn" id="btn-temp-toggle" aria-pressed="false">
+                  <i class="fi fi-fire" aria-hidden="true"></i>
+                  <span id="temp-toggle-label"><span data-i18n="temperatureService">Temperature service</span></span>
+                </button>
+                <button
+                  type="button"
+                  class="cmd-btn cmd-btn-icon cmd-settings-btn"
+                  id="btn-flyout-temp"
+                  aria-label="Temperature service settings" data-i18n-aria-label="temperatureSettings"
+                  title="Temperature service settings" data-i18n-title="temperatureSettings"
+                >
+                  <i class="fi fi-chevron-down" aria-hidden="true"></i>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -655,6 +672,19 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
+                        <div class="settings-row-title"><span data-i18n="customBackground">Custom background</span></div>
+                        <div class="settings-row-desc"><span data-i18n="customBackgroundHint">Choose a PNG, JPG or WebP image. It is saved on this device and restored when the app starts.</span></div>
+                      </div>
+                      <div class="settings-row-control background-control">
+                        <div class="background-preview" id="background-preview" role="img" aria-label="Default background" data-i18n-aria-label="defaultBackground">
+                          <img src="./assets/wallpapers/background-shark.jpg" alt="" />
+                        </div>
+                        <button type="button" class="btn" id="btn-background-choose"><span data-i18n="chooseBackground">Choose image</span></button>
+                        <button type="button" class="btn btn-subtle" id="btn-background-clear" disabled><span data-i18n="restoreBackground">Restore default</span></button>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
                         <label class="settings-row-title" for="language-select"><span data-i18n="language">Language</span></label>
                         <div class="settings-row-desc"><span data-i18n="languageHint">Follow the system language or choose a language manually.</span></div>
                       </div>
@@ -859,25 +889,6 @@
           </div>
         </section>
       </div>
-
-      <!-- 全局状态栏 -->
-      <footer class="statusbar" id="statusbar">
-        <div class="status-metrics" aria-label="Recording status" data-i18n-aria-label="statsRecording">
-          <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="Start or pause recording" data-i18n-title="toggleRecording">
-            <span class="status-label"><span data-i18n="statusRecording">Recording:</span></span><span id="record-status"><span data-i18n="stopRecording">Stopped</span></span>
-          </span>
-          <span class="status-item status-duration"><span class="status-label"><span data-i18n="statusDuration">Duration:</span></span><span id="record-duration">--</span></span>
-          <span class="status-item status-rate"><span class="status-label"><span data-i18n="statusSample">Sample:</span></span><span id="status-sample-rate"><span data-i18n="rate4">4 samples/s</span></span></span>
-          <span class="status-item status-count"><span class="status-label"><span data-i18n="statusPoints">Points:</span></span><span id="data-count">0</span></span>
-          <span class="status-item status-remaining" id="status-remaining" title="Remaining recording capacity" data-i18n-title="remainingCapacity">
-            <span class="status-label"><span data-i18n="remainingLabel">Remaining:</span></span><span id="record-remaining">--</span>
-          </span>
-        </div>
-        <span class="status-item status-connection" title="Connection status" data-i18n-title="connectionState">
-          <span class="status-indicator" id="connection-status"></span>
-          <span id="connection-text"><span data-i18n="disconnectedStatus">Disconnected</span></span>
-        </span>
-      </footer>
     </div>
 
     <!-- 浮出面板内容（flyout.js 控制显隐；ID 与既有 settings/temperature 逻辑保持契约） -->
@@ -895,6 +906,7 @@
           <span class="checkmark voltage"></span>
           <span data-i18n="voltage">Voltage</span>
         </label>
+        <input type="color" class="channel-color-picker" id="color-voltage" title="Voltage curve color" data-i18n-title="voltageColor" aria-label="Voltage curve color" data-i18n-aria-label="voltageColor" />
         <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-voltage" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
@@ -906,6 +918,7 @@
           <span class="checkmark current"></span>
           <span data-i18n="current">Current</span>
         </label>
+        <input type="color" class="channel-color-picker" id="color-current" title="Current curve color" data-i18n-title="currentColor" aria-label="Current curve color" data-i18n-aria-label="currentColor" />
         <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-current" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
@@ -917,6 +930,7 @@
           <span class="checkmark power"></span>
           <span data-i18n="power">Power</span>
         </label>
+        <input type="color" class="channel-color-picker" id="color-power" title="Power curve color" data-i18n-title="powerColor" aria-label="Power curve color" data-i18n-aria-label="powerColor" />
         <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-power" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>
@@ -928,6 +942,7 @@
           <span class="checkmark temp"></span>
           <span data-i18n="temperature">Temperature</span>
         </label>
+        <input type="color" class="channel-color-picker" id="color-temp" title="Temperature curve color" data-i18n-title="tempColor" aria-label="Temperature curve color" data-i18n-aria-label="tempColor" />
         <span class="opacity-wrap" title="Fill opacity (0 disables fill)" data-i18n-title="opacity">
           <input type="number" id="opacity-temp" value="15" min="0" max="100" class="ribbon-input no-spin" />
           <span class="opacity-suffix">%</span>

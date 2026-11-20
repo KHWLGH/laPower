@@ -6,19 +6,13 @@
  */
 
 /** Reserve time for input, including raster work that finishes after the JS draw hook. */
-export function liveChartIntervalMs(
-  workMs,
-  dense = false,
-  nextFrameDelayMs = 0,
-  idleFrameMs = 1000 / 60,
-  sampleIntervalMs = 10,
-) {
+export function liveChartIntervalMs(workMs, dense = false, nextFrameDelayMs = 0, idleFrameMs = 1000 / 60) {
+  const frameBudget = Number.isFinite(idleFrameMs) && idleFrameMs > 0 ? idleFrameMs : 1000 / 60;
   const cpu = Number.isFinite(workMs) ? Math.max(0, workMs) : 0;
-  const raster = dense && Number.isFinite(nextFrameDelayMs) ? Math.max(0, nextFrameDelayMs - idleFrameMs) : 0;
+  const raster = dense && Number.isFinite(nextFrameDelayMs) ? Math.max(0, nextFrameDelayMs - frameBudget) : 0;
   const work = cpu + raster;
-  const highRate = Number.isFinite(sampleIntervalMs) && sampleIntervalMs > 0 && sampleIntervalMs <= 1;
-  if (!highRate && work <= 8) return 0;
-  return Math.min(100, Math.max(highRate ? 50 : 20, work * 3));
+  if (work <= Math.min(8, frameBudget / 2)) return 0;
+  return Math.min(100, Math.max(20, work * 3));
 }
 
 /** Display-only feedback; acquisition and the stored samples never use this policy. */

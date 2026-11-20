@@ -316,6 +316,40 @@ test('curve shading defaults on, preserves opacity across reloads and resets', a
   }
 });
 
+test('custom channel colors are validated, echoed, persisted and reset', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    window.__TAURI__.core.invoke = async (command, args = {}) => {
+      if (command === 'plugin:store|get' && args.key === 'appSettings') {
+        return [{ channelColors: { voltage: '#112233', current: 'green', power: '#aabbcc', temp: '#ABCDEF' } }, true];
+      }
+      return invoke(command, args);
+    };
+    await loadSettings();
+    assert.deepEqual(state.settings.channelColors, { voltage: '#112233', power: '#aabbcc', temp: '#ABCDEF' });
+    assert.equal(el('color-voltage').value, '#112233');
+    assert.equal(el('color-current').value, '#34d889');
+
+    window.__TAURI__.core.invoke = invoke;
+    assert.equal(await saveSettings(), true);
+    state.settings = { ...defaultSettings, channelColors: {} };
+    await loadSettings();
+    assert.deepEqual(state.settings.channelColors, { voltage: '#112233', power: '#aabbcc', temp: '#ABCDEF' });
+    assert.equal(el('color-temp').value, '#ABCDEF');
+
+    assert.equal(await resetSettings(), true);
+    assert.deepEqual(state.settings.channelColors, {});
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
 test('loaded settings keep the protocol view and clamp PDM choices field by field', async () => {
   installStoreStub();
   const stored = globalThis.window.__TAURI__.core.invoke;

@@ -56,7 +56,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 | <img src="docs/screenshots/zh-CN/light-record.png" alt="监控工作区（浅色）：实时读数卡片、8 通道图表、时间线导航器" /><br><sub>**监控** · 实时读数卡 / 8 通道 4 轴图表 / 时间线导航器</sub> | <img src="docs/screenshots/zh-CN/dark-record.png" alt="监控工作区（深色）" /><br><sub>**监控** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-pd.png" alt="PD 分析工作区（浅色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/zh-CN/dark-pd.png" alt="PD 分析工作区（深色）" /><br><sub>**PD 分析** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-trigger.png" alt="协议控制工作区（浅色）：PDM、PDO 列表与检测日志" /><br><sub>**协议控制** · PDM / PDO / 协议检测与电压触发</sub> | <img src="docs/screenshots/zh-CN/dark-trigger.png" alt="协议控制工作区（深色）" /><br><sub>**协议控制** · 深色主题</sub> |
-| <img src="docs/screenshots/zh-CN/light-settings.png" alt="设置页（浅色）：固定目录、外观与语言、图表与记录" /><br><sub>**设置** · 固定目录 / 外观与语言 / 图表与记录</sub> | <img src="docs/screenshots/zh-CN/dark-settings.png" alt="设置页（深色）" /><br><sub>**设置** · 深色主题</sub> |
+| <img src="docs/screenshots/zh-CN/light-settings.png" alt="设置页（浅色）：固定目录、主题、自定义背景图片与语言、图表与记录" /><br><sub>**设置** · 主题 / 持久化自定义背景 / 语言 / 图表与记录</sub> | <img src="docs/screenshots/zh-CN/dark-settings.png" alt="设置页（深色）" /><br><sub>**设置** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-detection.png" alt="协议检测（浅色主题）" /><br><sub>**协议检测** · 逐协议状态 / 电压档位 / 独立依据</sub> | <img src="docs/screenshots/zh-CN/dark-detection.png" alt="协议检测（深色主题）" /><br><sub>**协议检测** · 深色主题</sub> |
 
 ### 报告样式

@@ -37,7 +37,7 @@ import {
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { rasterOrderedFill } from './chart-fill.js';
 import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
-import { wheelZoomFactor } from './chart-window.js';
+import { minZoomSpan, wheelZoomFactor, zoomTimeWindow } from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { displayFrames } from './frame-scheduler.js';
 import { getResolvedLanguage, t } from './i18n.js';
@@ -791,6 +791,7 @@ function bindMainViews(start, end) {
 }
 
 export function syncChartSeries() {
+  stopWheelZoom?.();
   pauseContext = null;
   displayFrames.cancel('chart-navigator');
   cancelIndexWarmup();
@@ -830,8 +831,9 @@ export function syncChartSeries() {
   }
 }
 
-/** @param {boolean} dragging */
-export function setRangeDragging(dragging) {
+/** @param {boolean} dragging @param {boolean} [fromWheel] */
+export function setRangeDragging(dragging, fromWheel = false) {
+  if (!fromWheel) stopWheelZoom?.();
   if (dragging && !rangeDragging) {
     cancelIndexWarmup();
     selectDisplayContext('review');
@@ -991,7 +993,6 @@ function liveRefreshInterval() {
     dense,
     dense ? renderPolicy.nextFrameDelayMs : 0,
     renderPolicy.idleFrameMs,
-    state.chartSeries.sampleIntervals.at(-1) || state.settings.sampleRate,
   );
 }
 
@@ -1691,8 +1692,7 @@ function applyData(opts = {}) {
     syncNavBuckets(srcLen);
     const nav = state.navigatorChart;
     const now = performance.now();
-    const cap = navMaxBuckets();
-    const live = state.isRecording && !force && !preview && srcLen > cap;
+    const live = state.isRecording && !force && !preview;
     const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS || appliedNavGen !== dataGen;
     if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
       const generation = dataGen;
@@ -1729,6 +1729,7 @@ function applyData(opts = {}) {
 /** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
 /** @param {ChartRefreshSource} [source='maintenance'] @param {{force?:boolean,reason?:string,requestedAt?:number}} [options] */
 export function updateCharts(source = 'maintenance', { force = true, reason = source, requestedAt } = {}) {
+  if (reason === 'release') stopWheelZoom?.();
   chartDirty = true;
   cancelChartFrame();
   if (reason === 'pause') {
@@ -1769,6 +1770,7 @@ export function handleMonitorShown() {
 }
 
 export function handleMonitorHidden() {
+  stopWheelZoom?.();
   pauseContext = null;
   displayFrames.cancel('chart-navigator');
   cancelIndexWarmup();
@@ -1794,18 +1796,8 @@ function registerChartListeners() {
   chartListenersRegistered = true;
   onThemeChange(applyChartTheme);
   const visibilityChanged = () => {
-    if (!monitorVisible()) {
-      pauseContext = null;
-      displayFrames.cancel('chart-navigator');
-      cancelIndexWarmup();
-      chartDirty = true;
-      paintRequest = null;
-      cancelChartFrame();
-      cancelFrameProbe();
-      cancelPreparation();
-      return;
-    }
-    handleMonitorShown();
+    if (monitorVisible()) handleMonitorShown();
+    else handleMonitorHidden();
   };
   document.addEventListener('visibilitychange', visibilityChanged);
   document.addEventListener('witrn:window-visibility', visibilityChanged);
@@ -2837,31 +2829,77 @@ function tooltipPlugin() {
 
 // ─── Sizing ──────────────────────────────────────────────────────────────────
 
-/**
- * 绘图区滚轮横向缩放。预览走手柄快路径，松手后补一帧全质量图。
- * @param {any} u
- */
+/** @type {(() => void)|undefined} */
+let stopWheelZoom;
+const WHEEL_ZOOM_MS = 150;
+
+/** Animate the actual viewport so the axes, curves and hit testing stay in sync. @param {any} u */
 function bindChartWheel(u) {
+  /** @type {HTMLElement|undefined} */
   const over = u?.over;
   if (!over) return;
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let wheelEndTimer = null;
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  /** @type {{fromMin: number, fromMax: number, min: number, max: number, initialDataMax: number, startedAt: number}|null} */
+  let zoom = null;
+  stopWheelZoom = () => {
+    if (!zoom) return;
+    zoom = null;
+    displayFrames.cancel('chart-wheel');
+    setRangeDragging(false, true);
+  };
+
+  function drawZoomFrame() {
+    if (!zoom || !monitorVisible()) {
+      stopWheelZoom?.();
+      return;
+    }
+    const time = reducedMotion?.matches ? 1 : Math.min(1, (performance.now() - zoom.startedAt) / WHEEL_ZOOM_MS);
+    const eased = 1 - (1 - time) ** 3;
+    const finished = time === 1;
+    let { min, max } = zoom;
+    if (finished && max === zoom.initialDataMax) {
+      // While zooming into the live edge, carry the selected span to the latest sample.
+      const latest = state.chartSeries.x.at(-1) ?? max;
+      if (min > state.chartSeries.x.at(0)) min += latest - max;
+      max = latest;
+    }
+    state.__applyChartXWindow?.(
+      finished ? min : zoom.fromMin + (min - zoom.fromMin) * eased,
+      finished ? max : zoom.fromMax + (max - zoom.fromMax) * eased,
+      finished,
+    );
+    if (finished) stopWheelZoom?.();
+    updateCharts('interaction', { force: false, reason: finished ? 'release' : 'interaction' });
+    if (!finished) displayFrames.schedule('chart-wheel', drawZoomFrame, 1);
+  }
+
   over.addEventListener(
     'wheel',
     (event) => {
       event.preventDefault();
-      if (state.chartSeries.x.length === 0) return;
-      const rect = over.getBoundingClientRect();
-      const pivot = u.posToVal(event.clientX - rect.left, 'x');
+      const xs = state.chartSeries.x;
+      if (xs.length < 2 || (rangeDragging && !zoom)) return;
       const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
-      setRangeDragging(true);
-      state.__applyChartXZoom?.(pivot, factor);
-      if (wheelEndTimer != null) clearTimeout(wheelEndTimer);
-      wheelEndTimer = setTimeout(() => {
-        wheelEndTimer = null;
-        setRangeDragging(false);
-        updateCharts('interaction', { force: false, reason: 'release' });
-      }, 80);
+      if (factor === 1) return;
+      const [fromMin, fromMax] = xRange();
+      const min = zoom?.min ?? fromMin;
+      const max = zoom?.max ?? fromMax;
+      const dataMax = xs.at(-1);
+      const rect = over.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      const next = zoomTimeWindow({
+        min,
+        max,
+        pivot: min + (max - min) * ratio,
+        factor,
+        dataMin: xs.at(0),
+        dataMax,
+        minSpan: minZoomSpan(state.settings.sampleRate),
+      });
+      if (next.min === min && next.max === max) return;
+      zoom = { fromMin, fromMax, ...next, initialDataMax: dataMax, startedAt: performance.now() };
+      setRangeDragging(true, true);
+      displayFrames.schedule('chart-wheel', drawZoomFrame, 1);
     },
     { passive: false },
   );

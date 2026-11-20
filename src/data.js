@@ -10,13 +10,7 @@
 
 import { scheduleChartUpdate as requestChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
 import { firstIndexAfter, firstIndexAtOrAfter } from './chart-buckets.js';
-import {
-  classifyChartWindow,
-  emptyChartWindow,
-  minZoomSpan,
-  resolveChartWindow,
-  zoomTimeWindow,
-} from './chart-window.js';
+import { classifyChartWindow, emptyChartWindow, resolveChartWindow } from './chart-window.js';
 import { deviceStream } from './device-stream.js';
 import { displayFrames } from './frame-scheduler.js';
 import { currentMagnitude, energyMaxStepS, nextRecordingX, niceCeiling, streamSampleTime } from './measurement.js';
@@ -491,37 +485,27 @@ export function adoptWindowFromPermille() {
 }
 
 /**
- * 滚轮横向缩放：绕 pivot 缩放当前时间窗，写回滑块与 xWindow。
- * @param {number} pivotSec
- * @param {number} factor
+ * 滚轮动画同步图表、时间轴和选区统计，结束时再吸附到录制边缘。
+ * @param {number} min @param {number} max @param {boolean} settled
  */
-export function applyChartXZoom(pivotSec, factor) {
+function applyChartXWindow(min, max, settled) {
   const xs = state.chartSeries.x;
   const n = xs.length;
   if (n === 0) return;
   const dataMin = xs.at(0);
   const dataMax = xs.at(-1);
-  const current = resolveChartWindow(state.chartWindow, dataMin, dataMax);
-  const zoomed = zoomTimeWindow({
-    min: current.min,
-    max: current.max,
-    pivot: pivotSec,
-    factor,
-    dataMin,
-    dataMax,
-    minSpan: minZoomSpan(state.settings.sampleRate),
-  });
-  state.chartWindow = classifyChartWindow(zoomed.min, zoomed.max, dataMin, dataMax, sampleEdgeEps());
+  state.chartWindow = settled
+    ? classifyChartWindow(min, max, dataMin, dataMax, sampleEdgeEps())
+    : { mode: 'frozen', min, max, duration: max - min };
   paintFromWindow(xs, n, dataMin, dataMax);
   if (monitorDisplayVisible()) {
     updateSliderFill();
     writeRangeLabels(xs);
   }
-  requestChartUpdate('interaction');
   if (state.settings.statsRange) scheduleStatsUpdate();
 }
 
-state.__applyChartXZoom = applyChartXZoom;
+state.__applyChartXWindow = applyChartXWindow;
 
 function paintEmptyRangeLabels() {
   const el1 = document.getElementById('range-start-time');

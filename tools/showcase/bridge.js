@@ -407,6 +407,12 @@ async function invoke(command, args = {}, ipc = {}) {
       return 'windows';
     case 'get_system_locale':
       return options.get('systemLocale') || navigator.language;
+    case 'load_custom_background':
+      return null;
+    case 'choose_custom_background':
+      return null;
+    case 'clear_custom_background':
+      return;
     case 'report_boot_timing':
       return;
     case 'enumerate_devices':

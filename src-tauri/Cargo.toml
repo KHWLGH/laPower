@@ -56,6 +56,7 @@ tauri-plugin-fs = "2.4.4"
 tauri-plugin-store = "2.4.1"
 tauri-plugin-decorum = "1.1.1"
 tauri-plugin-opener = "=2.5.4"
+base64 = "0.22"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "system-proxy"] }
 semver = "1"
 sys-locale.workspace = true

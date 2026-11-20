@@ -9,6 +9,7 @@
  */
 
 import {
+  applyChartTheme,
   handleMonitorHidden,
   handleMonitorShown,
   initChart,
@@ -23,6 +24,7 @@ import {
 } from './chart.js';
 import { panPermilleWindow } from './chart-window.js';
 import { importCSV } from './csv.js';
+import { clearCustomBackground, initCustomBackgroundControls, loadCustomBackground } from './custom-background.js';
 import {
   adoptWindowFromPermille,
   clearAndResetStats,
@@ -80,7 +82,7 @@ import {
   syncTempSourceUI,
   updateTempUIVisibility,
 } from './temperature.js';
-import { applyThemePreference } from './theme.js';
+import { applyThemePreference, refreshTheme } from './theme.js';
 import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
@@ -238,6 +240,17 @@ function setupChartToggles() {
       });
     }
   });
+
+  for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
+    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`color-${key}`));
+    if (!input) continue;
+    input.addEventListener('input', () => {
+      state.settings.channelColors[key] = input.value;
+      refreshTheme();
+      applyChartTheme();
+      debouncedSaveSettings();
+    });
+  }
 
   // D+/D- 与 CC1/CC2 叠加曲线：一个复选框控制一对 series（复用电压 scale，无透明度输入）
   /** @param {string} id @param {'showDpDn'|'showCc'} key @param {number[]} datasetIndexes */
@@ -531,11 +544,19 @@ function setupControls() {
     const yes = await ask(() => t('resetPrompt'), { title: () => t('confirmReset'), kind: 'warning' });
     if (!yes) return;
     // 只有真的落盘才算「已恢复默认」；写盘失败由 settings.js 说明，这里不再报成功。
-    if (await resetSettings()) toast.success(() => t('resetAll'));
+    if (await resetSettings()) {
+      try {
+        await clearCustomBackground();
+        toast.success(() => t('resetAll'));
+      } catch (error) {
+        toast.error(() => t('operationFailed', { detail: errorText(error) }));
+      }
+    }
     applyPdSplitLayout();
   });
 
   // 主题（设置页 外观 卡）
+  initCustomBackgroundControls();
   /** @param {'dark'|'light'|'system'} pref */
   const applyThemeChoice = (pref) => {
     state.settings.theme = pref;
@@ -1044,6 +1065,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   setConnectionReady(false);
   const platformReady = probePlatform();
   const settingsReady = loadSettings();
+  const backgroundReady = loadCustomBackground().catch((error) => {
+    console.warn('Failed to restore custom background:', error);
+  });
   const languageReady = settingsReady.then(() => initI18n());
   const closeReady = setupCloseConfirm()
     .then(() => true)
@@ -1066,7 +1090,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.__WITRN_BOOT__?.mark('devicesScanned');
   });
 
-  await Promise.all([platformReady, settingsReady, languageReady]);
+  await Promise.all([platformReady, settingsReady, languageReady, backgroundReady]);
   // Native selects retain loaded values; enhance them only after locale resolution.
   enhanceSelects();
   initChart();

@@ -56,6 +56,7 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {number}  opacityCurrent
  * @property {number}  opacityPower
  * @property {number}  opacityTemp
+ * @property {Partial<Record<'voltage'|'current'|'power'|'temp', string>>} channelColors
  * @property {boolean} statsRange
  * @property {string}  tempIp
  * @property {number}  tempPort
@@ -364,6 +365,7 @@ export const defaultSettings = {
   opacityCurrent: 15,
   opacityPower: 15,
   opacityTemp: 15,
+  channelColors: {},
   statsRange: false,
   tempIp: '127.0.0.1',
   tempPort: 1573,
@@ -417,9 +419,9 @@ export const state = {
   __setRangeControlsEnabled: null,
   /**
    * 滚轮缩放：由 data.js 注入，避免 chart.js ↔ data.js 循环 import。
-   * @type {((pivotSec: number, factor: number) => void)|null}
+   * @type {((min: number, max: number, settled: boolean) => void)|null}
    */
-  __applyChartXZoom: null,
+  __applyChartXWindow: null,
   /**
    * 由 app.js 注入的两个跨视图动作，供 views/pd.js 在「跟随记录」联动时调用。
    * 用注入而非直接 import：pd.js → data.js 会把 chart.js / temperature.js

@@ -8,7 +8,7 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { refreshChartScales, setChartFillEnabled, setSeriesFill, setSeriesVisible } from './chart.js';
+import { applyChartTheme, refreshChartScales, setChartFillEnabled, setSeriesFill, setSeriesVisible } from './chart.js';
 import {
   refreshRecordLimitUI,
   updateEnergyDisplay,
@@ -24,7 +24,7 @@ import { clampLimitMb } from './recording-limit.js';
 import { normalizeShortcuts } from './shortcuts-core.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
-import { applyThemePreference, echoThemeUI } from './theme.js';
+import { applyThemePreference, chartTheme, echoThemeUI, refreshTheme } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
 import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
@@ -55,6 +55,13 @@ function normalizeSettings(saved) {
   const merged = { ...defaultSettings, ...source };
   merged.chartFillEnabled =
     typeof source.chartFillEnabled === 'boolean' ? source.chartFillEnabled : defaultSettings.chartFillEnabled;
+  const savedColors = source.channelColors && typeof source.channelColors === 'object' ? source.channelColors : {};
+  merged.channelColors = Object.fromEntries(
+    ['voltage', 'current', 'power', 'temp'].flatMap((key) => {
+      const value = savedColors[key];
+      return typeof value === 'string' && /^#[\da-f]{6}$/i.test(value) ? [[key, value]] : [];
+    }),
+  );
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
   merged.videoExport = normalizeVideoExportOptions(source.videoExport);
@@ -229,6 +236,14 @@ function echoSettingsUI() {
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
 }
 
+/** Reflect saved overrides, or the active theme colors when a channel has no override. */
+function echoChannelColorsUI() {
+  for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
+    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`color-${key}`));
+    if (input) input.value = state.settings.channelColors[key] ?? chartTheme[key];
+  }
+}
+
 /** 回显图表纵向余量控件（loadSettings / resetSettings 共用）。 */
 function echoHeadroomUI() {
   const isCustom = state.settings.chartHeadroomMode === 'custom';
@@ -356,6 +371,9 @@ export async function loadSettings() {
     fillUiScaleHint();
     try {
       applyThemePreference(state.settings.theme);
+      refreshTheme();
+      applyChartTheme();
+      echoChannelColorsUI();
       await applyUiScale(state.settings.uiScalePercent);
     } catch {
       /* apply 内部已有 CSS 回退；这里只保证 isLoadingSettings 一定复位 */
@@ -425,7 +443,7 @@ export function debouncedSaveSettings(delay = 500) {
  */
 export async function resetSettings() {
   try {
-    state.settings = { ...defaultSettings };
+    state.settings = { ...defaultSettings, channelColors: {} };
     state.autoPauseSettings = { ...defaultAutoPauseSettings, triggerStartTime: null };
     await applyLanguage(state.settings.language);
 
@@ -434,6 +452,9 @@ export async function resetSettings() {
     echoThemeUI();
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
+    refreshTheme();
+    applyChartTheme();
+    echoChannelColorsUI();
     await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位

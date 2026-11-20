@@ -47,6 +47,7 @@ test('CSP script-src and style-src omit unsafe-inline', () => {
 
   assert.ok(directives.has('script-src'), 'CSP 缺少 script-src');
   assert.ok(directives.has('style-src'), 'CSP 缺少 style-src');
+  assert.ok(directives.get('img-src')?.split(/\s+/).includes('data:'), 'img-src 缺少自定义背景所需的 data:');
   assert.ok(!directives.get('script-src')?.includes("'unsafe-inline'"), "script-src 含 'unsafe-inline'");
   assert.ok(!directives.get('style-src')?.includes("'unsafe-inline'"), "style-src 含 'unsafe-inline'");
 });
