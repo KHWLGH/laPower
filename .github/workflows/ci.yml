@@ -294,7 +294,7 @@ jobs:
           merge-multiple: true
           path: dist/packages/
 
-      - name: Require seven installers and generate checksums
+      - name: Require eight release packages and generate checksums
         run: node scripts/release.mjs verify
 
       - uses: actions/upload-artifact@v4

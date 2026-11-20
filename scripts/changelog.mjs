@@ -96,10 +96,10 @@ ${english}
 
 ## Download and installation
 
-- Windows x64: MSI or NSIS setup.exe; packages are not certificate-signed.
+- Windows x64: MSI, NSIS setup.exe, or the portable ZIP (extract it and run laPower.exe); packages are not certificate-signed. The portable edition requires Microsoft Edge WebView2 Runtime to already be available.
 - macOS 12+: choose macos-x64 for Intel or macos-arm64 for Apple Silicon. Builds use ad-hoc signing, without Developer ID signing or notarization. On first launch, you may need to allow the app in System Settings → Privacy & Security. macOS 12 compatibility still requires real-machine verification.
 - Linux x64: DEB, RPM or AppImage. Make the AppImage executable and configure device access using the [udev instructions](${base}docs/en/DEVELOPMENT.md#udev-rules-required). Installers do not change device permissions automatically.
-- SHA256SUMS contains SHA-256 checksums for all seven installers.
+- SHA256SUMS contains SHA-256 checksums for all eight release packages.
 - Corresponding source for this release: [ZIP](${archives}.zip) or [tar.gz](${archives}.tar.gz), both at Tag v${version}. Follow the [build instructions](${base}docs/en/DEVELOPMENT.md) with the included lockfiles; dependency sources are retrieved as described there.
 - Copyright, permissions and notices: [COPYRIGHT](${base}COPYRIGHT), [GPLv3](${base}LICENSE), [LGPLv3](${base}LICENSE.LGPL-3.0) and [third-party materials](${base}licenses/). The software is provided without warranty; applicable license conditions govern modification and redistribution. Full notices are available offline in Settings → About.
 
@@ -114,10 +114,10 @@ ${chinese}
 
 ## 下载与安装
 
-- Windows x64：MSI 或 NSIS setup.exe；当前未做证书签名。
+- Windows x64：MSI、NSIS setup.exe 或免安装 ZIP（解压后运行 laPower.exe）；当前未做证书签名。免安装版需要系统已具备 Microsoft Edge WebView2 Runtime。
 - macOS 12+：Intel 选择 macos-x64，Apple Silicon 选择 macos-arm64。应用仅有 ad-hoc 签名，未做 Developer ID 签名或公证；首次打开可能需要在「系统设置 → 隐私与安全性」中允许运行。macOS 12 兼容性仍需实机验证。
 - Linux x64：DEB、RPM 或 AppImage；AppImage 需赋予执行权限，访问仪表需按[开发指南中的 udev 规则](${base}docs/DEVELOPMENT.md#udev-规则必需)配置。安装包不会自动修改设备权限。
-- SHA256SUMS：包含七个安装包的 SHA-256 校验和。
+- SHA256SUMS：包含八个发布包的 SHA-256 校验和。
 - 本版本对应源码：[ZIP](${archives}.zip) 或 [tar.gz](${archives}.tar.gz)，均对应 Tag v${version}；使用所附锁文件并按[构建指南](${base}docs/DEVELOPMENT.md)构建，依赖源码按指南说明获取。
 - 版权、许可与告知：[COPYRIGHT](${base}COPYRIGHT)、[GPLv3](${base}LICENSE)、[LGPLv3](${base}LICENSE.LGPL-3.0) 及[第三方材料](${base}licenses/)。软件不提供担保，修改与再分发须遵守相应许可；完整声明可在「设置 → 关于」离线阅读。
 
