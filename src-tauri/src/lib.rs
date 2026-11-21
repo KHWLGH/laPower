@@ -442,7 +442,10 @@ impl Default for AppState {
             km003c: Mutex::new(None),
             files: Mutex::new(file_io::FileRegistry::default()),
             video_exports: std::sync::Arc::new(video_export::VideoExports::default()),
+            #[cfg(target_os = "windows")]
             gpui_chart: gpui_chart::Renderer::default(),
+            #[cfg(not(target_os = "windows"))]
+            gpui_chart: gpui_chart::Renderer,
             shutting_down: AtomicBool::new(false),
         }
     }

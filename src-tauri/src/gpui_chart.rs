@@ -540,9 +540,6 @@ pub struct Renderer;
 
 #[cfg(not(target_os = "windows"))]
 impl Renderer {
-    pub fn start(&self, _parent: isize) -> Result<(), String> {
-        Ok(())
-    }
     pub fn is_ready(&self) -> bool {
         false
     }
