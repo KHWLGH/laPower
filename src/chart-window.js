@@ -63,7 +63,7 @@ export function zoomTimeWindow(args) {
   const minSpan = Math.max(Number(args.minSpan) || 0, Number.EPSILON);
   let nextSpan = span * factor;
   if (nextSpan < minSpan) nextSpan = minSpan;
-  if (nextSpan > dataSpan) nextSpan = dataSpan;
+  if (nextSpan >= dataSpan) return { min: dataMin, max: dataMax };
 
   let pivot = args.pivot;
   if (!Number.isFinite(pivot)) pivot = (args.min + args.max) / 2;
@@ -84,6 +84,15 @@ export function zoomTimeWindow(args) {
   }
   if (nextMin < dataMin) nextMin = dataMin;
   return { min: nextMin, max: nextMax };
+}
+
+/** Map a cursor position on the overview to a time within the selected window.
+ * @param {number} ratio @param {number} dataMin @param {number} dataMax
+ * @param {{ min: number, max: number }} window
+ */
+export function overviewZoomPivot(ratio, dataMin, dataMax, window) {
+  const time = dataMin + (dataMax - dataMin) * Math.max(0, Math.min(1, ratio));
+  return Math.max(window.min, Math.min(window.max, time));
 }
 
 /**

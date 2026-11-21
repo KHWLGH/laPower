@@ -9,6 +9,7 @@ import {
   classifyChartWindow,
   emptyChartWindow,
   minZoomSpan,
+  overviewZoomPivot,
   panPermilleWindow,
   resolveChartWindow,
   wheelZoomFactor,
@@ -65,6 +66,22 @@ test('zoomTimeWindow does not shrink below minSpan or grow past the data', () =>
   });
   assert.equal(wide.min, 0);
   assert.equal(wide.max, 10);
+});
+
+test('overview zoom uses the cursor time to move both sides of the selection', () => {
+  const domain = { dataMin: 20, dataMax: 120, minSpan: 0.1 };
+  const window = { min: 20, max: 120 };
+  const pivot = overviewZoomPivot(0.7, domain.dataMin, domain.dataMax, window);
+  const zoomed = zoomTimeWindow({ ...window, ...domain, pivot, factor: 0.5 });
+  assert.deepEqual(zoomed, { min: 55, max: 105 });
+  assert.equal(overviewZoomPivot(0.1, domain.dataMin, domain.dataMax, zoomed), zoomed.min);
+});
+
+test('zooming a historical overview back to the full range follows new samples', () => {
+  const result = zoomTimeWindow({ min: 30, max: 60, pivot: 40, factor: 4, dataMin: 5, dataMax: 105, minSpan: 0.1 });
+  const window = classifyChartWindow(result.min, result.max, 5, 105, 1e-6);
+  assert.equal(window.mode, 'full');
+  assert.deepEqual(resolveChartWindow(window, 5, 107), { mode: 'full', min: 5, max: 107, duration: 102 });
 });
 
 test('classifyChartWindow pins the right edge as follow and the interior as frozen', () => {
