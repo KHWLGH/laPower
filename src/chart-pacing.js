@@ -15,6 +15,16 @@ export function liveChartIntervalMs(workMs, dense = false, nextFrameDelayMs = 0,
   return Math.min(100, Math.max(20, work * 2));
 }
 
+/**
+ * Taper strokes as more samples share each screen pixel, without changing the samples.
+ * @param {number} pointCount
+ * @param {number} plotWidth CSS pixels
+ */
+export function zoomStrokeFactor(pointCount, plotWidth) {
+  const density = pointCount / Math.max(1, plotWidth);
+  return density <= 1 ? 1 : Math.max(0.5, density ** -0.22);
+}
+
 /** Display-only feedback; acquisition and the stored samples never use this policy. */
 export class ChartRenderPolicy {
   /** @param {{initialDensity?:number, maxDensity?:number}} [options] */

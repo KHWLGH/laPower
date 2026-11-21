@@ -103,7 +103,11 @@ export function wheelZoomPivot(args) {
  */
 export function settleWheelZoomWindow(args) {
   const { min, max, dataMin, dataMax, latest } = args;
-  const window = classifyChartWindow(min, max, dataMin, dataMax, 1e-6);
+  // Wheel deltas are fractional on high-resolution mice. Treat a window within
+  // the normal edge tolerance as full/follow instead of leaving it almost at
+  // the edge in frozen mode.
+  const edgeTolerance = Math.max(1e-6, Math.min((dataMax - dataMin) * 1e-4, (max - min) * 0.01));
+  const window = classifyChartWindow(min, max, dataMin, dataMax, edgeTolerance);
   const resolved = resolveChartWindow(window, dataMin, latest);
   return { min: resolved.min, max: resolved.max };
 }

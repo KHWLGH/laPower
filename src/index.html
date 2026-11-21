@@ -688,6 +688,15 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
+                        <label class="settings-row-title" for="background-transparency"><span data-i18n="backgroundTransparency">Background image transparency</span></label>
+                      </div>
+                      <div class="settings-row-control settings-scale">
+                        <input type="range" id="background-transparency" class="scale-slider" min="0" max="100" step="1" value="0" aria-valuetext="0%" />
+                        <span id="background-transparency-value" class="scale-value">0%</span>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
                         <label class="settings-row-title" for="language-select"><span data-i18n="language">Language</span></label>
                         <div class="settings-row-desc"><span data-i18n="languageHint">Follow the system language or choose a language manually.</span></div>
                       </div>
@@ -755,6 +764,17 @@
                           />
                           <span class="opacity-suffix">%</span>
                         </span>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="chart-auto-line-width"><span data-i18n="chartAutoLineWidth">Adjust line thickness on zoom</span></label>
+                      </div>
+                      <div class="settings-row-control">
+                        <label class="toggle">
+                          <input type="checkbox" id="chart-auto-line-width" checked />
+                          <span class="toggle-track"></span>
+                        </label>
                       </div>
                     </div>
                     <div class="settings-row">

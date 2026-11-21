@@ -180,6 +180,36 @@ test('a healthy store produces no failure toasts', async () => {
   assert.deepEqual(errorToasts, [], '干净路径不该出现任何错误提示');
 });
 
+test('background transparency and automatic stroke width survive reload and reset', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    state.settings = { ...defaultSettings, backgroundTransparency: 64, chartAutoLineWidth: false };
+    assert.equal(await saveSettings(), true);
+    state.settings = { ...defaultSettings };
+    await loadSettings();
+    assert.equal(state.settings.backgroundTransparency, 64);
+    assert.equal(el('background-transparency').value, '64');
+    assert.equal(el('background-transparency-value').textContent, '64%');
+    assert.equal(state.settings.chartAutoLineWidth, false);
+    assert.equal(el('chart-auto-line-width').checked, false);
+
+    state.settings.backgroundTransparency = 250;
+    assert.equal(await saveSettings(), true);
+    await loadSettings();
+    assert.equal(state.settings.backgroundTransparency, 100);
+
+    assert.equal(await resetSettings(), true);
+    assert.equal(el('background-transparency-value').textContent, '0%');
+    assert.equal(el('chart-auto-line-width').checked, true);
+  } finally {
+    state.settings = previous;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
 test('old and invalid language preferences use auto; valid choices survive a store reload', async () => {
   installStoreStub();
   const previous = state.settings;

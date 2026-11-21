@@ -10,9 +10,9 @@
 
 import {
   applyChartTheme,
+  refreshChartLineWidths,
   refreshChartScales,
   setChartFillEnabled,
-  setChartLineWidth,
   setSeriesFill,
   setSeriesVisible,
 } from './chart.js';
@@ -63,6 +63,8 @@ function normalizeSettings(saved) {
   const merged = { ...defaultSettings, ...source };
   merged.chartFillEnabled =
     typeof source.chartFillEnabled === 'boolean' ? source.chartFillEnabled : defaultSettings.chartFillEnabled;
+  merged.chartAutoLineWidth =
+    typeof source.chartAutoLineWidth === 'boolean' ? source.chartAutoLineWidth : defaultSettings.chartAutoLineWidth;
   const savedColors = source.channelColors && typeof source.channelColors === 'object' ? source.channelColors : {};
   merged.channelColors = Object.fromEntries(
     ['voltage', 'current', 'power', 'temp'].flatMap((key) => {
@@ -119,6 +121,9 @@ function normalizeSettings(saved) {
     merged.rangeEnd = swap;
   }
   merged.sampleRate = Math.round(clamp(merged.sampleRate, 1, 60_000, defaultSettings.sampleRate));
+  merged.backgroundTransparency = Math.round(
+    clamp(merged.backgroundTransparency, 0, 100, defaultSettings.backgroundTransparency),
+  );
   // 纵向余量参与 Y 轴量程计算，坏值会直接污染 scale
   if (merged.chartHeadroomMode !== 'auto' && merged.chartHeadroomMode !== 'custom') {
     merged.chartHeadroomMode = defaultSettings.chartHeadroomMode;
@@ -204,6 +209,19 @@ export function echoApUnit() {
   else apUnit.textContent = '';
 }
 
+export function applyBackgroundTransparency() {
+  const percent = state.settings.backgroundTransparency;
+  const label = `${percent}%`;
+  document.documentElement.style.setProperty('--wallpaper-image-opacity', String(1 - percent / 100));
+  const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('background-transparency'));
+  if (slider) {
+    slider.value = String(percent);
+    slider.setAttribute('aria-valuetext', label);
+  }
+  const value = document.getElementById('background-transparency-value');
+  if (value) value.textContent = label;
+}
+
 /** 把当前 settings / autoPause 写回控件（loadSettings / resetSettings 共用）。 */
 function echoSettingsUI() {
   document.dispatchEvent?.(new Event('lapower:preferences-changed'));
@@ -218,6 +236,7 @@ function echoSettingsUI() {
     if (el) el.checked = val;
   };
   setChecked('chart-fill-enabled', state.settings.chartFillEnabled);
+  setChecked('chart-auto-line-width', state.settings.chartAutoLineWidth);
   setChecked('show-voltage', state.settings.showVoltage);
   setChecked('show-current', state.settings.showCurrent);
   setChecked('show-power', state.settings.showPower);
@@ -228,6 +247,7 @@ function echoSettingsUI() {
   setChecked('immediate-marker', state.settings.immediateMarker);
   setChecked('pd-follow-recording', state.settings.pdFollowRecording);
   echoHeadroomUI();
+  applyBackgroundTransparency();
 
   const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   if (tempIp) tempIp.value = state.settings.tempIp || '127.0.0.1';
@@ -521,7 +541,7 @@ export async function resetSettings() {
     setSeriesFill(1, state.settings.opacityCurrent);
     setSeriesFill(2, state.settings.opacityPower);
     setSeriesFill(3, state.settings.opacityTemp);
-    for (let index = 0; index < 4; index++) setChartLineWidth(index);
+    refreshChartLineWidths();
     refreshChartScales();
 
     updateStatsDisplay();

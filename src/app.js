@@ -14,9 +14,9 @@ import {
   handleMonitorShown,
   initChart,
   refreshChartLanguage,
+  refreshChartLineWidths,
   refreshChartScales,
   setChartFillEnabled,
-  setChartLineWidth,
   setRangeDragging,
   setSeriesFill,
   setSeriesVisible,
@@ -64,6 +64,7 @@ import { clampLimitMb } from './recording-limit.js';
 import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
 import {
+  applyBackgroundTransparency,
   applyRealtimePanelWidth,
   applySampleRate,
   debouncedSaveSettings,
@@ -260,7 +261,7 @@ function setupChartToggles() {
     });
     bindDisplayStepper(`line-width-${key}`, (value) => {
       state.settings.chartLineWidths[key] = value;
-      setChartLineWidth(index);
+      refreshChartLineWidths();
       debouncedSaveSettings();
     });
     bindDisplayStepper(`curve-offset-${key}`, (value) => {
@@ -551,6 +552,20 @@ function setupControls() {
 
   // 主题（设置页 外观 卡）
   initCustomBackgroundControls();
+  const backgroundTransparency = /** @type {HTMLInputElement|null} */ (
+    document.getElementById('background-transparency')
+  );
+  backgroundTransparency?.addEventListener('input', () => {
+    state.settings.backgroundTransparency = backgroundTransparency.valueAsNumber;
+    applyBackgroundTransparency();
+    debouncedSaveSettings();
+  });
+  const autoLineWidth = /** @type {HTMLInputElement|null} */ (document.getElementById('chart-auto-line-width'));
+  autoLineWidth?.addEventListener('change', () => {
+    state.settings.chartAutoLineWidth = autoLineWidth.checked;
+    refreshChartLineWidths();
+    debouncedSaveSettings();
+  });
   /** @param {'dark'|'light'|'system'} pref */
   const applyThemeChoice = (pref) => {
     state.settings.theme = pref;

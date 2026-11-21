@@ -144,6 +144,14 @@ test('settling a tail-anchored zoom carries its span forward', () => {
   assert.deepEqual(settled, { min: 80.25, max: 100.25 });
 });
 
+test('settling a wheel window within an edge tolerance restores full/follow tracking', () => {
+  const full = settleWheelZoomWindow({ min: 0.005, max: 99.995, dataMin: 0, dataMax: 100, latest: 101 });
+  assert.deepEqual(full, { min: 0, max: 101 });
+
+  const follow = settleWheelZoomWindow({ min: 80, max: 99.995, dataMin: 0, dataMax: 100, latest: 101 });
+  assert.deepEqual(follow, { min: 81.005, max: 101 });
+});
+
 test('classifyChartWindow pins the right edge as follow and the interior as frozen', () => {
   const full = classifyChartWindow(0, 10, 0, 10, 0.01);
   assert.equal(full.mode, 'full');

@@ -61,6 +61,7 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+  opacity: var(--wallpaper-image-opacity, 1);
 }
 
 .app-wallpaper img.is-custom {
@@ -227,6 +228,12 @@
 .cmd-btn:hover:not(:disabled) {
   background-image: var(--glass-sheen);
   box-shadow: var(--glass-rim);
+}
+
+.commandbar .cmd-btn:hover:not(:disabled, :active, .cmd-primary-btn, .is-active, [aria-pressed="true"]) {
+  background-color: var(--glass-lens);
+  border-color: transparent;
+  box-shadow: inset 0 1px color-mix(in srgb, var(--glass-reflection) 55%, transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {

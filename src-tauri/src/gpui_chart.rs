@@ -17,6 +17,7 @@ mod platform {
     use std::thread;
     use windows_sys::Win32::{
         Foundation::HWND,
+        Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF},
         UI::WindowsAndMessaging::{
             GetAncestor, GetWindowLongPtrW, IsWindow, SetParent, SetWindowLongPtrW, SetWindowPos,
             ShowWindow, GA_PARENT, GWL_EXSTYLE, GWL_STYLE, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
@@ -31,7 +32,7 @@ mod platform {
     const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
     const MAX_POINTS_PER_SERIES: usize = 100_000;
 
-    #[derive(Clone, Copy, Default)]
+    #[derive(Clone, Copy, Default, PartialEq, Eq)]
     struct SurfaceBounds {
         left: i32,
         top: i32,
@@ -59,6 +60,8 @@ mod platform {
     struct FrameSet {
         frames: [Arc<ChartFrame>; 2],
         revisions: [u64; 2],
+        overlays: Arc<Vec<[i32; 4]>>,
+        overlay_revision: u64,
     }
 
     #[derive(Default)]
@@ -115,6 +118,28 @@ mod platform {
             self.wake();
         }
 
+        pub fn set_overlays(&self, rects: Vec<[i32; 4]>) -> Result<(), String> {
+            if rects.len() > 32
+                || rects.iter().any(|&[l, t, r, b]| {
+                    l >= r
+                        || t >= b
+                        || [l, t, r, b]
+                            .iter()
+                            .any(|v| !(-1_000_000..=1_000_000).contains(v))
+                })
+            {
+                return Err("GPUI overlay bounds are invalid".into());
+            }
+            let mut frames = self.frames.write().map_err(|_| "GPUI 图表数据已损坏")?;
+            if *frames.overlays != rects {
+                frames.overlays = Arc::new(rects);
+                frames.overlay_revision = frames.overlay_revision.wrapping_add(1);
+                drop(frames);
+                self.wake();
+            }
+            Ok(())
+        }
+
         fn wake(&self) {
             if let Ok(wake) = self.wake.lock() {
                 if let Some(wake) = wake.as_ref() {
@@ -151,7 +176,8 @@ mod platform {
             if series.points.len() < 2 {
                 continue;
             }
-            let mut fill = PathBuilder::fill();
+            let alpha = (series.fill_opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+            let mut fill = (alpha > 0).then(PathBuilder::fill);
             let mut stroke = PathBuilder::stroke(px(series.width * scale));
             let (mut first, mut last) = (None, None);
             let mut has_stroke = false;
@@ -160,7 +186,9 @@ mod platform {
             for &[x, y] in &series.points {
                 let value = [x * scale, y * scale];
                 if !value[0].is_finite() || !value[1].is_finite() {
-                    close_fill(&mut fill, first, last, baseline);
+                    if let Some(fill) = &mut fill {
+                        close_fill(fill, first, last, baseline);
+                    }
                     first = None;
                     last = None;
                     continue;
@@ -168,20 +196,22 @@ mod platform {
                 let pt = point(px(value[0]), px(value[1]));
                 if first.is_none() {
                     first = Some(value);
-                    fill.move_to(point(px(value[0]), px(baseline)));
-                    fill.line_to(pt);
                     stroke.move_to(pt);
+                    if let Some(fill) = &mut fill {
+                        fill.move_to(point(px(value[0]), px(baseline)));
+                        fill.line_to(pt);
+                    }
                 } else {
-                    fill.line_to(pt);
+                    if let Some(fill) = &mut fill {
+                        fill.line_to(pt);
+                    }
                     stroke.line_to(pt);
                     has_stroke = true;
                 }
                 last = Some(value);
             }
-            close_fill(&mut fill, first, last, baseline);
-
-            let alpha = (series.fill_opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
-            if alpha > 0 {
+            if let Some(mut fill) = fill {
+                close_fill(&mut fill, first, last, baseline);
                 if let Ok(path) = fill.build() {
                     paths.push((path, rgba((series.color << 8) | alpha).into()));
                 }
@@ -359,6 +389,48 @@ mod platform {
         }
     }
 
+    // The chart HWND sits above WebView2, so leave holes for its foreground controls.
+    fn clip_child(window: HWND, bounds: SurfaceBounds, overlays: &[[i32; 4]]) -> bool {
+        let rects: Vec<_> = overlays
+            .iter()
+            .filter_map(|&[l, t, r, b]| {
+                let l = (l - bounds.left).max(0);
+                let t = (t - bounds.top).max(0);
+                let r = (r - bounds.left).min(bounds.width);
+                let b = (b - bounds.top).min(bounds.height);
+                (l < r && t < b).then_some([l, t, r, b])
+            })
+            .collect();
+        unsafe {
+            if rects.is_empty() {
+                return SetWindowRgn(window, std::ptr::null_mut(), 1) != 0;
+            }
+            let region = CreateRectRgn(0, 0, bounds.width, bounds.height);
+            if region.is_null() {
+                return false;
+            }
+            for [l, t, r, b] in rects {
+                let hole = CreateRectRgn(l, t, r, b);
+                if hole.is_null() {
+                    DeleteObject(region);
+                    return false;
+                }
+                let combined = CombineRgn(region, region, hole, RGN_DIFF);
+                DeleteObject(hole);
+                if combined == 0 {
+                    DeleteObject(region);
+                    return false;
+                }
+            }
+            if SetWindowRgn(window, region, 1) != 0 {
+                // Win32 owns the region after a successful SetWindowRgn.
+                return true;
+            }
+            DeleteObject(region);
+            false
+        }
+    }
+
     fn open_surface(
         cx: &mut App,
         parent: HWND,
@@ -420,6 +492,8 @@ mod platform {
             let handles = [main, overview];
             let native = [main_hwnd, overview_hwnd];
             let mut revisions = [0u64; 2];
+            let mut overlay_revision = 0;
+            let mut placement = [(false, SurfaceBounds::default()); 2];
             cx.spawn(async move |cx| loop {
                 if wake_rx.recv().await.is_err() {
                     break;
@@ -427,19 +501,28 @@ mod platform {
                 let snapshot = frames.read().ok().map(|frames| frames.clone());
                 if let Some(snapshot) = snapshot {
                     for slot in 0..2 {
-                        if revisions[slot] == snapshot.revisions[slot] {
+                        let frame_changed = revisions[slot] != snapshot.revisions[slot];
+                        let overlay_changed = overlay_revision != snapshot.overlay_revision;
+                        if !frame_changed && !overlay_changed {
                             continue;
                         }
                         revisions[slot] = snapshot.revisions[slot];
                         let frame = Arc::clone(&snapshot.frames[slot]);
-                        let window_ok = update_child(native[slot], &frame);
-                        let view_ok = handles[slot]
-                            .update(cx, |surface, _window, cx| {
-                                surface.frame = frame;
-                                cx.notify();
-                            })
-                            .is_ok();
-                        if !window_ok || !view_ok {
+                        let position = (frame.visible, frame.bounds);
+                        let moved = position != placement[slot];
+                        placement[slot] = position;
+                        let window_ok = !moved || update_child(native[slot], &frame);
+                        let clip_ok = !frame.visible
+                            || !(moved || overlay_changed)
+                            || clip_child(native[slot], frame.bounds, &snapshot.overlays);
+                        let view_ok = !frame_changed
+                            || handles[slot]
+                                .update(cx, |surface, _window, cx| {
+                                    surface.frame = frame;
+                                    cx.notify();
+                                })
+                                .is_ok();
+                        if !window_ok || !clip_ok || !view_ok {
                             ready.store(false, Ordering::Release);
                             for hwnd in native {
                                 unsafe { ShowWindow(hwnd, SW_HIDE) };
@@ -447,6 +530,7 @@ mod platform {
                             return;
                         }
                     }
+                    overlay_revision = snapshot.overlay_revision;
                 }
             })
             .detach();
@@ -547,4 +631,8 @@ impl Renderer {
         Ok(())
     }
     pub fn hide(&self) {}
+
+    pub fn set_overlays(&self, _rects: Vec<[i32; 4]>) -> Result<(), String> {
+        Ok(())
+    }
 }

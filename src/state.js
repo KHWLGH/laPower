@@ -58,6 +58,7 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {number}  opacityTemp
  * @property {Partial<Record<'voltage'|'current'|'power'|'temp', string>>} channelColors
  * @property {Record<'voltage'|'current'|'power'|'temp', number>} chartLineWidths
+ * @property {boolean} chartAutoLineWidth
  * @property {Record<'voltage'|'current'|'power'|'temp', number>} chartCurveNudge
  * @property {boolean} statsRange
  * @property {string}  tempIp
@@ -72,6 +73,7 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
+ * @property {number} backgroundTransparency
  * @property {'auto'|'zh-CN'|'zh-TW'|'en'|'ja'} language - 界面语言；auto=跟随系统
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
@@ -369,6 +371,7 @@ export const defaultSettings = {
   opacityTemp: 15,
   channelColors: {},
   chartLineWidths: { voltage: 1.5, current: 1.5, power: 1.5, temp: 1.5 },
+  chartAutoLineWidth: true,
   chartCurveNudge: { voltage: 0, current: 0, power: 0, temp: 0 },
   statsRange: false,
   tempIp: '127.0.0.1',
@@ -383,6 +386,7 @@ export const defaultSettings = {
   signedCurrent: false,
   uiScalePercent: 100,
   theme: 'system',
+  backgroundTransparency: 0,
   language: 'auto',
   realtimePanelWidth: 250,
   pdSplitSide: false,

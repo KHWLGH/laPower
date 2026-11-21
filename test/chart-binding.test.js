@@ -526,8 +526,7 @@ test('applyData does not branch on the interaction state when binding', async ()
   const apply = bodyOf('applyData');
   assert.doesNotMatch(apply, /if \(preview/, 'preview 不得决定主图绑哪批条带');
   assert.match(apply, /if \(!preview && \(dataChanged \|\| appliedNavGen/);
-  assert.match(apply, /const due = !live \|\| now - lastNavPaint >= NAV_PAINT_MIN_MS/);
-  assert.doesNotMatch(apply, /appliedNavGen !== dataGen;\s*\n\s*const due/);
+  assert.match(apply, /const delay = live \? lastNavPaint \+ NAV_PAINT_MIN_MS - now : 0/);
 });
 
 test('the extrema index is a speed selector with a single build entry', async () => {

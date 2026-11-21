@@ -5,11 +5,21 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ChartRenderPolicy, liveChartIntervalMs } from '../src/chart-pacing.js';
+import { ChartRenderPolicy, liveChartIntervalMs, zoomStrokeFactor } from '../src/chart-pacing.js';
 
 function feedback(policy, delayMs, at, overrides = {}) {
   return policy.observe({ delayMs, at, visible: true, dense: true, idleFrameMs: 16, ...overrides });
 }
+
+test('zoom stroke factor tapers dense views without exceeding either limit', () => {
+  assert.equal(zoomStrokeFactor(0, 1000), 1);
+  assert.equal(zoomStrokeFactor(1000, 1000), 1);
+  const medium = zoomStrokeFactor(4000, 1000);
+  const dense = zoomStrokeFactor(12000, 1000);
+  assert.ok(medium < 1 && dense < medium && dense > 0.5);
+  assert.equal(zoomStrokeFactor(1_000_000, 1000), 0.5);
+  assert.equal(zoomStrokeFactor(4000, 2000), zoomStrokeFactor(2000, 1000));
+});
 
 test('density responds to consecutive slow frames and a single severe frame, within bounded levels', () => {
   const policy = new ChartRenderPolicy();

@@ -478,6 +478,11 @@ fn gpui_chart_hide(state: State<'_, AppState>) {
     state.gpui_chart.hide();
 }
 
+#[tauri::command]
+fn gpui_chart_overlays(rects: Vec<[i32; 4]>, state: State<'_, AppState>) -> Result<(), String> {
+    state.gpui_chart.set_overlays(rects)
+}
+
 /// Return the locale selected by the host environment. The frontend applies
 /// the language mapping and browser fallback so this command stays read-only.
 #[tauri::command]
@@ -1328,6 +1333,7 @@ pub fn run() {
             gpui_chart_ready,
             gpui_chart_frame,
             gpui_chart_hide,
+            gpui_chart_overlays,
             get_system_locale,
             custom_background::choose_custom_background,
             custom_background::load_custom_background,

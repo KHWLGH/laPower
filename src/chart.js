@@ -36,7 +36,7 @@ import {
 } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { rasterOrderedFill } from './chart-fill.js';
-import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
+import { ChartRenderPolicy, liveChartIntervalMs, zoomStrokeFactor } from './chart-pacing.js';
 import {
   minZoomSpan,
   panTimeWindow,
@@ -48,6 +48,7 @@ import {
 import { runCooperativeSlices } from './cooperative.js';
 import { chartCurrent, currentAt } from './current-display.js';
 import { displayFrames } from './frame-scheduler.js';
+import { createGpuiChartBridge, encodeGpuiChartFrame, watchGpuiChartOverlays } from './gpui-chart.js';
 import { getResolvedLanguage, t } from './i18n.js';
 import { markersOf, onMarkersChange } from './markers.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
@@ -101,6 +102,11 @@ let mainData = [[], [], [], [], [], [], [], [], []];
 /** 导航图数据：[x, power]（短历史的有界拷贝或桶数组）。 */
 /** @type {ChartColView[]} */
 let navData = [[], []];
+let gpuiChartActive = false;
+let gpuiChartBridge = null;
+/** @type {ReturnType<typeof watchGpuiChartOverlays> | null} */
+let gpuiChartOverlays = null;
+let nativeEmptyPath = null;
 
 /** 范围滑块设定的主图 X 轴窗口；null 表示尚无数据（使用默认范围）。 */
 /** @type {{ min: number|null, max: number|null }} */
@@ -330,6 +336,8 @@ let navProjectionCap = 0;
 /** @type {import('./chart-buckets.js').OrderedGeometry|null} */
 let navGeometry = null;
 let lastNavPaint = 0;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let navPaceTimer = null;
 const NAV_PAINT_MIN_MS = 100;
 function navMaxBuckets() {
   return bucketCap((document.getElementById('navigator-chart')?.clientWidth || 600) / 2);
@@ -341,6 +349,13 @@ function resetNavBuckets() {
   navProjectionCap = 0;
   navGeometry = null;
 }
+
+function cancelNavigatorPaint() {
+  displayFrames.cancel('chart-navigator');
+  if (navPaceTimer !== null) clearTimeout(navPaceTimer);
+  navPaceTimer = null;
+}
+
 /** 把新样本折进导航桶；不 flatten、不 setData。 */
 function syncNavBuckets(through = state.chartSeries.x.length) {
   const cs = state.chartSeries;
@@ -488,6 +503,15 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
   }
   paint.stroke = stroke;
   return { stroke, fill: null };
+}
+
+/** Keep uPlot's data/index model but stop its canvas from painting native-owned curves.
+ * @param {any} u @param {number} seriesIdx @param {number} idx0 @param {number} idx1
+ */
+function chartPaths(u, seriesIdx, idx0, idx1) {
+  if (!gpuiChartActive) return adaptivePaths(u, seriesIdx, idx0, idx1);
+  nativeEmptyPath ??= new Path2D();
+  return { stroke: nativeEmptyPath, fill: null };
 }
 
 function drawBucketFill(u, seriesIdx) {
@@ -792,6 +816,16 @@ function rasterBucketFill(u, geometry, fill) {
   recordPaintStage(u, 'fill', started);
 }
 
+/** @param {any} u @param {number} seriesIdx */
+function drawFallbackBucketFill(u, seriesIdx) {
+  if (!gpuiChartActive) drawBucketFill(u, seriesIdx);
+}
+
+/** @param {any} u @param {number} seriesIdx */
+function drawFallbackBucketRaster(u, seriesIdx) {
+  if (!gpuiChartActive) drawBucketRaster(u, seriesIdx);
+}
+
 // ─── Data binding ────────────────────────────────────────────────────────────
 
 /**
@@ -810,7 +844,7 @@ export function syncChartSeries() {
   stopWheelZoom?.();
   stopChartPan?.();
   pauseContext = null;
-  displayFrames.cancel('chart-navigator');
+  cancelNavigatorPaint();
   cancelIndexWarmup();
   cancelPreparation();
   cancelFrameProbe();
@@ -1686,13 +1720,14 @@ function applyData(opts = {}) {
   const covers = coarsePreview || bindingCovers(start, end, windowCount, cap);
   const frozenAppend = appended && state.chartWindow.mode === 'frozen' && sameXRange && covers && !yChanged;
   const reuseBinding = !force && appliedMainGen === dataGen && covers && (!dataChanged || frozenAppend);
+  const widthsChanged = syncChartLineWidths();
 
   if (reuseBinding) {
     if (!sameXRange) {
       expectChartDraw(state.mainChart, request);
       applyXScale(nextXRange);
-    } else if (!rangeDragging && boundKind === 'window' && bucketRaster && bucketRaster.scale < 1) {
-      // Even when the same buckets cover both windows, restore full raster resolution.
+    } else if (widthsChanged || (!rangeDragging && boundKind === 'window' && bucketRaster && bucketRaster.scale < 1)) {
+      // Refresh the stroke or restore full raster resolution without rebinding data.
       expectChartDraw(state.mainChart, request);
       state.mainChart.redraw(true, false);
     }
@@ -1726,9 +1761,9 @@ function applyData(opts = {}) {
     syncNavBuckets(srcLen);
     const nav = state.navigatorChart;
     const now = performance.now();
-    const live = state.isRecording && !force && !preview;
-    const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS;
-    if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
+    const live = state.isRecording && !force && request.reason !== 'release';
+    const delay = live ? lastNavPaint + NAV_PAINT_MIN_MS - now : 0;
+    if (nav && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
       const generation = dataGen;
       const submit = () => {
         if (!monitorVisible() || generation !== dataGen) return;
@@ -1743,10 +1778,16 @@ function applyData(opts = {}) {
         appliedNavLen = length;
         lastNavPaint = performance.now();
       };
-      if (request.pause) displayFrames.schedule('chart-navigator', submit, 20);
-      else {
-        displayFrames.cancel('chart-navigator');
-        submit();
+      if (delay > 0) {
+        if (navPaceTimer === null)
+          navPaceTimer = setTimeout(() => {
+            navPaceTimer = null;
+            if (!rangeDragging) scheduleChartUpdate();
+          }, Math.ceil(delay));
+      } else {
+        cancelNavigatorPaint();
+        if (request.pause) displayFrames.schedule('chart-navigator', submit, 20);
+        else submit();
       }
     }
   }
@@ -1801,13 +1842,20 @@ export function handleMonitorShown() {
   cancelFrameProbe();
   resizeDirty = true;
   scheduleChartUpdate();
+  if (gpuiChartActive) {
+    requestAnimationFrame(() => {
+      state.mainChart?.redraw(true);
+      state.navigatorChart?.redraw(true);
+    });
+  }
 }
 
 export function handleMonitorHidden() {
+  gpuiChartBridge?.hide();
   stopWheelZoom?.();
   stopChartPan?.();
   pauseContext = null;
-  displayFrames.cancel('chart-navigator');
+  cancelNavigatorPaint();
   cancelIndexWarmup();
   chartDirty = true;
   paintRequest = null;
@@ -2037,14 +2085,27 @@ export function applyChartChannelColor(datasetIndex) {
   renderLegend();
 }
 
-/** Update a live series width without recalculating scales or axes. @param {number} datasetIndex */
-export function setChartLineWidth(datasetIndex) {
-  const field = FIELDS[datasetIndex];
-  if (!field || datasetIndex > 3 || !state.mainChart) return;
-  const series = state.mainChart.series[datasetIndex + 1];
-  if (!series) return;
-  series.width = state.settings.chartLineWidths[field];
-  state.mainChart.redraw(true, false);
+function syncChartLineWidths() {
+  const allSeries = state.mainChart?.series;
+  if (!allSeries) return false;
+  const { chartAutoLineWidth, chartLineWidths } = state.settings;
+  const factor = chartAutoLineWidth ? zoomStrokeFactor(visiblePointCount, visiblePlotWidth) : 1;
+  let changed = false;
+  for (let index = 0; index < FIELDS.length; index++) {
+    const series = allSeries[index + 1];
+    const base = index < 4 ? chartLineWidths[FIELDS[index]] : 1;
+    const width = Math.max(0.5, base * factor);
+    if (series && series.width !== width) {
+      series.width = width;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** Apply display preferences without recalculating scales or axes. */
+export function refreshChartLineWidths() {
+  if (syncChartLineWidths()) state.mainChart?.redraw(true, false);
 }
 
 // ─── Scale ranges ────────────────────────────────────────────────────────────
@@ -2847,6 +2908,7 @@ let stopWheelZoom;
 /** @type {(() => void)|undefined} */
 let stopChartPan;
 const WHEEL_SETTLE_MS = 100;
+const WHEEL_EDGE_PX = 4;
 
 /** Coalesce wheel input from the plot and overview into the same time window.
  * @param {HTMLElement|undefined} plot @param {HTMLElement|null} overview
@@ -2904,8 +2966,10 @@ function bindChartWheel(plot, overview) {
       max = dataMax;
       min = state.chartWindow.mode === 'full' ? dataMin : Math.max(dataMin, max - duration);
     }
+    const offset = event.clientX - left;
+    const edge = Math.min(WHEEL_EDGE_PX, width / 4);
     const pivot = wheelZoomPivot({
-      ratio: (event.clientX - left) / width,
+      ratio: offset <= edge ? 0 : offset >= width - edge ? 1 : offset / width,
       min,
       max,
       dataMin,
@@ -2921,9 +2985,16 @@ function bindChartWheel(plot, overview) {
       dataMax,
       minSpan: minZoomSpan(state.settings.sampleRate),
     });
-    if (next.min === min && next.max === max) return;
+    const full = next.min === dataMin && next.max === dataMax;
+    if (next.min === min && next.max === max && !(full && !zoom && state.chartWindow.mode !== 'full')) return;
     zoom = { ...next, dataMin, dataMax, left, width, surface };
     setRangeDragging(true, true);
+    if (full) {
+      // Commit the live full-history state immediately. Do not publish a
+      // frozen window covering the old tail while waiting for wheel idle.
+      drawZoomFrame(true);
+      return;
+    }
     if (settle !== null) clearTimeout(settle);
     settle = setTimeout(() => drawZoomFrame(true), WHEEL_SETTLE_MS);
     displayFrames.schedule('chart-wheel', () => drawZoomFrame(false), 1);
@@ -3060,6 +3131,142 @@ function observeResize(host, chart, onSize = null) {
 
 // ─── Chart initialization ────────────────────────────────────────────────────
 
+/** @param {string} color */
+function nativeChartColor(color) {
+  const match = /^#([\da-f]{6})$/i.exec(color);
+  return match ? Number.parseInt(match[1], 16) : 0;
+}
+
+/** @param {string|null|undefined} fill */
+function nativeFillOpacity(fill) {
+  if (!fill) return 0;
+  const rgba = /^rgba?\([^,]+,[^,]+,[^,]+(?:,\s*([\d.]+))?\)$/i.exec(fill);
+  if (rgba) return rgba[1] == null ? 1 : Math.max(0, Math.min(1, Number(rgba[1])));
+  const hex = /^#(?:[\da-f]{6})([\da-f]{2})$/i.exec(fill);
+  return hex ? Number.parseInt(hex[1], 16) / 255 : 0;
+}
+
+/** @param {any} chart @param {0|1} slot */
+function makeGpuiFrame(chart, slot) {
+  const root = chart.root;
+  const rect = root.getBoundingClientRect();
+  const bbox = chart.bbox;
+  const backingRatio = chart.ctx?.canvas?.width / chart.width || 1;
+  const rootScaleX = root.clientWidth > 0 ? rect.width / root.clientWidth : 1;
+  const rootScaleY = root.clientHeight > 0 ? rect.height / root.clientHeight : rootScaleX;
+  const ratio = Math.max(0.5, Math.min(8, window.devicePixelRatio || backingRatio));
+  const width = (bbox.width / backingRatio) * rootScaleX;
+  const height = (bbox.height / backingRatio) * rootScaleY;
+  const visible = monitorVisible() && width > 0 && height > 0;
+  const pointScaleX = (rootScaleX * ratio) / backingRatio;
+  const pointScaleY = (rootScaleY * ratio) / backingRatio;
+  const series = [];
+  const channelCount = slot === 0 ? FIELDS.length : 1;
+
+  for (let channel = 0; channel < channelCount; channel++) {
+    const seriesIndex = channel + 1;
+    const current = chart.series[seriesIndex];
+    if (!current?.show) continue;
+
+    const geometry = slot === 0 ? (boundKind === 'window' ? mainGeometry[channel] : null) : navGeometry;
+    const xs = geometry?.x ?? chart.data?.[0] ?? [];
+    const ys = geometry?.y ?? chart.data?.[seriesIndex] ?? [];
+    const connect = geometry?.connect;
+    const count = Math.min(xs.length, ys.length);
+    const projected = [];
+    const scale = current.scale || (slot === 1 ? 'y' : SERIES_SCALES[channel]);
+
+    for (let index = 0; index < count; index++) {
+      if (index > 0 && connect && !connect[index]) projected.push(Number.NaN, Number.NaN);
+      const x = xs[index];
+      const y = ys[index];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        projected.push(Number.NaN, Number.NaN);
+        continue;
+      }
+      projected.push(
+        (chart.valToPos(x, 'x', true) - bbox.left) * pointScaleX,
+        (chart.valToPos(y, scale, true) - bbox.top) * pointScaleY,
+      );
+    }
+
+    const color = slot === 0 ? chartTheme[FIELDS[channel]] : chartTheme.power;
+    const fillStyle = slot === 0 && state.settings.chartFillEnabled ? fillStyles[seriesIndex] : null;
+    const fillOpacity = nativeFillOpacity(fillStyle);
+    const fillTo =
+      typeof current.fillTo === 'function' ? current.fillTo(chart, seriesIndex, current.min, current.max, 0) : 0;
+    const baseline = fillOpacity > 0 ? (chart.valToPos(fillTo, scale, true) - bbox.top) * pointScaleY : 0;
+
+    series.push({
+      channel,
+      color: nativeChartColor(color),
+      width: Math.max(0.25, Math.min(64, (current.width || 1) * ratio * rootScaleY)),
+      fillOpacity,
+      baseline,
+      points: Float32Array.from(projected),
+    });
+  }
+
+  return encodeGpuiChartFrame({
+    slot,
+    visible: visible && series.some(({ points }) => points.length >= 4),
+    left: rect.left + (bbox.left / backingRatio) * rootScaleX,
+    top: rect.top + (bbox.top / backingRatio) * rootScaleY,
+    width: Math.max(1, width),
+    height: Math.max(1, height),
+    ratio,
+    series,
+  });
+}
+
+function deactivateGpuiCharts(error) {
+  console.error('GPUI 曲线渲染不可用，恢复 uPlot 绘制:', error);
+  if (!gpuiChartActive) return;
+  gpuiChartActive = false;
+  gpuiChartOverlays?.stop();
+  gpuiChartOverlays = null;
+  gpuiChartBridge?.hide();
+  requestAnimationFrame(() => {
+    state.mainChart?.redraw(true);
+    state.navigatorChart?.redraw(true);
+  });
+}
+
+function submitGpuiFrame(chart, slot) {
+  if (!gpuiChartBridge?.isReady() || !gpuiChartActive) return;
+  if (!monitorVisible()) {
+    gpuiChartBridge.hide();
+    return;
+  }
+  try {
+    gpuiChartBridge.submit(slot, makeGpuiFrame(chart, slot));
+  } catch (error) {
+    deactivateGpuiCharts(error);
+  }
+}
+
+function initializeGpuiCharts() {
+  // The browser showcase simulates Windows UI but has no native chart surface.
+  if (typeof window === 'undefined' || '__SHOWCASE__' in window) return;
+  const invoke = /** @type {any} */ (window.__TAURI__)?.core?.invoke;
+  if (typeof invoke !== 'function') return;
+  gpuiChartBridge = createGpuiChartBridge(invoke, {
+    onReady: () => {
+      gpuiChartOverlays = watchGpuiChartOverlays((rects) => gpuiChartBridge?.setOverlays(rects));
+      gpuiChartActive = true;
+      state.mainChart?.redraw(true);
+      state.navigatorChart?.redraw(true);
+    },
+    onFailure: deactivateGpuiCharts,
+  });
+  void invoke('get_runtime_platform')
+    .then((platform) => {
+      if (platform !== 'windows' || !gpuiChartBridge) return;
+      return gpuiChartBridge.start(() => [makeGpuiFrame(state.mainChart, 0), makeGpuiFrame(state.navigatorChart, 1)]);
+    })
+    .catch((error) => console.warn('GPUI 图表平台检测失败:', error));
+}
+
 /** 初始化主图表。 */
 export function initChart() {
   const host = document.getElementById('main-chart');
@@ -3126,9 +3333,9 @@ export function initChart() {
         // D+/D-/CC 叠加曲线更细，避免与主通道曲线抢焦点
         width: i >= 4 ? 1 : (s.chartLineWidths[field] ?? 1.5),
         points: { show: false },
-        ...(hasPaths ? { paths: adaptivePaths } : {}),
+        ...(hasPaths ? { paths: chartPaths } : {}),
         // Every render path uses the same user-controlled shading switch.
-        fill: () => (state.settings.chartFillEnabled ? fillStyles[i + 1] : null),
+        fill: () => (gpuiChartActive || !state.settings.chartFillEnabled ? null : fillStyles[i + 1]),
         show: showInitial[i],
       })),
     ],
@@ -3154,8 +3361,8 @@ export function initChart() {
     ],
     hooks: {
       drawAxes: [drawYAxisChrome, drawYAxisLabels],
-      drawSeries: [drawBucketFill, drawBucketRaster],
-      draw: [drawMarkers],
+      drawSeries: [drawFallbackBucketFill, drawFallbackBucketRaster],
+      draw: [drawMarkers, (/** @type {any} */ u) => submitGpuiFrame(u, 0)],
       setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],
@@ -3187,6 +3394,7 @@ export function initChart() {
       })
       .catch(() => {});
   }
+  initializeGpuiCharts();
 }
 
 /** 初始化导航器图表（功率全量缩略图，无轴无交互）。 */
@@ -3218,11 +3426,15 @@ function initNavigatorChart() {
         ),
       },
       y: {
-        // 量程来自模块内跟踪的功率全量最大值（序列 auto: false，跳过 uPlot 的全量扫描）
         range: /** @type {any} */ (
           () => {
             const max = seriesMax[3];
-            return [0, Number.isFinite(max) && max > 0 ? max * (1 + headroomFrac()) : 1];
+            const ceiling = max > 0 && Number.isFinite(max) ? Math.max(0.001, max * (1 + headroomFrac())) : 1;
+            // GPUI clips to the plot bounds. Keep the zero baseline and the
+            // topmost peak inside that clip even when headroom is set to 0%.
+            const rows = Math.max(8, (host.clientHeight || 46) - 4);
+            const inset = ceiling / (rows - 2);
+            return [-inset, ceiling + inset];
           }
         ),
       },
@@ -3235,11 +3447,13 @@ function initNavigatorChart() {
         stroke: () => chartTheme.power,
         width: 1,
         points: { show: false },
-        ...(linearBuilder != null ? { paths: adaptivePaths } : {}),
+        ...(linearBuilder != null ? { paths: chartPaths } : {}),
       },
     ],
     axes: [{ show: false }, { show: false }],
-    hooks: { draw: [drawNavigatorMarkers] },
+    hooks: {
+      draw: [drawNavigatorMarkers, (/** @type {any} */ u) => submitGpuiFrame(u, 1)],
+    },
   };
 
   state.navigatorChart = new uPlot(opts, /** @type {any} */ (navData), host);

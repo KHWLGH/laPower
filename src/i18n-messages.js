@@ -327,6 +327,7 @@ export const messages = {
   settingsNavigation: ['Settings navigation', '设置目录', '設定目錄', '設定の目次'],
   appearanceAndLanguage: ['Appearance & language', '外观与语言', '外觀與語言', '外観と言語'],
   customBackground: ['Custom background', '自定义背景图片', '自訂背景圖片', 'カスタム背景画像'],
+  backgroundTransparency: ['Background image transparency', '背景图片透明度', '背景圖片透明度', '背景画像の透明度'],
   customBackgroundHint: [
     'Choose a PNG, JPG or WebP image. It is saved on this device and restored when the app starts.',
     '选择 PNG、JPG 或 WebP 图片。图片保存在此设备，并在应用启动时自动恢复。',
@@ -915,6 +916,12 @@ export const messages = {
   tempColor: ['Temperature curve color', '温度曲线颜色', '溫度曲線顏色', '温度曲線の色'],
   fillOpacity: ['Fill', '填充', '填色', '塗り'],
   lineWidth: ['Line thickness', '线条粗细', '線條粗細', '線の太さ'],
+  chartAutoLineWidth: [
+    'Adjust line thickness on zoom',
+    '缩放时自动调整线条粗细',
+    '縮放時自動調整線條粗細',
+    'ズームに合わせて線の太さを調整',
+  ],
   displayIncrease: ['Increase', '增加', '增加', '増やす'],
   displayDecrease: ['Decrease', '减少', '減少', '減らす'],
   curveOffset: ['Y offset', '上下错开', '上下錯開', '上下ずらし'],
