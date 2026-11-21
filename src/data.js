@@ -14,6 +14,7 @@ import {
   classifyChartWindow,
   emptyChartWindow,
   minZoomSpan,
+  overviewZoomPivot,
   resolveChartWindow,
   zoomTimeWindow,
 } from './chart-window.js';
@@ -514,10 +515,11 @@ export function adoptWindowFromPermille() {
 
 /**
  * 滚轮横向缩放：绕 pivot 缩放当前时间窗，写回滑块与 xWindow。
- * @param {number} pivotSec
+ * @param {number} anchor 图表时间，或总览图相对位置。
  * @param {number} factor
+ * @param {boolean} [overview=false]
  */
-export function applyChartXZoom(pivotSec, factor) {
+export function applyChartXZoom(anchor, factor, overview = false) {
   const xs = state.chartSeries.x;
   const n = xs.length;
   if (n === 0) return;
@@ -527,7 +529,7 @@ export function applyChartXZoom(pivotSec, factor) {
   const zoomed = zoomTimeWindow({
     min: current.min,
     max: current.max,
-    pivot: pivotSec,
+    pivot: overview ? overviewZoomPivot(anchor, dataMin, dataMax, current) : anchor,
     factor,
     dataMin,
     dataMax,

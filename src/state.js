@@ -419,7 +419,7 @@ export const state = {
   __setRangeControlsEnabled: null,
   /**
    * 滚轮缩放：由 data.js 注入，避免 chart.js ↔ data.js 循环 import。
-   * @type {((pivotSec: number, factor: number) => void)|null}
+   * @type {((anchor: number, factor: number, overview?: boolean) => void)|null}
    */
   __applyChartXZoom: null,
   /**

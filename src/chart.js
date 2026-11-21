@@ -2844,34 +2844,39 @@ function tooltipPlugin() {
 
 // ─── Sizing ──────────────────────────────────────────────────────────────────
 
-/**
- * 绘图区滚轮横向缩放。预览走手柄快路径，松手后补一帧全质量图。
- * @param {any} u
- */
+/** 绘图区和底部时间线的滚轮共享缩放与重绘流程。 @param {any} u */
 function bindChartWheel(u) {
-  const over = u?.over;
-  if (!over) return;
+  /** @type {HTMLElement|undefined} */
+  const plot = u?.over;
+  /** @type {HTMLElement|null} */
+  const overview = document.getElementById('timeline-track');
   /** @type {ReturnType<typeof setTimeout>|null} */
   let wheelEndTimer = null;
-  over.addEventListener(
-    'wheel',
-    (event) => {
-      event.preventDefault();
-      if (state.chartSeries.x.length === 0) return;
-      const rect = over.getBoundingClientRect();
-      const pivot = u.posToVal(event.clientX - rect.left, 'x');
-      const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
-      setRangeDragging(true);
-      state.__applyChartXZoom?.(pivot, factor);
-      if (wheelEndTimer != null) clearTimeout(wheelEndTimer);
-      wheelEndTimer = setTimeout(() => {
-        wheelEndTimer = null;
-        setRangeDragging(false);
-        updateCharts('interaction', { force: false, reason: 'release' });
-      }, 80);
-    },
-    { passive: false },
-  );
+
+  /** @param {WheelEvent} event */
+  function onWheel(event) {
+    if (state.chartSeries.x.length < 2 || (state.__rangeDragging && wheelEndTimer === null)) return;
+    const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+    if (factor === 1) return;
+    const target = /** @type {HTMLElement} */ (event.currentTarget);
+    const { left, width } = target.getBoundingClientRect();
+    if (width <= 0) return;
+    event.preventDefault();
+
+    const x = event.clientX - left;
+    const onOverview = target === overview;
+    setRangeDragging(true);
+    state.__applyChartXZoom?.(onOverview ? x / width : u.posToVal(x, 'x'), factor, onOverview);
+    if (wheelEndTimer !== null) clearTimeout(wheelEndTimer);
+    wheelEndTimer = setTimeout(() => {
+      wheelEndTimer = null;
+      setRangeDragging(false);
+      updateCharts('interaction', { force: false, reason: 'release' });
+    }, 80);
+  }
+
+  plot?.addEventListener('wheel', onWheel, { passive: false });
+  overview?.addEventListener('wheel', onWheel, { passive: false });
 }
 
 let resizeDirty = false;
