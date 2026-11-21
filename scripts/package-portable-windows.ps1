@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+﻿# SPDX-License-Identifier: GPL-3.0-only
 [CmdletBinding()]
 param()
 
@@ -20,17 +20,18 @@ $stage = New-Item -ItemType Directory -Path (Join-Path $bundle ([guid]::NewGuid(
 try {
     Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $stage.FullName 'laPower.exe')
     Copy-Item -LiteralPath (Join-Path $repo 'LICENSE'), (Join-Path $repo 'LICENSE.LGPL-3.0'), (Join-Path $repo 'COPYRIGHT') -Destination $stage.FullName
-    @'
-Windows x64 portable edition / Windows x64 免安装版
-
-Extract all files, then double-click laPower.exe.
-Microsoft Edge WebView2 Runtime must already be available on the system.
-App settings and cache use the existing Windows user data directories.
-
-解压全部文件后，双击 laPower.exe 启动。
-运行环境需要 Microsoft Edge WebView2 Runtime。
-应用设置和缓存沿用 Windows 用户数据目录。
-'@ | Set-Content -LiteralPath (Join-Path $stage.FullName 'README.txt') -Encoding utf8
+    $readme = @(
+        'Windows x64 portable edition / Windows x64 免安装版',
+        '',
+        'Extract all files, then double-click laPower.exe.',
+        'Microsoft Edge WebView2 Runtime must already be available on the system.',
+        'App settings and cache use the existing Windows user data directories.',
+        '',
+        '解压全部文件后，双击 laPower.exe 启动。',
+        '运行环境需要 Microsoft Edge WebView2 Runtime。',
+        '应用设置和缓存沿用 Windows 用户数据目录。'
+    ) -join [Environment]::NewLine
+    Set-Content -LiteralPath (Join-Path $stage.FullName 'README.txt') -Value $readme -Encoding utf8
 
     $archive = Join-Path $stage.FullName 'verified.zip'
     $files = @(Get-ChildItem -File -LiteralPath $stage.FullName)

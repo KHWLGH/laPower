@@ -85,6 +85,7 @@ ab_glyph = "0.2"
 openh264 = "0.9"
 
 [target.'cfg(windows)'.dependencies]
+async-channel = "2"
 # Video report export draws the dashboard with Direct2D / DirectWrite / WIC on a D3D11 texture and
 # encodes with Media Foundation. 0.61 rather than 0.62 keeps a single `windows` in the graph:
 # tauri already pulls 0.61 through tao/wry, and windows-numerics 0.2 is the matching crate.
@@ -113,6 +114,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging"
 ] }
+gpui = { version = "0.2.2", default-features = false }
+raw-window-handle = "0.6"
 
 [target.'cfg(windows)'.dev-dependencies]
 # The portable pipeline (skia renderer, OpenH264, in-house MP4 muxer) runs on macOS and Linux; the

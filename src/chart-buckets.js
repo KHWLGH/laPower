@@ -272,9 +272,16 @@ export class SeriesBuckets {
         bucketsRemaining = Math.max(1, maxBuckets);
       while (i < end && remaining > 0 && bucketsRemaining > 0) {
         if (!bucket) {
-          for (let s = 0; s < this.channels; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
-          bucket = makeBucket(columnValue(xs, i), values, i++);
-          remaining--;
+          if (index) {
+            // Query the entire bucket, including its first sample. An aligned
+            // power-of-two bucket can then use a single exact index node.
+            bucket = makeBucket(columnValue(xs, i), values, i);
+            bucket.n = 0;
+          } else {
+            for (let s = 0; s < this.channels; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
+            bucket = makeBucket(columnValue(xs, i), values, i++);
+            remaining--;
+          }
         }
         const through = Math.min(end, bucket.start + this.ppb, i + remaining);
         if (index) index.fold(bucket, series, i, through);

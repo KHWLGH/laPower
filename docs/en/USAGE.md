@@ -100,8 +100,10 @@ Drag the panel's right divider to resize it; narrow windows limit the resulting 
 - Open `Display` to choose curves. Voltage, current, power and temperature are selected by default; D+/D- and CC1/CC2 are off. Selecting the temperature curve does not connect its source.
 - The Curve shading switch at the top of Display defaults on and saves your choice. Turning it off preserves each main channel’s opacity; turning it back on restores those values. Recording, pausing, dragging and zooming never change shading automatically. This switch affects the monitor chart only.
 - Each main channel has a fill opacity from 0–100%, default 15%. Zero removes fill, not the curve. The legend identifies visible channels; it does not toggle them.
-- By default, the voltage, current and power peaks align from top to bottom, one major grid row apart. Use the arrows in `Display` to adjust fill, line thickness and vertical offset. An offset of 0 restores the default position. These adjustments do not modify samples.
+- By default, the voltage, current and power peaks align from top to bottom, with spacing limited by available headroom. Use the arrows in `Display` to adjust fill, line thickness and vertical offset. An offset of 0 restores the default position. These adjustments do not modify samples.
 - Hover for enabled channels with valid values at that time. Scroll to zoom around the pointer, then drag the main plot horizontally to pan.
+- The wheel, main plot drag, and overview selection change the time range without refitting the vertical axes to the selection. During recording, new peaks affect the scale after the gesture ends.
+- Scroll over the main plot or the overview to zoom. If the plot is following the latest samples during recording, zoom changes the displayed duration without stopping follow. Zooming a historical window does not jump to live data.
 - Drag the bottom timeline's end handles to resize the range or its middle to pan. A range touching the newest point follows new data; a historical range stays in place.
 - `Selected range only` is off by default. Enabling it limits min/average/max and energy/capacity to the selected range; the large live readings still show current previews. It neither removes data nor limits exports. Missing values are excluded from statistics.
 
@@ -295,7 +297,7 @@ Language changes apply immediately and retain recording/data. Unsupported system
 
 | Setting | Meaning and default |
 | --- | --- |
-| `Chart headroom` | `Automatic` by default, about 25%; `Custom` allows 0–100% |
+| `Chart headroom` | `Automatic` uses peaks of enabled channels across the full recording; `Custom` allows 0–100% |
 | `Record current direction` | Off by default. New recordings/imports preserve the current sign when enabled. Existing data is unchanged; export keeps recorded values |
 | `Mark immediately` | Off by default. Enable to add markers without first entering a label |
 | `Recording limit` | 64–8192 MB, default 512 MB. The budget covers all data in the current chart, including existing/imported data. Reaching it pauses recording; it does not automatically create multiple files |

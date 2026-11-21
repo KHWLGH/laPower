@@ -1,0 +1,184 @@
+/// Transfer direction
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Direction {
+    /// Host to device
+    Out = 0,
+
+    /// Device to host
+    In = 0x80,
+}
+
+impl Direction {
+    pub(crate) fn from_address(addr: u8) -> Direction {
+        match addr & Self::MASK {
+            0 => Self::Out,
+            _ => Self::In,
+        }
+    }
+    pub(crate) const MASK: u8 = 0x80;
+}
+
+/// Specification defining the request.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum ControlType {
+    /// Request defined by the USB standard.
+    Standard = 0,
+
+    /// Request defined by the standard USB class specification.
+    Class = 1,
+
+    /// Non-standard request.
+    Vendor = 2,
+}
+
+/// Entity targeted by the request.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Recipient {
+    /// Request made to device as a whole.
+    Device = 0,
+
+    /// Request made to specific interface.
+    Interface = 1,
+
+    /// Request made to specific endpoint.
+    Endpoint = 2,
+
+    /// Other request.
+    Other = 3,
+}
+
+/// SETUP packet and associated data to make an **OUT** request on a control endpoint.
+#[derive(Debug, Clone, Copy)]
+pub struct ControlOut<'a> {
+    /// Request type used for the `bmRequestType` field sent in the SETUP packet.
+    #[doc(alias = "bmRequestType")]
+    pub control_type: ControlType,
+
+    /// Recipient used for the `bmRequestType` field sent in the SETUP packet.
+    #[doc(alias = "bmRequestType")]
+    pub recipient: Recipient,
+
+    /// `bRequest` field sent in the SETUP packet.
+    #[doc(alias = "bRequest")]
+    pub request: u8,
+
+    /// `wValue` field sent in the SETUP packet.
+    #[doc(alias = "wValue")]
+    pub value: u16,
+
+    /// `wIndex` field sent in the SETUP packet.
+    ///
+    /// For [`Recipient::Interface`] this is the interface number. For [`Recipient::Endpoint`] this is the endpoint number.
+    #[doc(alias = "wIndex")]
+    pub index: u16,
+
+    /// Data to be sent in the data stage.
+    #[doc(alias = "wLength")]
+    pub data: &'a [u8],
+}
+
+impl<'a> ControlOut<'a> {
+    #[allow(unused)]
+    pub(crate) fn setup_packet(&self) -> [u8; SETUP_PACKET_SIZE] {
+        pack_setup(
+            Direction::Out,
+            self.control_type,
+            self.recipient,
+            self.request,
+            self.value,
+            self.index,
+            self.data.len().try_into().expect("length must fit in u16"),
+        )
+    }
+
+    #[allow(unused)]
+    pub(crate) fn request_type(&self) -> u8 {
+        request_type(Direction::Out, self.control_type, self.recipient)
+    }
+}
+
+/// SETUP packet to make an **IN** request on a control endpoint.
+#[derive(Debug, Clone, Copy)]
+pub struct ControlIn {
+    /// Request type used for the `bmRequestType` field sent in the SETUP packet.
+    #[doc(alias = "bmRequestType")]
+    pub control_type: ControlType,
+
+    /// Recipient used for the `bmRequestType` field sent in the SETUP packet.
+    #[doc(alias = "bmRequestType")]
+    pub recipient: Recipient,
+
+    /// `bRequest` field sent in the SETUP packet.
+    #[doc(alias = "bRequest")]
+    pub request: u8,
+
+    /// `wValue` field sent in the SETUP packet.
+    #[doc(alias = "wValue")]
+    pub value: u16,
+
+    /// `wIndex` field sent in the SETUP packet.
+    ///
+    /// For [`Recipient::Interface`] this is the interface number. For [`Recipient::Endpoint`] this is the endpoint number.
+    #[doc(alias = "wIndex")]
+    pub index: u16,
+
+    /// Number of bytes to be read in the data stage.
+    #[doc(alias = "wLength")]
+    pub length: u16,
+}
+
+impl ControlIn {
+    #[allow(unused)]
+    pub(crate) fn setup_packet(&self) -> [u8; SETUP_PACKET_SIZE] {
+        pack_setup(
+            Direction::In,
+            self.control_type,
+            self.recipient,
+            self.request,
+            self.value,
+            self.index,
+            self.length,
+        )
+    }
+
+    #[allow(unused)]
+    pub(crate) fn request_type(&self) -> u8 {
+        request_type(Direction::In, self.control_type, self.recipient)
+    }
+}
+
+pub(crate) const SETUP_PACKET_SIZE: usize = 8;
+
+fn pack_setup(
+    direction: Direction,
+    control_type: ControlType,
+    recipient: Recipient,
+    request: u8,
+    value: u16,
+    index: u16,
+    length: u16,
+) -> [u8; SETUP_PACKET_SIZE] {
+    let bmrequesttype = request_type(direction, control_type, recipient);
+
+    [
+        bmrequesttype,
+        request,
+        (value & 0xFF) as u8,
+        (value >> 8) as u8,
+        (index & 0xFF) as u8,
+        (index >> 8) as u8,
+        (length & 0xFF) as u8,
+        (length >> 8) as u8,
+    ]
+}
+
+pub(crate) fn request_type(
+    direction: Direction,
+    control_type: ControlType,
+    recipient: Recipient,
+) -> u8 {
+    (direction as u8) | ((control_type as u8) << 5) | (recipient as u8)
+}

@@ -394,21 +394,26 @@ export function addDataPoint(data, segment) {
 // ─── Slider / range ──────────────────────────────────────────────────────────
 
 /** 更新滑块填充条的位置和宽度。 */
-export function updateSliderFill() {
+/** @param {[number,number]} [domain] Frozen overview domain during a pointer gesture. */
+export function updateSliderFill(domain) {
   if (!monitorDisplayVisible()) return;
   const startEl = /** @type {HTMLInputElement|null} */ (document.getElementById('range-start'));
   const endEl = /** @type {HTMLInputElement|null} */ (document.getElementById('range-end'));
   if (startEl && startEl.value !== String(state.settings.rangeStart)) startEl.value = String(state.settings.rangeStart);
   if (endEl && endEl.value !== String(state.settings.rangeEnd)) endEl.value = String(state.settings.rangeEnd);
 
-  const start = state.settings.rangeStart / 10;
-  const end = state.settings.rangeEnd / 10;
+  const xs = state.chartSeries.x;
+  const [min, max] = domain ?? [xs.at(0), xs.at(-1)];
+  const span = max - min;
+  const win = state.chartWindow;
+  const start = span > 0 && win.mode !== 'full' ? Math.max(0, ((win.min - min) * 100) / span) : 0;
+  const end = span > 0 && win.mode !== 'full' ? Math.min(100, ((win.max - min) * 100) / span) : 100;
   const fill = document.getElementById('slider-fill');
   if (fill?.style) {
     if (fill.style.left !== `${start}%`) fill.style.left = `${start}%`;
     if (fill.style.width !== `${end - start}%`) fill.style.width = `${end - start}%`;
   }
-  fill?.classList?.toggle('is-pannable', state.settings.rangeEnd - state.settings.rangeStart < 1000);
+  fill?.classList?.toggle('is-pannable', end - start < 100);
 
   const handleStart = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-start'));
   const handleEnd = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-end'));
@@ -488,18 +493,18 @@ export function adoptWindowFromPermille() {
  * 主图缩放或平移时同步时间轴，交互结束后吸附录制边缘并更新选区统计。
  * @param {number} min @param {number} max @param {boolean} settled
  */
-function applyChartXWindow(min, max, settled) {
+function applyChartXWindow(min, max, settled, /** @type {[number,number]|undefined} */ overviewDomain) {
   const xs = state.chartSeries.x;
   const n = xs.length;
   if (n === 0) return;
   const dataMin = xs.at(0);
   const dataMax = xs.at(-1);
   state.chartWindow = settled
-    ? classifyChartWindow(min, max, dataMin, dataMax, sampleEdgeEps())
+    ? classifyChartWindow(min, max, dataMin, dataMax, 1e-6)
     : { mode: 'frozen', min, max, duration: max - min };
   paintFromWindow(xs, n, dataMin, dataMax);
   if (monitorDisplayVisible()) {
-    updateSliderFill();
+    updateSliderFill(overviewDomain);
     writeRangeLabels(xs);
   }
   if (settled && state.settings.statsRange) scheduleStatsUpdate();

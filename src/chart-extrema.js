@@ -104,6 +104,35 @@ export class ExactExtremaIndex {
 
   /** @param {ExtremaResult} result @param {NumericColumn[]} series @param {number} start @param {number} end */
   fold(result, series, start, end) {
+    const stride = end - start;
+    if (
+      stride >= BLOCK_SIZE &&
+      (stride & (stride - 1)) === 0 &&
+      start % stride === 0 &&
+      end / BLOCK_SIZE <= this.blocks
+    ) {
+      const node = start / stride;
+      const page = this.levels[Math.log2(stride / BLOCK_SIZE)][node >>> PAGE_SHIFT];
+      const offset = (node & PAGE_MASK) * this.stride;
+      for (let s = 0; s < this.channels; s++) {
+        const count = page[offset + this.channels * 2 + s];
+        if (!count) continue;
+        const low = page[offset + s];
+        const high = page[offset + this.channels + s];
+        const min = columnValue(series[s], low);
+        const max = columnValue(series[s], high);
+        if (!Number.isFinite(result.min[s]) || min < result.min[s]) {
+          result.min[s] = min;
+          if (result.minIndex) result.minIndex[s] = low;
+        }
+        if (!Number.isFinite(result.max[s]) || max > result.max[s]) {
+          result.max[s] = max;
+          if (result.maxIndex) result.maxIndex[s] = high;
+        }
+        if (result.count) result.count[s] += count;
+      }
+      return;
+    }
     const first = Math.ceil(start / BLOCK_SIZE),
       last = Math.min(Math.floor(end / BLOCK_SIZE), this.blocks);
     const headEnd = Math.min(end, first * BLOCK_SIZE);

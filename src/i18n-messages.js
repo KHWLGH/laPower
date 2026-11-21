@@ -862,10 +862,10 @@ export const messages = {
   uiScaleTitle: ['UI scale percentage', '界面缩放比例', '介面縮放比例', 'UI の拡大率'],
   headroom: ['Chart headroom', '图表纵向余量', '圖表縱向餘量', 'グラフ上部の余白'],
   headroomHint: [
-    'Empty space above curves; automatic mode reserves about 25%.',
-    '曲线顶部预留的空白比例；自动约为 25%，让曲线保持中高位置。',
-    '曲線頂部預留的空白比例；自動約為 25%。',
-    '曲線上部の余白です。自動モードでは約 25% を確保します。',
+    'Auto uses peaks across the full recording; custom sets extra headroom.',
+    '自动按全程记录的峰值定标；可自定义顶部余量。',
+    '自動依全程記錄的峰值定標；可自訂上方餘量。',
+    '自動では記録全体のピークに合わせます。余白は手動設定できます。',
   ],
   signedCurrent: ['Record current direction', '记录电流方向', '記錄電流方向', '電流の方向を記録'],
   signedCurrentHint: [

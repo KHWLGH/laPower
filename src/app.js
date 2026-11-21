@@ -22,7 +22,7 @@ import {
   setSeriesVisible,
   updateCharts,
 } from './chart.js';
-import { panPermilleWindow } from './chart-window.js';
+import { minZoomSpan, moveNavigatorWindow } from './chart-window.js';
 import { importCSV } from './csv.js';
 import { clearCustomBackground, initCustomBackgroundControls, loadCustomBackground } from './custom-background.js';
 import {
@@ -319,9 +319,8 @@ function setupControls() {
    * @param {number|string} nextStart
    * @param {number|string} nextEnd
    * @param {'start'|'end'} leader
-   * @param {boolean} [preview=false] 手柄拖动中：走 rAF 节流刷新，不立即提交绘制
    */
-  function applyRangeValues(nextStart, nextEnd, leader, preview = false) {
+  function applyRangeValues(nextStart, nextEnd, leader) {
     let start = clamp(Number.parseInt(String(nextStart), 10), 0, 1000);
     let end = clamp(Number.parseInt(String(nextEnd), 10), 0, 1000);
 
@@ -335,28 +334,8 @@ function setupControls() {
     adoptWindowFromPermille();
 
     updateChartRange();
-    if (!preview && state.settings.statsRange) scheduleStatsUpdate();
-    updateCharts('interaction', { force: false, reason: preview ? 'interaction' : 'release' });
-  }
-
-  /** @type {(() => void)|null} */
-  let pendingRangeInput = null;
-  function commitRangeInput() {
-    const apply = pendingRangeInput;
-    pendingRangeInput = null;
-    displayFrames.cancel('range-pointer');
-    apply?.();
-  }
-  /** @param {() => void} apply */
-  function queueRangeInput(apply) {
-    pendingRangeInput = apply;
-    displayFrames.schedule('range-pointer', commitRangeInput);
-  }
-  function finishRangeGesture() {
-    setRangeDragging(false);
-    if (pendingRangeInput) commitRangeInput();
-    else updateCharts('interaction', { force: false, reason: 'release' });
     if (state.settings.statsRange) scheduleStatsUpdate();
+    updateCharts('interaction', { force: false, reason: 'release' });
   }
 
   /** @param {'start'|'end'} leader */
@@ -367,45 +346,78 @@ function setupControls() {
   rangeStart.addEventListener('input', () => onSliderChange('start'));
   rangeEnd.addEventListener('input', () => onSliderChange('end'));
 
+  /** @param {HTMLElement|null} target @param {'start'|'end'|'pan'} part */
+  function bindNavigatorPointer(target, part) {
+    if (!target || !sliderContainer) return;
+    /** @type {{id:number, origin:number, x:number, secondsPerPixel:number, min:number, max:number, dataMin:number, dataMax:number, minSpan:number, columns:typeof state.chartSeries}|null} */
+    let gesture = null;
+    const drawPreview = () => draw(false);
+
+    /** @param {boolean} settled */
+    function draw(settled) {
+      if (!gesture || !state.__rangeDragging || gesture.columns !== state.chartSeries) return;
+      const { x, origin, secondsPerPixel, dataMin, dataMax, minSpan } = gesture;
+      const next = moveNavigatorWindow(gesture, part, (x - origin) * secondsPerPixel, dataMin, dataMax, minSpan);
+      if (settled) setRangeDragging(false);
+      const before = state.chartWindow;
+      if (!settled && before.min === next.min && before.max === next.max) return;
+      state.__applyChartXWindow?.(next.min, next.max, settled, settled ? undefined : [dataMin, dataMax]);
+      updateCharts('interaction', { force: false, reason: settled ? 'release' : 'interaction' });
+    }
+
+    target.addEventListener('pointerdown', (event) => {
+      const columns = state.chartSeries;
+      const dataMin = columns.x.at(0);
+      const dataMax = columns.x.at(-1);
+      const { min, max } = state.chartWindow;
+      if (gesture || !event.isPrimary || event.button !== 0 || !(dataMax > dataMin && max > min)) return;
+      if (part === 'pan' && max - min >= dataMax - dataMin) return;
+      const { width } = sliderContainer.getBoundingClientRect();
+      if (width <= 0) return;
+      event.preventDefault();
+      if (part !== 'pan') target.focus({ preventScroll: true });
+      target.setPointerCapture(event.pointerId);
+      gesture = {
+        id: event.pointerId,
+        origin: event.clientX,
+        x: event.clientX,
+        secondsPerPixel: (dataMax - dataMin) / width,
+        min,
+        max,
+        dataMin,
+        dataMax,
+        minSpan: minZoomSpan(state.settings.sampleRate),
+        columns,
+      };
+      if (part === 'pan') target.classList.add('is-panning');
+      setRangeDragging(true);
+    });
+    target.addEventListener('pointermove', (event) => {
+      if (gesture?.id !== event.pointerId) return;
+      gesture.x = event.clientX;
+      displayFrames.schedule('range-pointer', drawPreview);
+    });
+    /** @param {PointerEvent} event */
+    function finish(event) {
+      if (!gesture || gesture.id !== event.pointerId) return;
+      if (event.type === 'pointerup') gesture.x = event.clientX;
+      displayFrames.cancel('range-pointer');
+      draw(true);
+      gesture = null;
+      target?.classList.remove('is-panning');
+    }
+    target.addEventListener('pointerup', finish);
+    target.addEventListener('pointercancel', finish);
+    target.addEventListener('lostpointercapture', finish);
+  }
+
   /**
    * @param {HTMLElement|null} handle
    * @param {'start'|'end'} which
    */
   function setupHandleInteractions(handle, which) {
     if (!handle) return;
-
-    /** @type {{pointer: number, rect: DOMRect}|null} */
-    let drag = null;
-    const endHandleDrag = () => {
-      if (!drag) return;
-      drag = null;
-      finishRangeGesture();
-    };
-    /** @param {PointerEvent} event */
-    const moveHandle = (event) => {
-      if (drag?.pointer !== event.pointerId || !drag.rect.width) return;
-      const value = clamp(Math.round(((event.clientX - drag.rect.left) / drag.rect.width) * 1000), 0, 1000);
-      queueRangeInput(() => {
-        if (which === 'start') applyRangeValues(value, rangeEnd.value, 'start', !!drag);
-        else applyRangeValues(rangeStart.value, value, 'end', !!drag);
-      });
-    };
-
-    handle.addEventListener('pointerdown', (event) => {
-      if (!sliderContainer || !event.isPrimary || event.button !== 0) return;
-      event.preventDefault();
-      handle.focus();
-      handle.setPointerCapture(event.pointerId);
-      drag = { pointer: event.pointerId, rect: sliderContainer.getBoundingClientRect() };
-      setRangeDragging(true);
-    });
-
-    handle.addEventListener('pointermove', moveHandle);
-    handle.addEventListener('pointerup', (event) => {
-      if (drag?.pointer !== event.pointerId) return;
-      endHandleDrag();
-    });
-    handle.addEventListener('lostpointercapture', endHandleDrag);
+    bindNavigatorPointer(handle, which);
 
     handle.addEventListener('keydown', (event) => {
       const key = event.key;
@@ -417,63 +429,30 @@ function setupControls() {
 
       event.preventDefault();
 
-      const baseStep = event.shiftKey ? 10 : event.ctrlKey ? 50 : 1;
-      const current = which === 'start' ? Number.parseInt(rangeStart.value, 10) : Number.parseInt(rangeEnd.value, 10);
-      let next = current;
-
-      if (isHome) next = 0;
-      else if (isEnd) next = 1000;
-      else if (isLeft) next = current - baseStep;
-      else if (isRight) next = current + baseStep;
-
-      next = clamp(next, 0, 1000);
-      if (which === 'start') applyRangeValues(next, rangeEnd.value, 'start');
-      else applyRangeValues(rangeStart.value, next, 'end');
+      const xs = state.chartSeries.x;
+      const dataMin = xs.at(0);
+      const dataMax = xs.at(-1);
+      const span = dataMax - dataMin;
+      if (!(span > 0) || state.__rangeDragging) return;
+      const baseStep = (span * (event.shiftKey ? 10 : event.ctrlKey ? 50 : 1)) / 1000;
+      const delta = isHome ? -span : isEnd ? span : isLeft ? -baseStep : baseStep;
+      const next = moveNavigatorWindow(
+        state.chartWindow,
+        which,
+        delta,
+        dataMin,
+        dataMax,
+        minZoomSpan(state.settings.sampleRate),
+      );
+      state.__applyChartXWindow?.(next.min, next.max, true);
+      updateCharts('interaction', { force: false, reason: 'release' });
     });
   }
 
   setupHandleInteractions(handleStart, 'start');
   setupHandleInteractions(handleEnd, 'end');
 
-  const sliderFill = /** @type {HTMLElement|null} */ (document.getElementById('slider-fill'));
-  if (sliderFill && sliderContainer) {
-    /** @type {{pointer: number, x: number, width: number, start: number, end: number}|null} */
-    let pan = null;
-
-    const endFillPan = () => {
-      if (!pan) return;
-      pan = null;
-      sliderFill.classList.remove('is-panning');
-      finishRangeGesture();
-    };
-
-    sliderFill.addEventListener('pointerdown', (event) => {
-      const { rangeStart: start, rangeEnd: end } = state.settings;
-      if (!event.isPrimary || event.button !== 0 || end - start >= 1000) return;
-      event.preventDefault();
-      sliderFill.setPointerCapture(event.pointerId);
-      pan = {
-        pointer: event.pointerId,
-        x: event.clientX,
-        width: sliderContainer.getBoundingClientRect().width,
-        start,
-        end,
-      };
-      sliderFill.classList.add('is-panning');
-      setRangeDragging(true);
-    });
-
-    sliderFill.addEventListener('pointermove', (event) => {
-      if (pan?.pointer !== event.pointerId || !pan.width) return;
-      const next = panPermilleWindow(pan.start, pan.end, ((event.clientX - pan.x) / pan.width) * 1000);
-      queueRangeInput(() => applyRangeValues(next.start, next.end, 'start', !!pan));
-    });
-
-    sliderFill.addEventListener('pointerup', (event) => {
-      if (pan?.pointer === event.pointerId) endFillPan();
-    });
-    sliderFill.addEventListener('lostpointercapture', endFillPan);
-  }
+  bindNavigatorPointer(document.getElementById('slider-fill'), 'pan');
 
   updateSliderFill();
 

@@ -423,7 +423,7 @@ export const state = {
   __setRangeControlsEnabled: null,
   /**
    * 滚轮缩放：由 data.js 注入，避免 chart.js ↔ data.js 循环 import。
-   * @type {((min: number, max: number, settled: boolean) => void)|null}
+   * @type {((min: number, max: number, settled: boolean, overviewDomain?: [number, number]) => void)|null}
    */
   __applyChartXWindow: null,
   /**

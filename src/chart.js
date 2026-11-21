@@ -37,7 +37,14 @@ import {
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { rasterOrderedFill } from './chart-fill.js';
 import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
-import { minZoomSpan, panTimeWindow, wheelZoomFactor, zoomTimeWindow } from './chart-window.js';
+import {
+  minZoomSpan,
+  panTimeWindow,
+  settleWheelZoomWindow,
+  wheelZoomFactor,
+  wheelZoomPivot,
+  zoomTimeWindow,
+} from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { chartCurrent, currentAt } from './current-display.js';
 import { displayFrames } from './frame-scheduler.js';
@@ -2839,84 +2846,91 @@ function tooltipPlugin() {
 let stopWheelZoom;
 /** @type {(() => void)|undefined} */
 let stopChartPan;
-const WHEEL_ZOOM_MS = 90;
+const WHEEL_SETTLE_MS = 100;
 
-/** Animate the actual viewport so the axes, curves and hit testing stay in sync. @param {any} u */
-function bindChartWheel(u) {
-  /** @type {HTMLElement|undefined} */
-  const over = u?.over;
-  if (!over) return;
-  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-  /** @type {{fromMin: number, fromMax: number, min: number, max: number, initialDataMax: number, startedAt: number}|null} */
+/** Coalesce wheel input from the plot and overview into the same time window.
+ * @param {HTMLElement|undefined} plot @param {HTMLElement|null} overview
+ */
+function bindChartWheel(plot, overview) {
+  /** @type {{min:number,max:number,dataMin:number,dataMax:number,left:number,width:number,surface:HTMLElement}|null} */
   let zoom = null;
-  /** @type {DOMRect|null} */
-  let wheelBounds = null;
+  /** @type {ReturnType<typeof setTimeout>|null} */
+  let settle = null;
   stopWheelZoom = () => {
     if (!zoom) return;
     zoom = null;
-    wheelBounds = null;
+    if (settle !== null) clearTimeout(settle);
+    settle = null;
     displayFrames.cancel('chart-wheel');
     setRangeDragging(false, true);
   };
 
-  function drawZoomFrame() {
+  /** @param {boolean} finished */
+  function drawZoomFrame(finished) {
     if (!zoom || !monitorVisible()) {
       stopWheelZoom?.();
       return;
     }
-    const time = reducedMotion?.matches ? 1 : Math.min(1, (performance.now() - zoom.startedAt) / WHEEL_ZOOM_MS);
-    const eased = 1 - (1 - time) ** 3;
-    const finished = time === 1;
     let { min, max } = zoom;
-    if (finished && max === zoom.initialDataMax) {
-      // While zooming into the live edge, carry the selected span to the latest sample.
-      const latest = state.chartSeries.x.at(-1) ?? max;
-      if (min > state.chartSeries.x.at(0)) min += latest - max;
-      max = latest;
+    const { dataMin, dataMax } = zoom;
+    if (finished) {
+      // The overview domain is held during the gesture, but samples can still
+      // arrive. Rebase the chosen duration onto the actual tail before settling.
+      const latest = state.chartSeries.x.at(-1);
+      ({ min, max } = settleWheelZoomWindow({ min, max, dataMin, dataMax, latest }));
+      stopWheelZoom?.();
     }
-    const { fromMin, fromMax } = zoom;
-    if (finished) stopWheelZoom?.();
-    state.__applyChartXWindow?.(
-      finished ? min : fromMin + (min - fromMin) * eased,
-      finished ? max : fromMax + (max - fromMax) * eased,
-      finished,
-    );
+    state.__applyChartXWindow?.(min, max, finished, finished ? undefined : [dataMin, dataMax]);
     updateCharts('interaction', { force: false, reason: finished ? 'release' : 'interaction' });
-    if (!finished) displayFrames.schedule('chart-wheel', drawZoomFrame, 1);
   }
 
-  over.addEventListener(
-    'wheel',
-    (event) => {
-      event.preventDefault();
-      const xs = state.chartSeries.x;
-      if (xs.length < 2 || (rangeDragging && !zoom)) return;
-      const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
-      if (factor === 1) return;
-      const [fromMin, fromMax] = xRange();
-      const min = zoom?.min ?? fromMin;
-      const max = zoom?.max ?? fromMax;
-      const dataMax = xs.at(-1);
-      const rect = zoom && wheelBounds ? wheelBounds : over.getBoundingClientRect();
-      if (!rect.width) return;
-      const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-      const next = zoomTimeWindow({
-        min,
-        max,
-        pivot: min + (max - min) * ratio,
-        factor,
-        dataMin: xs.at(0),
-        dataMax,
-        minSpan: minZoomSpan(state.settings.sampleRate),
-      });
-      if (next.min === min && next.max === max) return;
-      wheelBounds = rect;
-      zoom = { fromMin, fromMax, ...next, initialDataMax: dataMax, startedAt: performance.now() };
-      setRangeDragging(true, true);
-      displayFrames.schedule('chart-wheel', drawZoomFrame, 1);
-    },
-    { passive: false },
-  );
+  /** @param {WheelEvent} event */
+  function onWheel(event) {
+    const xs = state.chartSeries.x;
+    if (xs.length < 2 || (rangeDragging && !zoom)) return;
+    const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+    if (factor === 1) return;
+    const surface = /** @type {HTMLElement} */ (event.currentTarget);
+    const { left, width } = zoom?.surface === surface ? zoom : surface.getBoundingClientRect();
+    if (!width) return;
+    event.preventDefault();
+
+    const dataMin = zoom?.dataMin ?? xs.at(0);
+    const dataMax = zoom?.dataMax ?? xs.at(-1);
+    if (!(dataMax > dataMin)) return;
+    let [min, max] = zoom ? [zoom.min, zoom.max] : xRange();
+    if (!zoom && state.chartWindow.mode !== 'frozen') {
+      const duration = max - min;
+      max = dataMax;
+      min = state.chartWindow.mode === 'full' ? dataMin : Math.max(dataMin, max - duration);
+    }
+    const pivot = wheelZoomPivot({
+      ratio: (event.clientX - left) / width,
+      min,
+      max,
+      dataMin,
+      dataMax,
+      overview: surface === overview,
+    });
+    const next = zoomTimeWindow({
+      min,
+      max,
+      pivot,
+      factor,
+      dataMin,
+      dataMax,
+      minSpan: minZoomSpan(state.settings.sampleRate),
+    });
+    if (next.min === min && next.max === max) return;
+    zoom = { ...next, dataMin, dataMax, left, width, surface };
+    setRangeDragging(true, true);
+    if (settle !== null) clearTimeout(settle);
+    settle = setTimeout(() => drawZoomFrame(true), WHEEL_SETTLE_MS);
+    displayFrames.schedule('chart-wheel', () => drawZoomFrame(false), 1);
+  }
+
+  plot?.addEventListener('wheel', onWheel, { passive: false });
+  overview?.addEventListener('wheel', onWheel, { passive: false });
 }
 
 /** @param {HTMLElement|undefined} over */
@@ -3148,7 +3162,7 @@ export function initChart() {
   };
 
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
-  bindChartWheel(state.mainChart);
+  bindChartWheel(state.mainChart.over, document.getElementById('timeline-track'));
   bindChartPan(state.mainChart.over);
   observeResize(host, state.mainChart, () => {
     cancelFrameProbe();

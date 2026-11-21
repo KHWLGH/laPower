@@ -1,0 +1,69 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Cargo Fmt
+        run: cargo fmt --all -- --check
+
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: ['stable', '1.85']
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust }}
+        override: true
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: |
+        cargo test --verbose
+        cargo test --verbose --features tokio
+        cargo test --verbose --features smol
+        cargo test --verbose --features smol,tokio
+
+  check:
+    strategy:
+      matrix:
+        target: [aarch64-linux-android, armv7-linux-androideabi, wasm32-unknown-unknown]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+    - name: check
+      run: |
+        cargo check --target ${{ matrix.target }}
+        cargo check --target ${{ matrix.target }} --features tokio
+        cargo check --target ${{ matrix.target }} --features smol
+        cargo check --target ${{ matrix.target }} --all-features
+
+  rustdoc:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install toolchain
+      uses: dtolnay/rust-toolchain@nightly
+    - name: rustdoc
+      run: RUSTDOCFLAGS=--cfg=docsrs cargo +nightly doc --all-features --no-deps
