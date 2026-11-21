@@ -4,7 +4,7 @@
 
 # User guide
 
-This guide covers laPower **0.2.10**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
+This guide covers laPower **0.2.11**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
 
 - [Getting started](#getting-started)
 - [Interface overview](#interface-overview)
@@ -342,7 +342,7 @@ SUM,1
 TotalTime,="00:00:00.250"
 SampTime(ms),250
 DateTime,2026-10-17 12:00:00
-Software,laPower 0.2.10
+Software,laPower 0.2.11
 Device,WITRN K2 (0716:5060)
 Points,mean
 

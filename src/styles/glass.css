@@ -1,7 +1,5 @@
 /* laPower 磨砂玻璃外观，参考 AstrBot 弥亚开发工具箱。 */
 :root {
-  --wallpaper: url("../assets/wallpapers/background-shark.jpg");
-  --wallpaper-size: contain;
   --wallpaper-base: #fdfdfb;
   --wallpaper-tint: rgba(26, 37, 63, 0.66);
   --wallpaper-frame: #646b7e;
@@ -43,7 +41,7 @@
   background: var(--wallpaper-frame);
 }
 
-.app-shell::before,
+.app-wallpaper,
 .app-shell::after {
   position: absolute;
   inset: 0;
@@ -52,14 +50,28 @@
   pointer-events: none;
 }
 
-.app-shell::before {
+.app-wallpaper {
   background-color: var(--wallpaper-base);
-  background-image: linear-gradient(var(--wallpaper-tint), var(--wallpaper-tint)), var(--wallpaper);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: cover, var(--wallpaper-size, contain);
   filter: blur(14px);
   clip-path: inset(0);
+}
+
+.app-wallpaper img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.app-wallpaper img.is-custom {
+  object-fit: cover;
+}
+
+.app-wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--wallpaper-tint);
 }
 
 .app-shell::after {
@@ -308,14 +320,14 @@
     --glass-sheen: none;
   }
 
-  .app-shell::before,
+  .app-wallpaper,
   .app-shell::after {
     display: none;
   }
 }
 
 @media (forced-colors: active) {
-  .app-shell::before,
+  .app-wallpaper,
   .app-shell::after {
     display: none;
   }

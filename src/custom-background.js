@@ -9,30 +9,26 @@ import { errorText, t } from './i18n.js';
 import { toast } from './ui/toast.js';
 
 const invoke = window.__TAURI__?.core?.invoke;
-const root = document.documentElement;
+const wallpaper = /** @type {HTMLImageElement} */ (document.getElementById('workspace-wallpaper'));
+const bundledImage = wallpaper.getAttribute('src') ?? '';
 
 /** @param {string|null} dataUrl */
 function renderBackground(dataUrl) {
   const preview = document.getElementById('background-preview');
   const clearButton = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-background-clear'));
-  if (dataUrl) {
-    if (!/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
-      throw new Error('背景图片数据格式无效');
-    }
-    root.style.setProperty('--wallpaper', `url("${dataUrl}")`);
-    root.style.setProperty('--wallpaper-size', 'cover');
-    preview?.style.setProperty('background-image', `url("${dataUrl}")`);
-    preview?.classList.add('has-image');
-    preview?.setAttribute('aria-label', t('customBackgroundPreview'));
-    if (clearButton) clearButton.disabled = false;
-    return;
+  if (dataUrl !== null && !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
+    throw new Error('背景图片数据格式无效');
   }
-  root.style.removeProperty('--wallpaper');
-  root.style.removeProperty('--wallpaper-size');
-  preview?.style.removeProperty('background-image');
-  preview?.classList.remove('has-image');
-  preview?.setAttribute('aria-label', t('defaultBackground'));
-  if (clearButton) clearButton.disabled = true;
+  // Large data URLs can exceed Chromium's CSS variable limit. Use the image loader directly.
+  const src = dataUrl ?? bundledImage;
+  wallpaper.src = src;
+  wallpaper.classList.toggle('is-custom', dataUrl !== null);
+  const thumbnail = preview?.querySelector('img');
+  if (thumbnail) thumbnail.src = src;
+  const label = dataUrl ? 'customBackgroundPreview' : 'defaultBackground';
+  preview?.setAttribute('data-i18n-aria-label', label);
+  preview?.setAttribute('aria-label', t(label));
+  if (clearButton) clearButton.disabled = dataUrl === null;
 }
 
 /** Load the persisted image before the first workspace is displayed. */

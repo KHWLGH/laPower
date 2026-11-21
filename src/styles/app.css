@@ -1101,10 +1101,6 @@ html[data-ui-scale-css] .flyout-panel {
   object-fit: cover;
 }
 
-.background-preview.has-image img {
-  visibility: hidden;
-}
-
 .settings-scale {
   min-width: 168px;
   max-width: 240px;
