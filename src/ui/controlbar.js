@@ -72,7 +72,7 @@ export function syncRecordUI(s) {
 
   const indicatorIcon = document.getElementById('record-status-icon');
   if (indicatorIcon) {
-    indicatorIcon.setAttribute('class', s.recording ? 'fi fi-play' : 'fi fi-pause');
+    indicatorIcon.setAttribute('class', s.recording ? 'fi fi-pause' : 'fi fi-play');
   }
 }
 

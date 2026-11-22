@@ -1668,11 +1668,11 @@ html[data-ui-scale-css] .about-legal-dialog {
 }
 
 .status-metrics .status-record.is-recording {
-  color: var(--status-success);
+  color: var(--status-danger);
 }
 
 .status-metrics .status-record.is-paused {
-  color: var(--status-danger);
+  color: var(--status-success);
 }
 
 .status-metrics .status-record.is-disabled {
