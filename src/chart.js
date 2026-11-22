@@ -36,10 +36,19 @@ import {
 } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
 import { rasterOrderedFill } from './chart-fill.js';
-import { ChartRenderPolicy, liveChartIntervalMs } from './chart-pacing.js';
-import { wheelZoomFactor } from './chart-window.js';
+import { ChartRenderPolicy, liveChartIntervalMs, zoomStrokeFactor } from './chart-pacing.js';
+import {
+  minZoomSpan,
+  panTimeWindow,
+  settleWheelZoomWindow,
+  wheelZoomFactor,
+  wheelZoomPivot,
+  zoomTimeWindow,
+} from './chart-window.js';
 import { runCooperativeSlices } from './cooperative.js';
+import { chartCurrent, currentAt } from './current-display.js';
 import { displayFrames } from './frame-scheduler.js';
+import { createGpuiChartBridge, encodeGpuiChartFrame, watchGpuiChartOverlays } from './gpui-chart.js';
 import { getResolvedLanguage, t } from './i18n.js';
 import { markersOf, onMarkersChange } from './markers.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
@@ -65,12 +74,7 @@ function chartAxisTitle(key, unit) {
 /** 各 series 挂靠的 scale：D+/D-/CC1/CC2 复用电压 scale（不新增轴）。 */
 const SERIES_SCALES = ['voltage', 'current', 'power', 'temp', 'voltage', 'voltage', 'voltage', 'voltage'];
 
-const CHART_FONT_FALLBACK =
-  "'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', sans-serif";
-const MONO_FONT_FALLBACK =
-  "ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, 'Noto Sans Mono', 'DejaVu Sans Mono', 'Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', monospace";
-let CHART_FONT = CHART_FONT_FALLBACK;
-let MONO_FONT = MONO_FONT_FALLBACK;
+let CHART_FONT = "'Microsoft YaHei', 'Microsoft YaHei UI', system-ui, sans-serif";
 
 /**
  * Canvas 字体不会自动解析 CSS 的 var()，因此从同一组 CSS 令牌读取字体栈，
@@ -80,9 +84,7 @@ function syncChartFonts() {
   if (typeof document === 'undefined') return;
   const styles = getComputedStyle(document.documentElement);
   const uiFont = styles.getPropertyValue('--font-ui').trim();
-  const monoFont = styles.getPropertyValue('--font-mono').trim();
   if (uiFont) CHART_FONT = uiFont;
-  if (monoFont) MONO_FONT = monoFont;
 }
 
 /** X 轴刻度步长候选（秒）— 时间友好的取值（覆盖 0.1 秒到月级跨度）。 */
@@ -100,6 +102,11 @@ let mainData = [[], [], [], [], [], [], [], [], []];
 /** 导航图数据：[x, power]（短历史的有界拷贝或桶数组）。 */
 /** @type {ChartColView[]} */
 let navData = [[], []];
+let gpuiChartActive = false;
+let gpuiChartBridge = null;
+/** @type {ReturnType<typeof watchGpuiChartOverlays> | null} */
+let gpuiChartOverlays = null;
+let nativeEmptyPath = null;
 
 /** 范围滑块设定的主图 X 轴窗口；null 表示尚无数据（使用默认范围）。 */
 /** @type {{ min: number|null, max: number|null }} */
@@ -152,7 +159,7 @@ let preparationTarget = null;
 
 function chartRevision() {
   const cs = state.chartSeries;
-  return cs.x.revision + FIELDS.reduce((sum, key) => sum + cs[key].revision, 0);
+  return cs.x.revision + cs.currentMagnitudes.revision + FIELDS.reduce((sum, key) => sum + cs[key].revision, 0);
 }
 
 /** @param {PreparationTarget} target */
@@ -329,6 +336,8 @@ let navProjectionCap = 0;
 /** @type {import('./chart-buckets.js').OrderedGeometry|null} */
 let navGeometry = null;
 let lastNavPaint = 0;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let navPaceTimer = null;
 const NAV_PAINT_MIN_MS = 100;
 function navMaxBuckets() {
   return bucketCap((document.getElementById('navigator-chart')?.clientWidth || 600) / 2);
@@ -340,6 +349,13 @@ function resetNavBuckets() {
   navProjectionCap = 0;
   navGeometry = null;
 }
+
+function cancelNavigatorPaint() {
+  displayFrames.cancel('chart-navigator');
+  if (navPaceTimer !== null) clearTimeout(navPaceTimer);
+  navPaceTimer = null;
+}
+
 /** 把新样本折进导航桶；不 flatten、不 setData。 */
 function syncNavBuckets(through = state.chartSeries.x.length) {
   const cs = state.chartSeries;
@@ -395,8 +411,12 @@ function bindNavData() {
 let linearBuilder = null;
 /** @type {import('./chart-buckets.js').OrderedGeometry[]} */
 let mainGeometry = [];
-/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number,paintTop:number,paintBottom:number,columns:number[][],columnLengths:Uint32Array,coverage:Float64Array,pending:boolean}|null} */
+/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number,paintTop:number,paintBottom:number,columns:number[][],columnLengths:Uint32Array,coverage:Float64Array,pending:boolean,scale:number}|null} */
 let bucketRaster = null;
+let restingRaster = null;
+let gestureRaster = null;
+const GESTURE_RASTER_PIXELS = 480_000;
+const GESTURE_SERIES_BUCKETS = 3072;
 /** @type {WeakMap<object, Map<number, any>>} */
 let orderedPaints = new WeakMap();
 
@@ -485,13 +505,22 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
   return { stroke, fill: null };
 }
 
+/** Keep uPlot's data/index model but stop its canvas from painting native-owned curves.
+ * @param {any} u @param {number} seriesIdx @param {number} idx0 @param {number} idx1
+ */
+function chartPaths(u, seriesIdx, idx0, idx1) {
+  if (!gpuiChartActive) return adaptivePaths(u, seriesIdx, idx0, idx1);
+  nativeEmptyPath ??= new Path2D();
+  return { stroke: nativeEmptyPath, fill: null };
+}
+
 function drawBucketFill(u, seriesIdx) {
   if (boundKind !== 'window') return;
   const geometry = orderedPaints.get(u)?.get(seriesIdx),
     series = u.series[seriesIdx];
   const fill = series.fill(u, seriesIdx);
   if (!geometry || !fill || !Number.isFinite(geometry.base)) return;
-  if (geometry.rasterFill && useBucketRaster(u) && /^rgba\(/.test(fill)) return;
+  if (useBucketRaster(u) && useRasterFill(geometry, fill)) return;
   if (bucketRaster?.pending) flushBucketRaster(u);
   const started = performance.now();
   const { points, connect, base } = geometry,
@@ -544,6 +573,12 @@ function useBucketRaster(u) {
   );
 }
 
+/** @param {{rasterFill: boolean}} geometry @param {unknown} fill */
+function useRasterFill(geometry, fill) {
+  // One upload for all supported strokes and shadows in a moving viewport.
+  return (rangeDragging || geometry.rasterFill) && typeof fill === 'string' && fill.startsWith('rgba(');
+}
+
 /** Scan-convert by x column, then union covered intervals before writing any pixels. */
 function drawBucketRaster(u, seriesIdx) {
   if (!useBucketRaster(u)) {
@@ -572,9 +607,12 @@ function drawBucketRaster(u, seriesIdx) {
   const geometry = orderedPaints.get(u)?.get(seriesIdx);
   if (!geometry) return;
   const started = performance.now();
-  const bbox = u.bbox,
-    width = Math.ceil(bbox.width),
-    height = Math.ceil(bbox.height);
+  const bbox = u.bbox;
+  // Bound bitmap upload and blending while the viewport is moving, not at rest.
+  const scale = rangeDragging ? Math.min(1, Math.sqrt(GESTURE_RASTER_PIXELS / (bbox.width * bbox.height))) : 1;
+  const width = Math.ceil(bbox.width * scale);
+  const height = Math.ceil(bbox.height * scale);
+  bucketRaster = scale < 1 ? gestureRaster : restingRaster;
   if (!bucketRaster || bucketRaster.canvas.width !== height || bucketRaster.canvas.height !== width) {
     // Transpose the scratch: each screen column becomes one contiguous row.
     const canvas = new OffscreenCanvas(height, width);
@@ -596,7 +634,10 @@ function drawBucketRaster(u, seriesIdx) {
       columnLengths: new Uint32Array(width),
       coverage: new Float64Array((height + 1) * 3),
       pending: false,
+      scale,
     };
+    if (scale < 1) gestureRaster = bucketRaster;
+    else restingRaster = bucketRaster;
   }
   const { pixels, columns, columnLengths } = bucketRaster;
   if (!bucketRaster.pending) {
@@ -610,17 +651,17 @@ function drawBucketRaster(u, seriesIdx) {
     hex = Number.parseInt(series.stroke(u, seriesIdx).slice(1), 16);
   const color = new Uint32Array(Uint8Array.of(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255).buffer)[0];
   const fill = series.fill(u, seriesIdx);
-  const half = (series.width * plotPixelRatio()) / 2;
+  const half = (series.width * plotPixelRatio() * scale) / 2;
   const intervalStarted = performance.now();
-  if (!geometry.raster || geometry.raster.half !== half) {
+  if (!geometry.raster || geometry.raster.half !== half || geometry.raster.scale !== scale) {
     columnLengths.fill(0);
     const { points, connect } = geometry;
     for (let i = 0; i < connect.length; i++) {
-      const x1 = points[i * 2] - bbox.left,
-        y1 = points[i * 2 + 1] - bbox.top;
+      const x1 = (points[i * 2] - bbox.left) * scale,
+        y1 = (points[i * 2 + 1] - bbox.top) * scale;
       if (!Number.isFinite(x1) || !Number.isFinite(y1)) continue;
-      const x0 = connect[i] ? points[(i - 1) * 2] - bbox.left : x1;
-      const y0 = connect[i] ? points[(i - 1) * 2 + 1] - bbox.top : y1;
+      const x0 = connect[i] ? (points[(i - 1) * 2] - bbox.left) * scale : x1;
+      const y0 = connect[i] ? (points[(i - 1) * 2 + 1] - bbox.top) * scale : y1;
       const dx = x1 - x0,
         dy = y1 - y0;
       const left = Math.max(0, Math.floor(Math.min(x0, x1) - half)),
@@ -687,12 +728,11 @@ function drawBucketRaster(u, seriesIdx) {
       for (let i = 0; i < columnLengths[x]; i++) spans[cursor++] = columns[x][i];
     }
     offsets[width] = cursor;
-    geometry.raster = { half, spans, offsets };
+    geometry.raster = { half, spans, offsets, scale };
     recordPaintStage(u, 'intervals', intervalStarted);
   } else recordPaintStage(u, 'intervalsCached', intervalStarted);
   const { spans, offsets } = geometry.raster;
-  if (geometry.rasterFill && Number.isFinite(geometry.base) && fill && /^rgba\(/.test(fill))
-    rasterBucketFill(u, geometry, fill);
+  if (Number.isFinite(geometry.base) && useRasterFill(geometry, fill)) rasterBucketFill(u, geometry, fill);
   let { dirtyTop, dirtyBottom } = bucketRaster;
   for (let x = 0; x < width; x++) {
     for (let i = offsets[x]; i < offsets[x + 1]; i += 2) {
@@ -716,7 +756,7 @@ function flushBucketRaster(u) {
   bucketRaster.pending = false;
   const { dirtyTop, dirtyBottom } = bucketRaster,
     bbox = u.bbox,
-    width = Math.ceil(bbox.width);
+    width = bucketRaster.canvas.height;
   if (dirtyBottom <= dirtyTop) return;
   const uploadStarted = performance.now();
   const scratch = bucketRaster.ctx;
@@ -730,7 +770,8 @@ function flushBucketRaster(u) {
   ctx.beginPath();
   ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
   ctx.clip();
-  ctx.transform(0, 1, 1, 0, bbox.left, bbox.top);
+  const factor = 1 / bucketRaster.scale;
+  ctx.transform(0, factor, factor, 0, bbox.left, bbox.top);
   ctx.drawImage(
     bucketRaster.canvas,
     dirtyTop,
@@ -752,12 +793,14 @@ function rasterBucketFill(u, geometry, fill) {
   const rgba = fill.match(/[\d.]+/g)?.map(Number);
   if (!rgba || rgba.length !== 4 || !bucketRaster) return;
   const rgb = new Uint32Array(Uint8Array.of(rgba[0], rgba[1], rgba[2], 0).buffer)[0];
+  const { scale } = bucketRaster;
   const bounds = rasterOrderedFill({
     points: geometry.points,
     connect: geometry.connect,
-    base: geometry.base - u.bbox.top,
+    base: (geometry.base - u.bbox.top) * scale,
     leftOffset: u.bbox.left,
     topOffset: u.bbox.top,
+    scale,
     width: bucketRaster.canvas.height,
     height: bucketRaster.canvas.width,
     pixels: bucketRaster.pixels,
@@ -773,6 +816,16 @@ function rasterBucketFill(u, geometry, fill) {
   recordPaintStage(u, 'fill', started);
 }
 
+/** @param {any} u @param {number} seriesIdx */
+function drawFallbackBucketFill(u, seriesIdx) {
+  if (!gpuiChartActive) drawBucketFill(u, seriesIdx);
+}
+
+/** @param {any} u @param {number} seriesIdx */
+function drawFallbackBucketRaster(u, seriesIdx) {
+  if (!gpuiChartActive) drawBucketRaster(u, seriesIdx);
+}
+
 // ─── Data binding ────────────────────────────────────────────────────────────
 
 /**
@@ -784,22 +837,14 @@ function bindMainViews(start, end) {
   const cs = state.chartSeries;
   rawStart = Math.max(0, start - 1);
   rawEnd = Math.min(cs.x.length, end + 1);
-  mainData = [
-    cs.x.copyRange(rawStart, rawEnd),
-    cs.voltage.copyRange(rawStart, rawEnd),
-    cs.current.copyRange(rawStart, rawEnd),
-    cs.power.copyRange(rawStart, rawEnd),
-    cs.temp.copyRange(rawStart, rawEnd),
-    cs.dp.copyRange(rawStart, rawEnd),
-    cs.dn.copyRange(rawStart, rawEnd),
-    cs.cc1.copyRange(rawStart, rawEnd),
-    cs.cc2.copyRange(rawStart, rawEnd),
-  ];
+  mainData = [cs.x, ...channelBufs()].map((column) => column.copyRange(rawStart, rawEnd));
 }
 
 export function syncChartSeries() {
+  stopWheelZoom?.();
+  stopChartPan?.();
   pauseContext = null;
-  displayFrames.cancel('chart-navigator');
+  cancelNavigatorPaint();
   cancelIndexWarmup();
   cancelPreparation();
   cancelFrameProbe();
@@ -808,6 +853,8 @@ export function syncChartSeries() {
   reviewRenderPolicy.reset();
   sourceRevision = chartRevision();
   bucketRaster = null;
+  restingRaster = null;
+  gestureRaster = null;
   orderedPaints = new WeakMap();
   mainGeometry = [];
   submittedSourceLen = state.chartSeries.x.length;
@@ -837,8 +884,12 @@ export function syncChartSeries() {
   }
 }
 
-/** @param {boolean} dragging */
-export function setRangeDragging(dragging) {
+/** @param {boolean} dragging @param {boolean} [fromChart] */
+export function setRangeDragging(dragging, fromChart = false) {
+  if (!fromChart) {
+    stopWheelZoom?.();
+    stopChartPan?.();
+  }
   if (dragging && !rangeDragging) {
     cancelIndexWarmup();
     selectDisplayContext('review');
@@ -859,7 +910,7 @@ function trackNewPoints(through = state.chartSeries.x.length) {
     scannedLen = len;
     return false;
   }
-  const cols = [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
+  const cols = channelBufs();
   let changed = false;
   for (let si = 0; si < cols.length; si++) {
     const arr = cols[si];
@@ -925,10 +976,18 @@ function displayResolution(width = plotCssWidth()) {
   return width * (displayContext === 'review' ? plotPixelRatio() : 1);
 }
 
+function gestureBucketLimit() {
+  const chart = state.mainChart;
+  if (!rangeDragging || !chart?.ctx?.canvas || !chart.series) return Infinity;
+  const count = chart.series.slice(1).filter((series) => series.show).length;
+  return Math.floor(GESTURE_SERIES_BUCKETS / Math.max(1, count));
+}
+
 /** Sparse windows retain raw samples even after a dense recording reduced its budget. @param {number} count */
 function mainBucketCap(count) {
   const width = plotCssWidth();
-  return bucketCap(displayResolution(width) / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1));
+  const cap = displayResolution(width) / (displayDense(count, width) ? renderPolicy.pixelsPerBucket : 1);
+  return bucketCap(Math.min(cap, gestureBucketLimit()));
 }
 
 /** Keep medium zooms on real sample geometry with a bounded copy/vertex budget. */
@@ -941,7 +1000,7 @@ function mainRawLimit() {
 /** Bound retraced Canvas strokes as well as vertices; fixed data keeps the same choice through a gesture. */
 function useRawWindow(start, end) {
   const count = end - start;
-  if (count > mainRawLimit()) return false;
+  if (count > Math.min(mainRawLimit(), gestureBucketLimit())) return false;
   if (count <= displayResolution()) return true;
   const chart = state.mainChart;
   if (!chart?.series || !chart.bbox?.height) return true;
@@ -998,13 +1057,12 @@ function liveRefreshInterval() {
     dense,
     dense ? renderPolicy.nextFrameDelayMs : 0,
     renderPolicy.idleFrameMs,
-    state.chartSeries.sampleIntervals.at(-1) || state.settings.sampleRate,
   );
 }
 
 function channelBufs() {
   const cs = state.chartSeries;
-  return [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
+  return [cs.voltage, chartCurrent(cs), cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2];
 }
 
 /** @param {SeriesBuckets} buckets @param {BoundKind} kind */
@@ -1018,7 +1076,7 @@ function bindFlattenedBuckets(buckets, kind) {
 /**
  * 条带折叠的**速度选择器**：只决定耗时，不决定产出值 —— 金字塔 fold 与逐样本扫描对同一条带
  * 得到同一组 min/max（`test/chart-extrema.test.js` 的 `compare()` 逐桶钉着这条等价）。
- * 所以拖动中 / 松手后 / 冷启动走到不同分支，画出来的曲线也必须一模一样。
+ * At a given display density, warm and cold projections retain the same extrema.
  * @param {import('./chart-buckets.js').NumericColumn[]} series @param {number} end @param {number} ppb
  * @returns {ExactExtremaIndex|null}
  */
@@ -1654,7 +1712,7 @@ function applyData(opts = {}) {
   const yChanged = trackNewPoints(srcLen);
   const force = !!opts.force;
   const dataChanged = appended || appliedMainGen !== dataGen;
-  // 拖动中唯一被推迟的是导航图重扫：它与主图画什么无关。
+  // The overview is static during a gesture; only the main viewport moves.
   const preview = rangeDragging && !force;
 
   const nextXRange = target?.xRange ?? xRange();
@@ -1662,11 +1720,16 @@ function applyData(opts = {}) {
   const covers = coarsePreview || bindingCovers(start, end, windowCount, cap);
   const frozenAppend = appended && state.chartWindow.mode === 'frozen' && sameXRange && covers && !yChanged;
   const reuseBinding = !force && appliedMainGen === dataGen && covers && (!dataChanged || frozenAppend);
+  const widthsChanged = syncChartLineWidths();
 
   if (reuseBinding) {
     if (!sameXRange) {
       expectChartDraw(state.mainChart, request);
       applyXScale(nextXRange);
+    } else if (widthsChanged || (!rangeDragging && boundKind === 'window' && bucketRaster && bucketRaster.scale < 1)) {
+      // Refresh the stroke or restore full raster resolution without rebinding data.
+      expectChartDraw(state.mainChart, request);
+      state.mainChart.redraw(true, false);
     }
   } else {
     if (!coarsePreview) bindDisplayData({ cap, start, end, windowCount, force });
@@ -1694,14 +1757,13 @@ function applyData(opts = {}) {
   }
   appliedXRange = nextXRange;
 
-  if (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen) {
+  if (!preview && (dataChanged || appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
     syncNavBuckets(srcLen);
     const nav = state.navigatorChart;
     const now = performance.now();
-    const cap = navMaxBuckets();
-    const live = state.isRecording && !force && !preview && srcLen > cap;
-    const due = !live || now - lastNavPaint >= NAV_PAINT_MIN_MS || appliedNavGen !== dataGen;
-    if (nav && due && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
+    const live = state.isRecording && !force && request.reason !== 'release';
+    const delay = live ? lastNavPaint + NAV_PAINT_MIN_MS - now : 0;
+    if (nav && (appliedNavGen !== dataGen || appliedNavLen !== srcLen)) {
       const generation = dataGen;
       const submit = () => {
         if (!monitorVisible() || generation !== dataGen) return;
@@ -1716,10 +1778,16 @@ function applyData(opts = {}) {
         appliedNavLen = length;
         lastNavPaint = performance.now();
       };
-      if (request.pause) displayFrames.schedule('chart-navigator', submit, 20);
-      else {
-        displayFrames.cancel('chart-navigator');
-        submit();
+      if (delay > 0) {
+        if (navPaceTimer === null)
+          navPaceTimer = setTimeout(() => {
+            navPaceTimer = null;
+            if (!rangeDragging) scheduleChartUpdate();
+          }, Math.ceil(delay));
+      } else {
+        cancelNavigatorPaint();
+        if (request.pause) displayFrames.schedule('chart-navigator', submit, 20);
+        else submit();
       }
     }
   }
@@ -1736,6 +1804,7 @@ function applyData(opts = {}) {
 /** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
 /** @param {ChartRefreshSource} [source='maintenance'] @param {{force?:boolean,reason?:string,requestedAt?:number}} [options] */
 export function updateCharts(source = 'maintenance', { force = true, reason = source, requestedAt } = {}) {
+  if (reason === 'release') stopWheelZoom?.();
   chartDirty = true;
   cancelChartFrame();
   if (reason === 'pause') {
@@ -1773,11 +1842,20 @@ export function handleMonitorShown() {
   cancelFrameProbe();
   resizeDirty = true;
   scheduleChartUpdate();
+  if (gpuiChartActive) {
+    requestAnimationFrame(() => {
+      state.mainChart?.redraw(true);
+      state.navigatorChart?.redraw(true);
+    });
+  }
 }
 
 export function handleMonitorHidden() {
+  gpuiChartBridge?.hide();
+  stopWheelZoom?.();
+  stopChartPan?.();
   pauseContext = null;
-  displayFrames.cancel('chart-navigator');
+  cancelNavigatorPaint();
   cancelIndexWarmup();
   chartDirty = true;
   paintRequest = null;
@@ -1801,18 +1879,8 @@ function registerChartListeners() {
   chartListenersRegistered = true;
   onThemeChange(applyChartTheme);
   const visibilityChanged = () => {
-    if (!monitorVisible()) {
-      pauseContext = null;
-      displayFrames.cancel('chart-navigator');
-      cancelIndexWarmup();
-      chartDirty = true;
-      paintRequest = null;
-      cancelChartFrame();
-      cancelFrameProbe();
-      cancelPreparation();
-      return;
-    }
-    handleMonitorShown();
+    if (monitorVisible()) handleMonitorShown();
+    else handleMonitorHidden();
   };
   document.addEventListener('visibilitychange', visibilityChanged);
   document.addEventListener('witrn:window-visibility', visibilityChanged);
@@ -1949,9 +2017,10 @@ export function setChartXWindow(min, max) {
 export function setSeriesVisible(datasetIndex, show) {
   const chart = state.mainChart;
   const si = datasetIndex + 1;
-  if (!chart || !chart.series[si]) return;
+  if (!chart || !chart.series[si] || chart.series[si].show === !!show) return;
   cancelFrameProbe();
-  chart.setSeries(si, { show: !!show });
+  // Flush visibility before a first data submission can inherit its empty scale.
+  chart.batch(() => chart.setSeries(si, { show: !!show }));
   renderLegend();
 }
 
@@ -1998,6 +2067,45 @@ export function applyChartTheme() {
   state.mainChart?.redraw();
   state.navigatorChart?.redraw();
   renderLegend();
+}
+
+/** Redraw a color-only edit while reusing cached series paths. @param {number} datasetIndex */
+export function applyChartChannelColor(datasetIndex) {
+  const field = FIELDS[datasetIndex];
+  if (!field) return;
+  const opacity = [
+    state.settings.opacityVoltage,
+    state.settings.opacityCurrent,
+    state.settings.opacityPower,
+    state.settings.opacityTemp,
+  ][datasetIndex];
+  fillStyles[datasetIndex + 1] = opacity > 0 ? hexToRgba(/** @type {any} */ (chartTheme)[field], opacity) : null;
+  state.mainChart?.redraw(false, false);
+  if (datasetIndex === 2) state.navigatorChart?.redraw(false, false);
+  renderLegend();
+}
+
+function syncChartLineWidths() {
+  const allSeries = state.mainChart?.series;
+  if (!allSeries) return false;
+  const { chartAutoLineWidth, chartLineWidths } = state.settings;
+  const factor = chartAutoLineWidth ? zoomStrokeFactor(visiblePointCount, visiblePlotWidth) : 1;
+  let changed = false;
+  for (let index = 0; index < FIELDS.length; index++) {
+    const series = allSeries[index + 1];
+    const base = index < 4 ? chartLineWidths[FIELDS[index]] : 1;
+    const width = Math.max(0.5, base * factor);
+    if (series && series.width !== width) {
+      series.width = width;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** Apply display preferences without recalculating scales or axes. */
+export function refreshChartLineWidths() {
+  if (syncChartLineWidths()) state.mainChart?.redraw(true, false);
 }
 
 // ─── Scale ranges ────────────────────────────────────────────────────────────
@@ -2065,18 +2173,21 @@ function aggregateVisible(u, seriesIndexes) {
 }
 
 /**
- * 0 基线 + 顶部余量；出现负值时（有符号电流）底部按同比例外扩。
+ * Use a tighter scale for steady nonzero signals so real ripple is visible.
+ * A minimum span limits amplification of the least significant ADC digits.
  * @param {number} min @param {number} max @param {number} h
  * @returns {[number, number]}
  */
 function paddedZeroBased(min, max, h) {
+  const span = max - min;
+  if (min > 0 && span > 0 && span <= max * 0.08) {
+    const padding = Math.max(span * Math.max(0.18, h), max * 0.005 - span / 2);
+    return [Math.max(0, min - padding), max + padding];
+  }
   const lo = min < 0 ? min * (1 + h) : 0;
   const hi = max > 0 ? max * (1 + h) : min < 0 ? 0 : 1;
   return lo < hi ? [lo, hi] : [lo - 0.5, hi + 0.5];
 }
-
-/** 挂在纵轴上的全部 scale（网格 / 等分对齐的作用域）。 */
-const Y_SCALES = ['voltage', 'current', 'power', 'temp'];
 
 /**
  * 全部 Y 轴共用的等分格数。
@@ -2100,7 +2211,7 @@ function yDivisions(u) {
 /**
  * 量程量化时实际采用的等分数。
  *
- * 刻度（uniformSplits）与次网格必须复用它，而不是各自再调一次 yDivisions：
+ * 刻度（uniformSplits）必须复用它，而不是各自再调一次 yDivisions：
  * 量程只在 setData / setScale 时重算，而 yDivisions 随窗口高度即时变化，
  * 两者若不同步就会出现「按 7 等分量化的量程被切成 5 份」——刻度落在 5.6、11.2
  * 这种非整数上。窗口高度变化后由 syncDivisionsAfterResize 补一次量程重算。
@@ -2117,6 +2228,9 @@ function syncDivisionsAfterResize(/** @type {any} */ u) {
 
 /** 量化步长的候选尾数。比常见的 1/2/5 更细，用于压低量化引入的额外余量。 */
 const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+// Display-only floors for unloaded meters. Applying a narrow ripple scale to
+// a few ADC steps at zero load makes idle noise look like a large excursion.
+const IDLE_AXIS_CEILING = { voltage: 0.05, current: 0.01, power: 0.005, temp: 0 };
 
 /**
  * 把量程量化为「整齐步长 × 等分数」，使刻度既是整数值又正好铺满绘图区。
@@ -2144,14 +2258,15 @@ function quantizeRange(lo, hi, divisions) {
 }
 
 /**
- * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，0 起点 + 可配置余量，
+ * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，可配置余量，
  * 最后量化到全局等分格（与其余 Y 轴共线）。
  * 注意：量程完全来自模块内的 seriesMax/seriesMin 增量跟踪，因此各 series 均设置
  * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
+ * @param {keyof import('./state.js').Settings['chartCurveNudge']} channel
  * @param {number[]} seriesIndexes - 挂靠在该 scale 上的 series 下标
  * @param {boolean} [symmetric=false] - 温度轴：对称余量，保留负值
  */
-function mkYRange(seriesIndexes, symmetric = false) {
+function mkYRange(channel, seriesIndexes, symmetric = false) {
   return /** @type {any} */ (
     /** @param {any} u */
     (u) => {
@@ -2171,7 +2286,23 @@ function mkYRange(seriesIndexes, symmetric = false) {
       } else {
         [lo, hi] = paddedZeroBased(agg.min, agg.max, h);
       }
-      return quantizeRange(lo, hi, divisions);
+      const [min, max] = quantizeRange(lo, hi, divisions);
+      const initialSpan = max - min;
+      const idleCeiling = IDLE_AXIS_CEILING[channel];
+      if (!symmetric && agg.min >= 0 && agg.max <= idleCeiling) {
+        return [0, Math.max(idleCeiling, agg.max * (1 + h))];
+      }
+      // Align peaks, not the independent zero lines. A grid row is always 1 / divisions of the plot.
+      // Signal overlays share the voltage scale but should not determine its reference peak.
+      const peak = channel === 'voltage' && u.series[1].show ? seriesMax[1] : agg.max;
+      const anchor = symmetric ? min + initialSpan / 2 : Number.isFinite(peak) ? peak : agg.max;
+      const base = symmetric ? 0.5 : 0.6 + (channel === 'voltage' ? 1 : channel === 'power' ? -1 : 0) / divisions;
+      const nudge = state.settings.chartCurveNudge[channel] / 100;
+      const room = nudge > 0 ? 0.98 - base : base - 0.02;
+      const position = base + nudge * Math.min(1, room / 0.35);
+      // Widen only when translation would clip a sample. The axis still displays real values.
+      const span = Math.max(initialSpan, (anchor - agg.min) / position, (agg.max - anchor) / (1 - position));
+      return [anchor - position * span, anchor + (1 - position) * span];
     }
   );
 }
@@ -2193,8 +2324,7 @@ function smartTick(value) {
 
 /**
  * 生成与其余 Y 轴共线的等分刻度（配合 quantizeRange 量化后的整齐量程使用）。
- * 用 min + (max-min)·i/N 而非逐格累加步长：与 drawMinorGrid 的几何算式同源，
- * 浮点结果逐位一致，刻度线与网格线不会差半个像素。
+ * 用 min + (max-min)·i/N，避免逐格累加造成跨轴刻度错位。
  * @param {any} u @param {string} scaleKey
  * @returns {number[]}
  */
@@ -2257,90 +2387,20 @@ function mkYAxis(scaleKey, label, color, side) {
     stroke: color,
     axisTitle: label,
     labelFont: `12px ${CHART_FONT}`,
-    font: `12px ${MONO_FONT}`,
+    font: `12px ${CHART_FONT}`,
     // 数字与竖脊之间的空隙；默认朝数字伸出的 ticks 已关闭（见 drawYAxisChrome）
     gap: 6,
     size: axisAutoSize,
     // 等分刻度由 uniformSplits 决定，uPlot 基于 space / incrs 的自动选点被完全覆盖
     splits: (/** @type {any} */ u) => uniformSplits(u, scaleKey),
-    values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map(smartTick),
+    values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
+      splits.map((value) => (scaleKey === 'current' && seriesMin[2] >= 0 && value < 0 ? '' : smartTick(value))),
     // 四条 Y 轴画同一套主网格：量程已量化到相同的高度比例，像素级重合；
     // 令牌是不透明色，重复描边不会叠亮（见 tokens.css 的说明）
     grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
     // 关掉 uPlot 朝数字伸出的横刻度：右侧会像负号。竖脊 + 朝图内的短刻度由 drawYAxisChrome 画
     ticks: { show: false },
   };
-}
-
-// ─── Minor grid ──────────────────────────────────────────────────────────────
-
-/** 是否至少有一条 Y 轴在显示（挂靠曲线全部隐藏时该 scale 的 min 为 null）。 */
-function hasVisibleYScale(/** @type {any} */ u) {
-  return Y_SCALES.some((key) => u.scales?.[key]?.min != null);
-}
-
-/**
- * 在主刻度之间画次网格：每个主格均分成 5 格（4 条次线）。
- *
- * 纵向次线取自 X 轴实际刻度（时间步长非等距，只能读 _splits）；
- * 横向次线按几何等分推出——全部 Y 轴共用 yDivisions 等分，次线与任一条轴的刻度
- * 都对齐，因此不依赖某条具体的轴，隐藏电压曲线后横向次网格依然在位。
- * @param {any} u
- */
-function drawMinorGrid(u) {
-  const { ctx, bbox } = u;
-  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
-
-  const left = bbox.left;
-  const right = bbox.left + bbox.width;
-  const top = bbox.top;
-  const bottom = bbox.top + bbox.height;
-  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  // 主刻度间距低于此值时不再插次线，避免窄图上重新糊成一片（设备像素）
-  const minGapPx = 36 * pxRatio;
-  const minorCells = 5;
-
-  ctx.save();
-  ctx.lineWidth = pxRatio;
-  ctx.strokeStyle = chartTheme.gridMinor;
-  // 与 uPlot 画网格线同款的清晰化手法：奇数线宽整体平移半像素
-  const offset = (ctx.lineWidth % 2) / 2;
-  ctx.translate(offset, offset);
-  ctx.beginPath();
-
-  // ── 纵向次线（X 轴主刻度之间） ──
-  const xSplits = u.axes?.[0]?._splits;
-  if (Array.isArray(xSplits) && xSplits.length >= 2) {
-    for (let i = 0; i < xSplits.length - 1; i++) {
-      const a = u.valToPos(xSplits[i], 'x', true);
-      const b = u.valToPos(xSplits[i + 1], 'x', true);
-      if (Math.abs(b - a) < minGapPx) continue;
-      for (let k = 1; k < minorCells; k++) {
-        const x = Math.round(a + ((b - a) * k) / minorCells);
-        if (x >= left && x <= right) {
-          ctx.moveTo(x, top);
-          ctx.lineTo(x, bottom);
-        }
-      }
-    }
-  }
-
-  // ── 横向次线（Y 轴等分格之间） ──
-  const divisions = appliedYDivisions || yDivisions(u);
-  if (bbox.height / divisions >= minGapPx && hasVisibleYScale(u)) {
-    for (let i = 0; i < divisions; i++) {
-      for (let k = 1; k < minorCells; k++) {
-        const y = Math.round(top + (bbox.height * (i + k / minorCells)) / divisions);
-        if (y >= top && y <= bottom) {
-          ctx.moveTo(left, y);
-          ctx.lineTo(right, y);
-        }
-      }
-    }
-  }
-
-  ctx.stroke();
-  ctx.restore();
 }
 
 /**
@@ -2594,8 +2654,8 @@ export function refreshChartLanguage() {
   for (let i = 0; i < axes.length; i++) {
     // uPlot normalises fonts to [scaled CSS font, scaled size, original size].
     // Preserve its DPI bookkeeping when replacing the family of an existing axis.
-    if (Array.isArray(axes[i].font)) axes[i].font[0] = `${axes[i].font[1]}px ${MONO_FONT}`;
-    else axes[i].font = `12px ${MONO_FONT}`;
+    if (Array.isArray(axes[i].font)) axes[i].font[0] = `${axes[i].font[1]}px ${CHART_FONT}`;
+    else axes[i].font = `12px ${CHART_FONT}`;
     if (i > 0) {
       if (Array.isArray(axes[i].labelFont)) axes[i].labelFont[0] = `${axes[i].labelFont[1]}px ${CHART_FONT}`;
       else axes[i].labelFont = `12px ${CHART_FONT}`;
@@ -2646,7 +2706,7 @@ function realIndexFromCursor(u, hoveredIdx) {
 function cursorPointBox(u, seriesIdx) {
   const index = realIndexFromCursor(u, u.cursor.idx);
   const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[seriesIdx - 1]);
-  const value = index == null ? Number.NaN : state.chartSeries[field].valueAt(index);
+  const value = index == null ? Number.NaN : displayValueAt(field, index);
   if (index == null || !Number.isFinite(value)) return { left: -100, top: -100, width: 0, height: 0 };
   return {
     left: u.valToPos(state.chartSeries.x.valueAt(index), 'x') - 4,
@@ -2656,13 +2716,19 @@ function cursorPointBox(u, seriesIdx) {
   };
 }
 
+/** @param {string} field @param {number} index */
+function displayValueAt(field, index) {
+  const columns = state.chartSeries;
+  return field === 'current' ? currentAt(columns, index) : columns[field]?.valueAt(index);
+}
+
 function cursorDataIdx(u, seriesIdx, hoveredIdx) {
   if (hoveredIdx == null) return null;
   const realIdx = realIndexFromCursor(u, hoveredIdx);
   if (realIdx == null) return null;
   if (seriesIdx === 0) return hoveredIdx;
   const field = FIELDS[seriesIdx - 1];
-  const y = state.chartSeries[/** @type {keyof typeof state.chartSeries} */ (field)]?.valueAt(realIdx);
+  const y = displayValueAt(field, realIdx);
   return Number.isFinite(y) ? hoveredIdx : null;
 }
 
@@ -2707,7 +2773,7 @@ function tooltipPlugin() {
   function commit(u) {
     if (!tt || !title || !monitorVisible()) return;
     const { idx, left, top } = u.cursor;
-    if (idx == null || left == null || left < 0 || top == null || top < 0) {
+    if (u.over?.classList.contains('is-panning') || idx == null || left == null || left < 0 || top == null || top < 0) {
       hide();
       return;
     }
@@ -2736,7 +2802,7 @@ function tooltipPlugin() {
       for (let i = 0; i < rows.length; i++) {
         const { row, swatch, text } = rows[i];
         const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[i]);
-        const value = state.chartSeries[field]?.valueAt(realIdx);
+        const value = displayValueAt(field, realIdx);
         const show = !!(mask & (1 << i)) && Number.isFinite(value);
         const display = show ? '' : 'none';
         if (row.style.display !== display) row.style.display = display;
@@ -2844,34 +2910,174 @@ function tooltipPlugin() {
 
 // ─── Sizing ──────────────────────────────────────────────────────────────────
 
-/**
- * 绘图区滚轮横向缩放。预览走手柄快路径，松手后补一帧全质量图。
- * @param {any} u
+/** @type {(() => void)|undefined} */
+let stopWheelZoom;
+/** @type {(() => void)|undefined} */
+let stopChartPan;
+const WHEEL_SETTLE_MS = 100;
+const WHEEL_EDGE_PX = 4;
+
+/** Coalesce wheel input from the plot and overview into the same time window.
+ * @param {HTMLElement|undefined} plot @param {HTMLElement|null} overview
  */
-function bindChartWheel(u) {
-  const over = u?.over;
-  if (!over) return;
+function bindChartWheel(plot, overview) {
+  /** @type {{min:number,max:number,dataMin:number,dataMax:number,left:number,width:number,surface:HTMLElement}|null} */
+  let zoom = null;
   /** @type {ReturnType<typeof setTimeout>|null} */
-  let wheelEndTimer = null;
-  over.addEventListener(
-    'wheel',
-    (event) => {
-      event.preventDefault();
-      if (state.chartSeries.x.length === 0) return;
-      const rect = over.getBoundingClientRect();
-      const pivot = u.posToVal(event.clientX - rect.left, 'x');
-      const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
-      setRangeDragging(true);
-      state.__applyChartXZoom?.(pivot, factor);
-      if (wheelEndTimer != null) clearTimeout(wheelEndTimer);
-      wheelEndTimer = setTimeout(() => {
-        wheelEndTimer = null;
-        setRangeDragging(false);
-        updateCharts('interaction', { force: false, reason: 'release' });
-      }, 80);
-    },
-    { passive: false },
-  );
+  let settle = null;
+  stopWheelZoom = () => {
+    if (!zoom) return;
+    zoom = null;
+    if (settle !== null) clearTimeout(settle);
+    settle = null;
+    displayFrames.cancel('chart-wheel');
+    setRangeDragging(false, true);
+  };
+
+  /** @param {boolean} finished */
+  function drawZoomFrame(finished) {
+    if (!zoom || !monitorVisible()) {
+      stopWheelZoom?.();
+      return;
+    }
+    let { min, max } = zoom;
+    const { dataMin, dataMax } = zoom;
+    if (finished) {
+      // The overview domain is held during the gesture, but samples can still
+      // arrive. Rebase the chosen duration onto the actual tail before settling.
+      const latest = state.chartSeries.x.at(-1);
+      ({ min, max } = settleWheelZoomWindow({ min, max, dataMin, dataMax, latest }));
+      stopWheelZoom?.();
+    }
+    state.__applyChartXWindow?.(min, max, finished, finished ? undefined : [dataMin, dataMax]);
+    updateCharts('interaction', { force: false, reason: finished ? 'release' : 'interaction' });
+  }
+
+  /** @param {WheelEvent} event */
+  function onWheel(event) {
+    const xs = state.chartSeries.x;
+    if (xs.length < 2 || (rangeDragging && !zoom)) return;
+    const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+    if (factor === 1) return;
+    const surface = /** @type {HTMLElement} */ (event.currentTarget);
+    const { left, width } = zoom?.surface === surface ? zoom : surface.getBoundingClientRect();
+    if (!width) return;
+    event.preventDefault();
+
+    const dataMin = zoom?.dataMin ?? xs.at(0);
+    const dataMax = zoom?.dataMax ?? xs.at(-1);
+    if (!(dataMax > dataMin)) return;
+    let [min, max] = zoom ? [zoom.min, zoom.max] : xRange();
+    if (!zoom && state.chartWindow.mode !== 'frozen') {
+      const duration = max - min;
+      max = dataMax;
+      min = state.chartWindow.mode === 'full' ? dataMin : Math.max(dataMin, max - duration);
+    }
+    const offset = event.clientX - left;
+    const edge = Math.min(WHEEL_EDGE_PX, width / 4);
+    const pivot = wheelZoomPivot({
+      ratio: offset <= edge ? 0 : offset >= width - edge ? 1 : offset / width,
+      min,
+      max,
+      dataMin,
+      dataMax,
+      overview: surface === overview,
+    });
+    const next = zoomTimeWindow({
+      min,
+      max,
+      pivot,
+      factor,
+      dataMin,
+      dataMax,
+      minSpan: minZoomSpan(state.settings.sampleRate),
+    });
+    const full = next.min === dataMin && next.max === dataMax;
+    if (next.min === min && next.max === max && !(full && !zoom && state.chartWindow.mode !== 'full')) return;
+    zoom = { ...next, dataMin, dataMax, left, width, surface };
+    setRangeDragging(true, true);
+    if (full) {
+      // Commit the live full-history state immediately. Do not publish a
+      // frozen window covering the old tail while waiting for wheel idle.
+      drawZoomFrame(true);
+      return;
+    }
+    if (settle !== null) clearTimeout(settle);
+    settle = setTimeout(() => drawZoomFrame(true), WHEEL_SETTLE_MS);
+    displayFrames.schedule('chart-wheel', () => drawZoomFrame(false), 1);
+  }
+
+  plot?.addEventListener('wheel', onWheel, { passive: false });
+  overview?.addEventListener('wheel', onWheel, { passive: false });
+}
+
+/** @param {HTMLElement|undefined} over */
+function bindChartPan(over) {
+  if (!over) return;
+  /** @type {{pointer: number, origin: number, x: number, min: number, max: number, width: number, active: boolean}|null} */
+  let pan = null;
+  over.classList.add('is-pannable');
+
+  stopChartPan = () => {
+    if (!pan) return;
+    const { pointer, active } = pan;
+    pan = null;
+    displayFrames.cancel('chart-pan');
+    over.classList.remove('is-panning');
+    if (over.hasPointerCapture(pointer)) over.releasePointerCapture(pointer);
+    if (active) setRangeDragging(false, true);
+  };
+
+  /** @param {boolean} settled */
+  function drawPan(settled) {
+    if (!pan?.active) return;
+    const { origin, x, min, max, width } = pan;
+    const xs = state.chartSeries.x;
+    const next = panTimeWindow(min, max, ((origin - x) / width) * (max - min), xs.at(0), xs.at(-1));
+    if (settled) stopChartPan?.();
+    const [previousMin, previousMax] = xRange();
+    if (!settled && next.min === previousMin && next.max === previousMax) return;
+    state.__applyChartXWindow?.(next.min, next.max, settled);
+    updateCharts('interaction', { force: false, reason: settled ? 'release' : 'interaction' });
+  }
+
+  over.addEventListener('pointerdown', (event) => {
+    const xs = state.chartSeries.x;
+    if (!event.isPrimary || event.button !== 0 || pan || xs.length < 2) return;
+    const [min, max] = xRange();
+    if (max - min >= xs.at(-1) - xs.at(0)) return;
+    const { width } = over.getBoundingClientRect();
+    if (!width) return;
+    stopWheelZoom?.();
+    if (rangeDragging) return;
+    pan = { pointer: event.pointerId, origin: event.clientX, x: event.clientX, min, max, width, active: false };
+    over.setPointerCapture(event.pointerId);
+  });
+  over.addEventListener('pointermove', (event) => {
+    if (!pan || pan.pointer !== event.pointerId) return;
+    pan.x = event.clientX;
+    if (!pan.active) {
+      if (Math.abs(pan.x - pan.origin) < 3) return;
+      stopWheelZoom?.();
+      pan.active = true;
+      over.classList.add('is-panning');
+      setRangeDragging(true, true);
+    }
+    displayFrames.schedule('chart-pan', () => drawPan(false), 1);
+  });
+  /** @param {PointerEvent} event */
+  function finish(event) {
+    if (!pan || pan.pointer !== event.pointerId) return;
+    if (pan.active) {
+      if (event.type === 'pointerup') pan.x = event.clientX;
+      drawPan(true);
+    } else {
+      stopChartPan?.();
+    }
+  }
+  over.addEventListener('pointerup', finish);
+  over.addEventListener('pointercancel', finish);
+  over.addEventListener('lostpointercapture', finish);
 }
 
 let resizeDirty = false;
@@ -2932,6 +3138,152 @@ function observeResize(host, chart, onSize = null) {
 
 // ─── Chart initialization ────────────────────────────────────────────────────
 
+/** @param {string} color */
+function nativeChartColor(color) {
+  const match = /^#([\da-f]{6})$/i.exec(color);
+  return match ? Number.parseInt(match[1], 16) : 0;
+}
+
+/** @param {string|null|undefined} fill */
+function nativeFillOpacity(fill) {
+  if (!fill) return 0;
+  const rgba = /^rgba?\([^,]+,[^,]+,[^,]+(?:,\s*([\d.]+))?\)$/i.exec(fill);
+  if (rgba) return rgba[1] == null ? 1 : Math.max(0, Math.min(1, Number(rgba[1])));
+  const hex = /^#(?:[\da-f]{6})([\da-f]{2})$/i.exec(fill);
+  return hex ? Number.parseInt(hex[1], 16) / 255 : 0;
+}
+
+/** @param {any} chart @param {0|1} slot */
+function makeGpuiFrame(chart, slot) {
+  const root = chart.root;
+  const rect = root.getBoundingClientRect();
+  const bbox = chart.bbox;
+  const backingRatio = chart.ctx?.canvas?.width / chart.width || 1;
+  const rootScaleX = root.clientWidth > 0 ? rect.width / root.clientWidth : 1;
+  const rootScaleY = root.clientHeight > 0 ? rect.height / root.clientHeight : rootScaleX;
+  const ratio = Math.max(0.5, Math.min(8, window.devicePixelRatio || backingRatio));
+  const width = (bbox.width / backingRatio) * rootScaleX;
+  const height = (bbox.height / backingRatio) * rootScaleY;
+  const visible = monitorVisible() && width > 0 && height > 0;
+  const pointScaleX = (rootScaleX * ratio) / backingRatio;
+  const pointScaleY = (rootScaleY * ratio) / backingRatio;
+  const series = [];
+  const channelCount = slot === 0 ? FIELDS.length : 1;
+
+  for (let channel = 0; channel < channelCount; channel++) {
+    const seriesIndex = channel + 1;
+    const current = chart.series[seriesIndex];
+    if (!current?.show) continue;
+
+    const geometry = slot === 0 ? (boundKind === 'window' ? mainGeometry[channel] : null) : navGeometry;
+    const xs = geometry?.x ?? chart.data?.[0] ?? [];
+    const ys = geometry?.y ?? chart.data?.[seriesIndex] ?? [];
+    const connect = geometry?.connect;
+    const count = Math.min(xs.length, ys.length);
+    const projected = [];
+    const scale = current.scale || (slot === 1 ? 'y' : SERIES_SCALES[channel]);
+
+    for (let index = 0; index < count; index++) {
+      if (index > 0 && connect && !connect[index]) projected.push(Number.NaN, Number.NaN);
+      const x = xs[index];
+      const y = ys[index];
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        projected.push(Number.NaN, Number.NaN);
+        continue;
+      }
+      projected.push(
+        (chart.valToPos(x, 'x', true) - bbox.left) * pointScaleX,
+        nativeStrokeY(chart.valToPos(y, scale, true) - bbox.top, bbox.height, (current.width || 1) * backingRatio) *
+          pointScaleY,
+      );
+    }
+
+    const color = slot === 0 ? chartTheme[FIELDS[channel]] : chartTheme.power;
+    const fillStyle = slot === 0 && state.settings.chartFillEnabled ? fillStyles[seriesIndex] : null;
+    const fillOpacity = nativeFillOpacity(fillStyle);
+    const fillTo =
+      typeof current.fillTo === 'function' ? current.fillTo(chart, seriesIndex, current.min, current.max, 0) : 0;
+    const baseline = fillOpacity > 0 ? (chart.valToPos(fillTo, scale, true) - bbox.top) * pointScaleY : 0;
+
+    series.push({
+      channel,
+      color: nativeChartColor(color),
+      width: Math.max(0.25, Math.min(64, (current.width || 1) * ratio * rootScaleY)),
+      fillOpacity,
+      baseline,
+      points: Float32Array.from(projected),
+    });
+  }
+
+  return encodeGpuiChartFrame({
+    slot,
+    visible: visible && series.some(({ points }) => points.length >= 4),
+    left: rect.left + (bbox.left / backingRatio) * rootScaleX,
+    top: rect.top + (bbox.top / backingRatio) * rootScaleY,
+    width: Math.max(1, width),
+    height: Math.max(1, height),
+    ratio,
+    series,
+  });
+}
+
+/** Keep a stroke centered just inside the native surface when the value is on an axis edge.
+ * @param {number} y @param {number} height @param {number} width
+ */
+function nativeStrokeY(y, height, width) {
+  if (y < 0 || y > height) return y;
+  const inset = Math.min(height / 2, width / 2 + 0.5);
+  return Math.min(height - inset, Math.max(inset, y));
+}
+
+function deactivateGpuiCharts(error) {
+  console.error('GPUI 曲线渲染不可用，恢复 uPlot 绘制:', error);
+  if (!gpuiChartActive) return;
+  gpuiChartActive = false;
+  gpuiChartOverlays?.stop();
+  gpuiChartOverlays = null;
+  gpuiChartBridge?.hide();
+  requestAnimationFrame(() => {
+    state.mainChart?.redraw(true);
+    state.navigatorChart?.redraw(true);
+  });
+}
+
+function submitGpuiFrame(chart, slot) {
+  if (!gpuiChartBridge?.isReady() || !gpuiChartActive) return;
+  if (!monitorVisible()) {
+    gpuiChartBridge.hide();
+    return;
+  }
+  try {
+    gpuiChartBridge.submit(slot, makeGpuiFrame(chart, slot));
+  } catch (error) {
+    deactivateGpuiCharts(error);
+  }
+}
+
+function initializeGpuiCharts() {
+  // The browser showcase simulates Windows UI but has no native chart surface.
+  if (typeof window === 'undefined' || '__SHOWCASE__' in window) return;
+  const invoke = /** @type {any} */ (window.__TAURI__)?.core?.invoke;
+  if (typeof invoke !== 'function') return;
+  gpuiChartBridge = createGpuiChartBridge(invoke, {
+    onReady: () => {
+      gpuiChartOverlays = watchGpuiChartOverlays((rects) => gpuiChartBridge?.setOverlays(rects));
+      gpuiChartActive = true;
+      state.mainChart?.redraw(true);
+      state.navigatorChart?.redraw(true);
+    },
+    onFailure: deactivateGpuiCharts,
+  });
+  void invoke('get_runtime_platform')
+    .then((platform) => {
+      if (platform !== 'windows' || !gpuiChartBridge) return;
+      return gpuiChartBridge.start(() => [makeGpuiFrame(state.mainChart, 0), makeGpuiFrame(state.navigatorChart, 1)]);
+    })
+    .catch((error) => console.warn('GPUI 图表平台检测失败:', error));
+}
+
 /** 初始化主图表。 */
 export function initChart() {
   const host = document.getElementById('main-chart');
@@ -2983,10 +3335,10 @@ export function initChart() {
     },
     scales: {
       x: { time: false, range: /** @type {any} */ (xRange) },
-      voltage: { range: mkYRange(VOLTAGE_SCALE_SERIES) },
-      current: { range: mkYRange([2]) },
-      power: { range: mkYRange([3]) },
-      temp: { range: mkYRange([4], true) },
+      voltage: { range: mkYRange('voltage', VOLTAGE_SCALE_SERIES) },
+      current: { range: mkYRange('current', [2]) },
+      power: { range: mkYRange('power', [3]) },
+      temp: { range: mkYRange('temp', [4], true) },
     },
     series: [
       {},
@@ -2996,11 +3348,11 @@ export function initChart() {
         auto: false,
         stroke: () => /** @type {any} */ (chartTheme)[field],
         // D+/D-/CC 叠加曲线更细，避免与主通道曲线抢焦点
-        width: i >= 4 ? 1 : 1.5,
+        width: i >= 4 ? 1 : (s.chartLineWidths[field] ?? 1.5),
         points: { show: false },
-        ...(hasPaths ? { paths: adaptivePaths } : {}),
+        ...(hasPaths ? { paths: chartPaths } : {}),
         // Every render path uses the same user-controlled shading switch.
-        fill: () => (state.settings.chartFillEnabled ? fillStyles[i + 1] : null),
+        fill: () => (gpuiChartActive || !state.settings.chartFillEnabled ? null : fillStyles[i + 1]),
         show: showInitial[i],
       })),
     ],
@@ -3008,10 +3360,10 @@ export function initChart() {
       {
         scale: 'x',
         stroke: () => chartTheme.axisText,
-        font: `12px ${MONO_FONT}`,
+        font: `12px ${CHART_FONT}`,
         size: 34,
         gap: 4,
-        // 80：HH:MM:SS.d 标签约 10 字符（等宽 12px ≈ 72px），64 会在任意宽度下互相碰撞
+        // 80：给 12px 的 HH:MM:SS.d 时间标签留足空间，64 会在任意宽度下互相碰撞
         space: 80,
         incrs: TIME_INCRS,
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
@@ -3025,16 +3377,17 @@ export function initChart() {
       mkYAxis('temp', chartAxisTitle('temperature', '°C'), () => chartTheme.tempAxis, 1),
     ],
     hooks: {
-      drawAxes: [drawMinorGrid, drawYAxisChrome, drawYAxisLabels],
-      drawSeries: [drawBucketFill, drawBucketRaster],
-      draw: [drawMarkers],
+      drawAxes: [drawYAxisChrome, drawYAxisLabels],
+      drawSeries: [drawFallbackBucketFill, drawFallbackBucketRaster],
+      draw: [drawMarkers, (/** @type {any} */ u) => submitGpuiFrame(u, 0)],
       setSize: [syncDivisionsAfterResize],
     },
     plugins: [tooltipPlugin()],
   };
 
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
-  bindChartWheel(state.mainChart);
+  bindChartWheel(state.mainChart.over, document.getElementById('timeline-track'));
+  bindChartPan(state.mainChart.over);
   observeResize(host, state.mainChart, () => {
     cancelFrameProbe();
   });
@@ -3050,13 +3403,15 @@ export function initChart() {
 
   // Canvas 不解析 CSS var()；与令牌对齐后再 load 一次，避免首帧用了回退栈。系统字体通常立刻 resolve。
   if (document.fonts?.load) {
-    Promise.all([document.fonts.load(`12px ${CHART_FONT}`), document.fonts.load(`12px ${MONO_FONT}`)])
+    document.fonts
+      .load(`12px ${CHART_FONT}`)
       .then(() => {
         state.mainChart?.redraw();
         state.navigatorChart?.redraw();
       })
       .catch(() => {});
   }
+  initializeGpuiCharts();
 }
 
 /** 初始化导航器图表（功率全量缩略图，无轴无交互）。 */
@@ -3088,11 +3443,15 @@ function initNavigatorChart() {
         ),
       },
       y: {
-        // 量程来自模块内跟踪的功率全量最大值（序列 auto: false，跳过 uPlot 的全量扫描）
         range: /** @type {any} */ (
           () => {
             const max = seriesMax[3];
-            return [0, Number.isFinite(max) && max > 0 ? max * (1 + headroomFrac()) : 1];
+            // Fit even micro-watt spikes in the overview. Its vertical scale
+            // represents the full recording, independently of the main axes.
+            const ceiling = max > 0 && Number.isFinite(max) ? max * (1 + headroomFrac()) : 1;
+            const rows = Math.max(12, (host.clientHeight || 46) - 4);
+            const inset = (3 * ceiling) / (rows - 6);
+            return [-inset, ceiling + inset];
           }
         ),
       },
@@ -3103,13 +3462,15 @@ function initNavigatorChart() {
         scale: 'y',
         auto: false,
         stroke: () => chartTheme.power,
-        width: 1,
+        width: 1.25,
         points: { show: false },
-        ...(linearBuilder != null ? { paths: adaptivePaths } : {}),
+        ...(linearBuilder != null ? { paths: chartPaths } : {}),
       },
     ],
     axes: [{ show: false }, { show: false }],
-    hooks: { draw: [drawNavigatorMarkers] },
+    hooks: {
+      draw: [drawNavigatorMarkers, (/** @type {any} */ u) => submitGpuiFrame(u, 1)],
+    },
   };
 
   state.navigatorChart = new uPlot(opts, /** @type {any} */ (navData), host);

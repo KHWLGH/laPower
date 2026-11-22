@@ -63,7 +63,7 @@ export function zoomTimeWindow(args) {
   const minSpan = Math.max(Number(args.minSpan) || 0, Number.EPSILON);
   let nextSpan = span * factor;
   if (nextSpan < minSpan) nextSpan = minSpan;
-  if (nextSpan > dataSpan) nextSpan = dataSpan;
+  if (nextSpan >= dataSpan) return { min: dataMin, max: dataMax };
 
   let pivot = args.pivot;
   if (!Number.isFinite(pivot)) pivot = (args.min + args.max) / 2;
@@ -84,6 +84,32 @@ export function zoomTimeWindow(args) {
   }
   if (nextMin < dataMin) nextMin = dataMin;
   return { min: nextMin, max: nextMax };
+}
+
+/** Resolve a wheel position against either the overview domain or plot window.
+ * @param {{ratio:number,min:number,max:number,dataMin:number,dataMax:number,overview:boolean}} args
+ */
+export function wheelZoomPivot(args) {
+  const ratio = Math.min(1, Math.max(0, Number.isFinite(args.ratio) ? args.ratio : 0.5));
+  if (args.overview) {
+    const time = args.dataMin + (args.dataMax - args.dataMin) * ratio;
+    return Math.max(args.min, Math.min(args.max, time));
+  }
+  return args.min + (args.max - args.min) * ratio;
+}
+
+/** Classify against the gesture domain, then carry the chosen mode to the current tail.
+ * @param {{min:number,max:number,dataMin:number,dataMax:number,latest:number}} args
+ */
+export function settleWheelZoomWindow(args) {
+  const { min, max, dataMin, dataMax, latest } = args;
+  // Wheel deltas are fractional on high-resolution mice. Treat a window within
+  // the normal edge tolerance as full/follow instead of leaving it almost at
+  // the edge in frozen mode.
+  const edgeTolerance = Math.max(1e-6, Math.min((dataMax - dataMin) * 1e-4, (max - min) * 0.01));
+  const window = classifyChartWindow(min, max, dataMin, dataMax, edgeTolerance);
+  const resolved = resolveChartWindow(window, dataMin, latest);
+  return { min: resolved.min, max: resolved.max };
 }
 
 /**
@@ -177,4 +203,28 @@ export function panPermilleWindow(start, end, delta) {
   if (nextStart < 0) nextStart = 0;
   if (nextStart + span > 1000) nextStart = 1000 - span;
   return { start: nextStart, end: nextStart + span };
+}
+
+/** Move a navigator edge or the selection by a time delta from pointer-down.
+ * @param {{min:number,max:number}} window @param {'start'|'end'|'pan'} part @param {number} delta
+ * @param {number} dataMin @param {number} dataMax @param {number} minSpan
+ */
+export function moveNavigatorWindow(window, part, delta, dataMin, dataMax, minSpan) {
+  const { min, max } = window;
+  if (part === 'pan') return panTimeWindow(min, max, delta, dataMin, dataMax);
+  const span = Math.min(minSpan, max - min);
+  return part === 'start'
+    ? { min: Math.max(dataMin, Math.min(max - span, min + delta)), max }
+    : { min, max: Math.min(dataMax, Math.max(min + span, max + delta)) };
+}
+
+/** Translate the window in seconds while keeping its span at either recording edge.
+ * @param {number} min @param {number} max @param {number} delta
+ * @param {number} dataMin @param {number} dataMax
+ */
+export function panTimeWindow(min, max, delta, dataMin, dataMax) {
+  const span = max - min;
+  if (span >= dataMax - dataMin) return { min: dataMin, max: dataMax };
+  const start = Math.max(dataMin, Math.min(dataMax - span, min + delta));
+  return { min: start, max: Math.min(dataMax, start + span) };
 }

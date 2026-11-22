@@ -162,10 +162,10 @@ async function publisher(t, mockOptions) {
 test('complete installer set produces deterministic checksums; modified files cannot be published', async (t) => {
   const { directory, names } = await fixture(t);
   const assets = await verifyPackages(directory, VERSION, { writeChecksums: true });
-  assert.equal(names.length, 7);
-  assert.equal(assets.length, 8);
+  assert.equal(names.length, 8);
+  assert.equal(assets.length, 9);
   const sums = await readFile(join(directory, 'SHA256SUMS'), 'utf8');
-  assert.equal(sums.trimEnd().split('\n').length, 7);
+  assert.equal(sums.trimEnd().split('\n').length, 8);
   for (const asset of assets.filter(({ name }) => name !== 'SHA256SUMS')) {
     const content = await readFile(join(directory, asset.name));
     assert.ok(sums.includes(`${createHash('sha256').update(content).digest('hex')}  ${asset.name}\n`));
@@ -176,7 +176,7 @@ test('complete installer set produces deterministic checksums; modified files ca
 });
 
 test('missing architectures, stale versions, unexpected and empty files are rejected', async (t) => {
-  for (const problem of ['missing', 'stale', 'extra', 'empty']) {
+  for (const problem of ['missing', 'missing-portable', 'stale', 'extra', 'empty']) {
     await t.test(problem, async (sub) => {
       const { directory, names } = await fixture(sub);
       if (problem === 'missing')
@@ -186,13 +186,16 @@ test('missing architectures, stale versions, unexpected and empty files are reje
             names.find((name) => name.includes('macos-x64')),
           ),
         );
+      if (problem === 'missing-portable') {
+        await rm(join(directory, `laPower_${VERSION}_windows-x64_portable.zip`));
+      }
       if (problem === 'stale') {
         await rm(join(directory, names[0]));
         await writeFile(join(directory, names[0].replace(VERSION, '1.2.2')), 'old installer');
       }
       if (problem === 'extra') await writeFile(join(directory, 'unexpected.txt'), 'unexpected');
       if (problem === 'empty') await writeFile(join(directory, names[0]), '');
-      await assert.rejects(verifyPackages(directory, VERSION, { writeChecksums: true }), /七个|非空/);
+      await assert.rejects(verifyPackages(directory, VERSION, { writeChecksums: true }), /指定发布包|非空/);
     });
   }
 });
@@ -255,7 +258,7 @@ test('publish a draft only after all eight uploaded assets pass size and digest 
   assert.equal(state.release.prerelease, false);
   assert.equal(state.release.body, releaseNotes(NOTES, VERSION, 'owner/repo'));
   assert.equal(state.release.generate_release_notes, undefined);
-  assert.equal(state.assets.length, 8);
+  assert.equal(state.assets.length, 9);
   assert.equal(state.calls.at(-2).method, 'GET');
   assert.ok(state.calls.at(-2).pathname.endsWith('/assets'));
   assert.equal(state.calls.at(-1).method, 'PATCH');
@@ -284,7 +287,7 @@ test('rerun replaces only the owned draft assets and then publishes', async (t) 
     false,
   );
   assert.ok(state.calls.some(({ method, pathname }) => method === 'DELETE' && pathname.endsWith('/42')));
-  assert.equal(state.assets.length, 8);
+  assert.equal(state.assets.length, 9);
   assert.equal(state.release.draft, false);
   assert.equal(state.release.body, releaseNotes(NOTES, VERSION, 'owner/repo'));
 });

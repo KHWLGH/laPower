@@ -8,7 +8,14 @@
  * @file 设置持久化 — LazyStore 读写、settings 合并、UI 回显。
  */
 
-import { refreshChartScales, setChartFillEnabled, setSeriesFill, setSeriesVisible } from './chart.js';
+import {
+  applyChartTheme,
+  refreshChartLineWidths,
+  refreshChartScales,
+  setChartFillEnabled,
+  setSeriesFill,
+  setSeriesVisible,
+} from './chart.js';
 import {
   refreshRecordLimitUI,
   updateEnergyDisplay,
@@ -24,13 +31,13 @@ import { clampLimitMb } from './recording-limit.js';
 import { normalizeShortcuts } from './shortcuts-core.js';
 import { defaultAutoPauseSettings, defaultSettings, state } from './state.js';
 import { syncTempSourceUI, updateTempUIVisibility } from './temperature.js';
-import { applyThemePreference, echoThemeUI } from './theme.js';
+import { applyThemePreference, chartTheme, echoThemeUI, refreshTheme } from './theme.js';
 import { syncAutoPauseUI } from './ui/controlbar.js';
+import { echoDisplayStepper } from './ui/display-stepper.js';
 import { toast } from './ui/toast.js';
 import { applyUiScale, clampUiScalePercent, fillUiScaleHint } from './ui-scale.js';
 import { setSampleRateOption } from './utils.js';
 import { normalizeVideoExportOptions } from './video-export-options.js';
-import { applyWindowStyle, echoWindowStyleUI, normalizeWindowStyle } from './window-style.js';
 
 // ─── Store singleton ─────────────────────────────────────────────────────────
 
@@ -56,6 +63,44 @@ function normalizeSettings(saved) {
   const merged = { ...defaultSettings, ...source };
   merged.chartFillEnabled =
     typeof source.chartFillEnabled === 'boolean' ? source.chartFillEnabled : defaultSettings.chartFillEnabled;
+  merged.chartAutoLineWidth =
+    typeof source.chartAutoLineWidth === 'boolean' ? source.chartAutoLineWidth : defaultSettings.chartAutoLineWidth;
+  const savedColors = source.channelColors && typeof source.channelColors === 'object' ? source.channelColors : {};
+  merged.channelColors = Object.fromEntries(
+    ['voltage', 'current', 'power', 'temp'].flatMap((key) => {
+      const value = savedColors[key];
+      return typeof value === 'string' && /^#[\da-f]{6}$/i.test(value) ? [[key, value]] : [];
+    }),
+  );
+  const savedLineWidths =
+    source.chartLineWidths && typeof source.chartLineWidths === 'object' ? source.chartLineWidths : {};
+  /** @typedef {Partial<import('./state.js').Settings['chartCurveNudge']>} SavedCurveOffsets */
+  const { chartCurveShift, chartCurveOffset } = /** @type {{
+    chartCurveShift?: SavedCurveOffsets, chartCurveOffset?: SavedCurveOffsets
+  }} */ (source);
+  const legacyOffset = chartCurveShift ?? chartCurveOffset;
+  // Upgrade the previous default presets. Keep custom offsets as adjustments to the new layout.
+  const legacyDefault =
+    legacyOffset?.voltage === 0 &&
+    legacyOffset?.current === 0 &&
+    legacyOffset?.power === (chartCurveShift ? 18 : -18) &&
+    legacyOffset?.temp === 0;
+  const savedCurveNudge = source.chartCurveNudge ?? (legacyDefault ? undefined : legacyOffset);
+  /** @param {Record<string, unknown>} saved @param {Record<string, number>} fallback @param {number} min @param {number} max */
+  const normalizeChannelNumbers = (saved, fallback, min, max) =>
+    /** @type {import('./state.js').Settings['chartLineWidths']} */ (
+      Object.fromEntries(
+        ['voltage', 'current', 'power', 'temp'].map((key) => {
+          const value = saved[key];
+          return [
+            key,
+            typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback[key],
+          ];
+        }),
+      )
+    );
+  merged.chartLineWidths = normalizeChannelNumbers(savedLineWidths, defaultSettings.chartLineWidths, 0.5, 6);
+  merged.chartCurveNudge = normalizeChannelNumbers(savedCurveNudge ?? {}, defaultSettings.chartCurveNudge, -35, 35);
   merged.shortcuts = normalizeShortcuts(source.shortcuts);
   merged.csvExportOptions = normalizeCsvExportOptions(source.csvExportOptions);
   merged.videoExport = normalizeVideoExportOptions(source.videoExport);
@@ -76,6 +121,9 @@ function normalizeSettings(saved) {
     merged.rangeEnd = swap;
   }
   merged.sampleRate = Math.round(clamp(merged.sampleRate, 1, 60_000, defaultSettings.sampleRate));
+  merged.backgroundTransparency = Math.round(
+    clamp(merged.backgroundTransparency, 0, 100, defaultSettings.backgroundTransparency),
+  );
   // 纵向余量参与 Y 轴量程计算，坏值会直接污染 scale
   if (merged.chartHeadroomMode !== 'auto' && merged.chartHeadroomMode !== 'custom') {
     merged.chartHeadroomMode = defaultSettings.chartHeadroomMode;
@@ -97,11 +145,14 @@ function normalizeSettings(saved) {
     merged.theme = defaultSettings.theme;
   }
   merged.language = normalizeLanguagePreference(merged.language);
-  merged.windowStyle = normalizeWindowStyle(merged.windowStyle);
-  // Mica settings were removed; discard them when loading older LazyStore data.
+  // 丢弃旧版的窗口风格和 Mica 设置。
   const legacyMerged = /** @type {Record<string, unknown>} */ (merged);
+  delete legacyMerged.windowStyle;
   delete legacyMerged.windowMaterial;
   delete legacyMerged.windowMaterialUnfocused;
+  delete legacyMerged.chartAxisSpacing;
+  delete legacyMerged.chartCurveOffset;
+  delete legacyMerged.chartCurveShift;
   merged.realtimePanelWidth = Math.round(
     clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
   );
@@ -158,6 +209,19 @@ export function echoApUnit() {
   else apUnit.textContent = '';
 }
 
+export function applyBackgroundTransparency() {
+  const percent = state.settings.backgroundTransparency;
+  const label = `${percent}%`;
+  document.documentElement.style.setProperty('--wallpaper-image-opacity', String(1 - percent / 100));
+  const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('background-transparency'));
+  if (slider) {
+    slider.value = String(percent);
+    slider.setAttribute('aria-valuetext', label);
+  }
+  const value = document.getElementById('background-transparency-value');
+  if (value) value.textContent = label;
+}
+
 /** 把当前 settings / autoPause 写回控件（loadSettings / resetSettings 共用）。 */
 function echoSettingsUI() {
   document.dispatchEvent?.(new Event('lapower:preferences-changed'));
@@ -172,6 +236,7 @@ function echoSettingsUI() {
     if (el) el.checked = val;
   };
   setChecked('chart-fill-enabled', state.settings.chartFillEnabled);
+  setChecked('chart-auto-line-width', state.settings.chartAutoLineWidth);
   setChecked('show-voltage', state.settings.showVoltage);
   setChecked('show-current', state.settings.showCurrent);
   setChecked('show-power', state.settings.showPower);
@@ -182,6 +247,7 @@ function echoSettingsUI() {
   setChecked('immediate-marker', state.settings.immediateMarker);
   setChecked('pd-follow-recording', state.settings.pdFollowRecording);
   echoHeadroomUI();
+  applyBackgroundTransparency();
 
   const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   if (tempIp) tempIp.value = state.settings.tempIp || '127.0.0.1';
@@ -190,15 +256,15 @@ function echoSettingsUI() {
   syncTempSourceUI();
   echoRangeUI();
 
-  /** @param {string} id @param {number} val */
-  const setOp = (id, val) => {
-    const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
-    if (el) el.value = String(val);
-  };
-  setOp('opacity-voltage', state.settings.opacityVoltage);
-  setOp('opacity-current', state.settings.opacityCurrent);
-  setOp('opacity-power', state.settings.opacityPower);
-  setOp('opacity-temp', state.settings.opacityTemp);
+  echoDisplayStepper('opacity-voltage', state.settings.opacityVoltage);
+  echoDisplayStepper('opacity-current', state.settings.opacityCurrent);
+  echoDisplayStepper('opacity-power', state.settings.opacityPower);
+  echoDisplayStepper('opacity-temp', state.settings.opacityTemp);
+
+  for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
+    echoDisplayStepper(`line-width-${key}`, state.settings.chartLineWidths[key]);
+    echoDisplayStepper(`curve-offset-${key}`, state.settings.chartCurveNudge[key]);
+  }
 
   const statsRangeToggle = /** @type {HTMLInputElement|null} */ (document.getElementById('stats-range-toggle'));
   if (statsRangeToggle) statsRangeToggle.checked = state.settings.statsRange;
@@ -228,6 +294,14 @@ function echoSettingsUI() {
   refreshRecordLimitUI();
 
   document.dispatchEvent?.(new CustomEvent('witrn:monitor-changed'));
+}
+
+/** Reflect saved overrides, or the active theme colors when a channel has no override. */
+function echoChannelColorsUI() {
+  for (const key of /** @type {const} */ (['voltage', 'current', 'power', 'temp'])) {
+    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`color-${key}`));
+    if (input) input.value = state.settings.channelColors[key] ?? chartTheme[key];
+  }
 }
 
 /** 回显图表纵向余量控件（loadSettings / resetSettings 共用）。 */
@@ -353,12 +427,13 @@ export async function loadSettings() {
   } finally {
     echoUiScaleUI();
     echoThemeUI();
-    echoWindowStyleUI(state.settings.windowStyle);
-    applyWindowStyle(state.settings.windowStyle);
     echoRealtimePanelWidth();
     fillUiScaleHint();
     try {
       applyThemePreference(state.settings.theme);
+      refreshTheme();
+      applyChartTheme();
+      echoChannelColorsUI();
       await applyUiScale(state.settings.uiScalePercent);
     } catch {
       /* apply 内部已有 CSS 回退；这里只保证 isLoadingSettings 一定复位 */
@@ -381,7 +456,6 @@ export async function saveSettings() {
     const store = await getStore();
     const settingsToSave = {
       ...state.settings,
-      windowStyle: normalizeWindowStyle(state.settings.windowStyle),
       autoPause: {
         enabled: state.autoPauseSettings.enabled,
         basis: state.autoPauseSettings.basis,
@@ -429,17 +503,23 @@ export function debouncedSaveSettings(delay = 500) {
  */
 export async function resetSettings() {
   try {
-    state.settings = { ...defaultSettings };
+    state.settings = {
+      ...defaultSettings,
+      channelColors: {},
+      chartLineWidths: { ...defaultSettings.chartLineWidths },
+      chartCurveNudge: { ...defaultSettings.chartCurveNudge },
+    };
     state.autoPauseSettings = { ...defaultAutoPauseSettings, triggerStartTime: null };
     await applyLanguage(state.settings.language);
 
     echoSettingsUI();
     echoUiScaleUI();
     echoThemeUI();
-    echoWindowStyleUI(state.settings.windowStyle);
-    applyWindowStyle(state.settings.windowStyle);
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
+    refreshTheme();
+    applyChartTheme();
+    echoChannelColorsUI();
     await applyUiScale(state.settings.uiScalePercent);
 
     // 方向设置回落到默认（关闭）后，侧栏方向箭头一并复位
@@ -461,6 +541,7 @@ export async function resetSettings() {
     setSeriesFill(1, state.settings.opacityCurrent);
     setSeriesFill(2, state.settings.opacityPower);
     setSeriesFill(3, state.settings.opacityTemp);
+    refreshChartLineWidths();
     refreshChartScales();
 
     updateStatsDisplay();

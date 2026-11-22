@@ -53,8 +53,9 @@ export function onSelectionChange(callback) {
 /**
  * 切换到指定视图。
  * @param {string} id
+ * @param {{animate?: boolean}} [options]
  */
-export function showView(id) {
+export function showView(id, { animate = true } = {}) {
   if (!views.has(id)) return;
   if (id === activeId) {
     selectionCallback?.(id);
@@ -71,7 +72,9 @@ export function showView(id) {
   activeId = id;
   state.settings.activeView = id;
 
-  document.getElementById(`view-${id}`)?.removeAttribute('hidden');
+  const panel = document.getElementById(`view-${id}`);
+  panel?.toggleAttribute('data-view-enter', animate);
+  panel?.removeAttribute('hidden');
   if (!inited.has(id)) {
     next.init?.();
     inited.add(id);
@@ -90,5 +93,5 @@ export function restoreView(id) {
   // 监控是默认可见视图；标记为已初始化（图表等由启动序列直接建好）
   inited.add('monitor');
   selectionCallback?.(activeId);
-  if (id !== activeId && views.has(id)) showView(id);
+  if (id !== activeId && views.has(id)) showView(id, { animate: false });
 }

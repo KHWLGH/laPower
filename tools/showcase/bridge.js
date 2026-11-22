@@ -49,7 +49,6 @@ const stored = new Map([
     {
       theme: options.get('theme') === 'dark' ? 'dark' : options.get('theme') === 'system' ? 'system' : 'light',
       language: options.get('language') || 'auto',
-      windowStyle: 'windows',
       sampleRate: 10,
       showDpDn: true,
       showCc: true,
@@ -72,7 +71,6 @@ window.Date = class extends RealDate {
   }
 };
 localStorage.setItem('lapower-theme', stored.get('appSettings').theme);
-localStorage.setItem('lapower-window-style', 'windows');
 
 function emit(name, payload) {
   for (const handler of handlers.get(name) ?? []) handler({ event: name, payload });
@@ -409,6 +407,12 @@ async function invoke(command, args = {}, ipc = {}) {
       return 'windows';
     case 'get_system_locale':
       return options.get('systemLocale') || navigator.language;
+    case 'load_custom_background':
+      return null;
+    case 'choose_custom_background':
+      return null;
+    case 'clear_custom_background':
+      return;
     case 'report_boot_timing':
       return;
     case 'enumerate_devices':

@@ -5,8 +5,8 @@
  * For original project contributions; see COPYRIGHT.
  */
 /**
- * 窗口动作始终按真实 data-os 分发，data-window-style 只负责 CSS 皮肤。
- * Windows 保留 decorum 原节点、ID、class、click/hover 监听和 Snap（macOS 皮肤下由 guardDecorumSnap 常驻拦下）；
+ * 窗口控件由真实 data-os 决定。
+ * Windows 保留 decorum 原节点、ID、class、click/hover 监听和 Snap；
  * Linux 单次创建自绘按钮。Mac 使用系统原生红绿灯（tauri.macos.conf.json），这里只留占位，
  * 不注册 decorum，也不创建缩放热区。close() 继续进入现有 onCloseRequested 确认流程。
  */
@@ -70,7 +70,6 @@ function restyleDecorumButtons() {
     setIcon(closeBtn, 'dismiss', t('windowClose'));
     const maximized = document.documentElement.classList.contains('is-maximized');
     setIcon(maxBtn, maximized ? 'restore' : 'maximize', maximized ? t('windowRestore') : t('windowMaximize'));
-    attachSnapGuard(maxBtn);
     return true;
   };
   const watch = () => {
@@ -90,32 +89,7 @@ function restyleDecorumButtons() {
   return paint;
 }
 
-/**
- * decorum 1.1.1 的贴取布局：#decorum-tb-maximize 上 mouseenter 武装 620ms timer，到点才 setFocus + invoke，
- * mouseleave 里 clearTimeout。插件用 `const invoke = tauri.core.invoke` 一次性捕获，而
- * __TAURI_INTERNALS__.invoke 是只读属性，IPC 边界拦不了（赋值抛 TypeError，曾连带把整个初始化打断）。
- * 只能挂在同一个节点上：Blink 把 mouseenter/mouseleave 只派发给目标元素，祖先的捕获监听器收不到，
- * 所以委托到 document 不成立。同节点上注册顺序即调用顺序，我们晚于插件，此时 timer 已写入，同步补发即可。
- */
-function attachSnapGuard(btn) {
-  if (btn.getAttribute('data-snap-guarded')) return;
-  btn.setAttribute('data-snap-guarded', '1');
-  btn.addEventListener('mouseenter', () => {
-    if (document.documentElement.getAttribute('data-window-style') !== 'macos') return;
-    btn.dispatchEvent(new MouseEvent('mouseleave'));
-  });
-}
-
-/** 切到 macOS 皮肤时，取消切换前已武装的那次 timer。 */
-function guardDecorumSnap() {
-  const root = document.documentElement;
-  new MutationObserver(() => {
-    if (root.getAttribute('data-window-style') !== 'macos') return;
-    document.getElementById('decorum-tb-maximize')?.dispatchEvent(new MouseEvent('mouseleave'));
-  }).observe(root, { attributes: true, attributeFilter: ['data-window-style'] });
-}
-
-/** 初始化一次；后续风格切换只更新 CSS，不新增按钮、监听器或热区。 */
+/** 窗口控件和热区只初始化一次。 */
 export function initWindowControls() {
   if (initialized) return;
   const titlebar = document.getElementById('titlebar');
@@ -187,7 +161,6 @@ export function initWindowControls() {
   };
 
   if (os === 'windows') {
-    guardDecorumSnap();
     paint = restyleDecorumButtons();
   } else if (isMac) {
     // 系统红绿灯浮在这块占位之上；全屏、平铺、最小化都由系统按钮处理。

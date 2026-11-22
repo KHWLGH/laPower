@@ -9,7 +9,9 @@ mod app_nap;
 mod locale;
 // Public so  can read the file it writes without duplicating the layout.
 pub mod boot_timing;
+mod custom_background;
 mod file_io;
+mod gpui_chart;
 mod km003c_session;
 mod pd_capture;
 // Public only so `cargo bench` can drive the emit path; the app itself never re-exports it.
@@ -421,6 +423,7 @@ pub(crate) struct AppState {
     files: Mutex<file_io::FileRegistry>,
     /// 报告视频的单槽编码任务；编码线程自己持有 `Arc`，不借用 `State`。
     video_exports: std::sync::Arc<video_export::VideoExports>,
+    gpui_chart: gpui_chart::Renderer,
     /// 末包已校验、进入销毁流程：置位后禁止新建连接，退出事件放行。
     shutting_down: AtomicBool,
 }
@@ -439,6 +442,10 @@ impl Default for AppState {
             km003c: Mutex::new(None),
             files: Mutex::new(file_io::FileRegistry::default()),
             video_exports: std::sync::Arc::new(video_export::VideoExports::default()),
+            #[cfg(target_os = "windows")]
+            gpui_chart: gpui_chart::Renderer::default(),
+            #[cfg(not(target_os = "windows"))]
+            gpui_chart: gpui_chart::Renderer,
             shutting_down: AtomicBool::new(false),
         }
     }
@@ -448,6 +455,32 @@ impl Default for AppState {
 #[tauri::command]
 fn get_runtime_platform() -> &'static str {
     std::env::consts::OS
+}
+
+#[tauri::command]
+fn gpui_chart_ready(state: State<'_, AppState>) -> bool {
+    state.gpui_chart.is_ready()
+}
+
+#[tauri::command]
+fn gpui_chart_frame(
+    request: tauri::ipc::Request<'_>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => state.gpui_chart.submit(bytes),
+        tauri::ipc::InvokeBody::Json(_) => Err("GPUI 图表仅接受二进制帧".into()),
+    }
+}
+
+#[tauri::command]
+fn gpui_chart_hide(state: State<'_, AppState>) {
+    state.gpui_chart.hide();
+}
+
+#[tauri::command]
+fn gpui_chart_overlays(rects: Vec<[i32; 4]>, state: State<'_, AppState>) -> Result<(), String> {
+    state.gpui_chart.set_overlays(rects)
 }
 
 /// Return the locale selected by the host environment. The frontend applies
@@ -1279,6 +1312,14 @@ pub fn run() {
                     .expect("failed to create overlay titlebar");
                 boot_timing::mark("titlebar_created");
                 windows_icon::configure(&main_window);
+                if let Err(error) = app.state::<AppState>().gpui_chart.start(
+                    main_window
+                        .hwnd()
+                        .map(|handle| handle.0 as isize)
+                        .unwrap_or_default(),
+                ) {
+                    eprintln!("GPUI 图表渲染器未启动: {error}");
+                }
             }
             boot_timing::mark("setup_exit");
             Ok(())
@@ -1289,7 +1330,14 @@ pub fn run() {
             boot_timing::get_boot_timing,
             boot_timing::report_boot_timing,
             get_runtime_platform,
+            gpui_chart_ready,
+            gpui_chart_frame,
+            gpui_chart_hide,
+            gpui_chart_overlays,
             get_system_locale,
+            custom_background::choose_custom_background,
+            custom_background::load_custom_background,
+            custom_background::clear_custom_background,
             titlebar::titlebar_double_click,
             connect_device_by_path,
             disconnect_device,

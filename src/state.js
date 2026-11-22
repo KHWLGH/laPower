@@ -56,6 +56,10 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {number}  opacityCurrent
  * @property {number}  opacityPower
  * @property {number}  opacityTemp
+ * @property {Partial<Record<'voltage'|'current'|'power'|'temp', string>>} channelColors
+ * @property {Record<'voltage'|'current'|'power'|'temp', number>} chartLineWidths
+ * @property {boolean} chartAutoLineWidth
+ * @property {Record<'voltage'|'current'|'power'|'temp', number>} chartCurveNudge
  * @property {boolean} statsRange
  * @property {string}  tempIp
  * @property {number}  tempPort
@@ -69,8 +73,8 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {boolean} signedCurrent - 记录电流方向：开=保留符号（反向为负），关=记录绝对值
  * @property {number}  uiScalePercent - 界面等比缩放百分比（50–200，步进 5；100=跟随系统 DPI）
  * @property {'dark'|'light'|'system'} theme - 外观：深色 / 浅色 / 跟随系统
+ * @property {number} backgroundTransparency
  * @property {'auto'|'zh-CN'|'zh-TW'|'en'|'ja'} language - 界面语言；auto=跟随系统
- * @property {'windows'|'macos'} windowStyle - 窗口风格；与真实平台及窗口动作分离
  * @property {number}  realtimePanelWidth - 监控页读数栏宽度（px，200–360）
  * @property {boolean} pdSplitSide - PD 分析宽屏时采用左右分栏
  * @property {{ pdType: number, em: number, sink: number }} km003cPdm - POWER-Z PDM 参数（PD 类型 / 线缆模拟 / Sink）
@@ -365,6 +369,10 @@ export const defaultSettings = {
   opacityCurrent: 15,
   opacityPower: 15,
   opacityTemp: 15,
+  channelColors: {},
+  chartLineWidths: { voltage: 1.5, current: 1.5, power: 1.5, temp: 1.5 },
+  chartAutoLineWidth: true,
+  chartCurveNudge: { voltage: 0, current: 0, power: 0, temp: 0 },
   statsRange: false,
   tempIp: '127.0.0.1',
   tempPort: 1573,
@@ -378,8 +386,8 @@ export const defaultSettings = {
   signedCurrent: false,
   uiScalePercent: 100,
   theme: 'system',
+  backgroundTransparency: 0,
   language: 'auto',
-  windowStyle: 'windows',
   realtimePanelWidth: 250,
   pdSplitSide: false,
   km003cPdm: { pdType: 1, em: 1, sink: 0 },
@@ -419,9 +427,9 @@ export const state = {
   __setRangeControlsEnabled: null,
   /**
    * 滚轮缩放：由 data.js 注入，避免 chart.js ↔ data.js 循环 import。
-   * @type {((pivotSec: number, factor: number) => void)|null}
+   * @type {((min: number, max: number, settled: boolean, overviewDomain?: [number, number]) => void)|null}
    */
-  __applyChartXZoom: null,
+  __applyChartXWindow: null,
   /**
    * 由 app.js 注入的两个跨视图动作，供 views/pd.js 在「跟随记录」联动时调用。
    * 用注入而非直接 import：pd.js → data.js 会把 chart.js / temperature.js

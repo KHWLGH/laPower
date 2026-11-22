@@ -19,6 +19,7 @@ const MIME = {
   '.json': 'application/json',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
 };
 
 export async function startServer({ port = 0, distribution = false } = {}) {

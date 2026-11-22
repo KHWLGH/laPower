@@ -35,7 +35,6 @@ const TOKEN_MAP = /** @type {const} */ ({
   energy: '--ch-energy',
   axisText: '--chart-axis-text',
   grid: '--chart-grid',
-  gridMinor: '--chart-grid-minor',
   marker: '--chart-marker',
   markerBg: '--chart-marker-bg',
 });
@@ -54,10 +53,16 @@ const FALLBACK = {
   energy: '#d161c4',
   axisText: '#adadad',
   grid: '#666666',
-  gridMinor: '#3d3d3d',
   marker: '#d6d6d6',
   markerBg: '#333333',
 };
+
+const CHANNEL_COLOR_KEYS = /** @type {const} */ (['voltage', 'current', 'power', 'temp']);
+
+/** @param {unknown} value @returns {value is string} */
+function isHexColor(value) {
+  return typeof value === 'string' && /^#[\da-f]{6}$/i.test(value);
+}
 
 /** 与 src/theme-boot.js 共用的 localStorage 键。 */
 export const THEME_STORAGE_KEY = 'lapower-theme';
@@ -72,10 +77,34 @@ export const chartTheme = { ...FALLBACK };
 export function refreshTheme() {
   // node --test 环境无 DOM（测试只 mock 了 getElementById），保持 FALLBACK 值即可
   if (typeof getComputedStyle !== 'function' || !document.documentElement) return;
-  const style = getComputedStyle(document.documentElement);
+  const root = document.documentElement;
+  for (const key of CHANNEL_COLOR_KEYS) root.style?.removeProperty?.(TOKEN_MAP[key]);
+  root.style?.removeProperty?.('--ch-temp-axis');
+  const style = getComputedStyle(root);
   for (const key of /** @type {(keyof typeof TOKEN_MAP)[]} */ (Object.keys(TOKEN_MAP))) {
     const value = style.getPropertyValue(TOKEN_MAP[key]).trim();
     chartTheme[key] = value !== '' ? value : FALLBACK[key];
+  }
+  for (const key of CHANNEL_COLOR_KEYS) {
+    const custom = state.settings.channelColors?.[key];
+    if (!isHexColor(custom)) continue;
+    root.style?.setProperty?.(TOKEN_MAP[key], custom);
+    chartTheme[key] = custom;
+    if (key === 'temp') {
+      root.style?.setProperty?.('--ch-temp-axis', custom);
+      chartTheme.tempAxis = custom;
+    }
+  }
+}
+
+/** Apply one user-picked channel color without rereading every computed theme token. */
+export function setChannelColor(key, color) {
+  if (!CHANNEL_COLOR_KEYS.includes(key) || !isHexColor(color)) return;
+  chartTheme[key] = color;
+  document.documentElement.style.setProperty(TOKEN_MAP[key], color);
+  if (key === 'temp') {
+    chartTheme.tempAxis = color;
+    document.documentElement.style.setProperty('--ch-temp-axis', color);
   }
 }
 

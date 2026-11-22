@@ -72,7 +72,7 @@ test('signed-current ON keeps the sign; power and energy stay non-negative', () 
 
   assert.equal(state.chartSeries.current.at(-1), -2);
   assert.equal(state.chartSeries.power.at(-1), 10);
-  assert.equal(state.stats.current.min, -2);
+  assert.equal(state.stats.current.min, 2);
   assert.ok(state.energy.mah > 0, 'reverse current must still add capacity');
   assert.ok(state.energy.wh > 0);
 });

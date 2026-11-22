@@ -259,7 +259,12 @@ jobs:
           test "${#images[@]}" -eq 1
           hdiutil verify "${images[0]}"
 
-      - name: Collect and validate installers
+      - name: Create and verify Windows portable ZIP
+        if: matrix.package == 'windows-x64'
+        shell: pwsh
+        run: ./scripts/package-portable-windows.ps1
+
+      - name: Collect and validate release packages
         env:
           PACKAGE_ID: ${{ matrix.package }}
         run: node scripts/release.mjs collect
@@ -289,7 +294,7 @@ jobs:
           merge-multiple: true
           path: dist/packages/
 
-      - name: Require seven installers and generate checksums
+      - name: Require eight release packages and generate checksums
         run: node scripts/release.mjs verify
 
       - uses: actions/upload-artifact@v4

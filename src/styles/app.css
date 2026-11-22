@@ -1,7 +1,7 @@
 /*! SPDX-FileCopyrightText: 2026 KHWLGH
  * SPDX-License-Identifier: GPL-3.0-only */
 /*
- * 外壳层：标题栏（Tab 条 + 连接区 + 窗口控制）/ 视图宿主 / 命令栏 / 状态栏 / 浮出面板 / 页面卡片。
+ * 外壳层：标题栏（Tab 条 + 连接区 + 窗口控制）/ 视图宿主 / 命令栏 / 浮出面板 / 页面卡片。
  * 布局骨架见 index.html，行为见 src/shell.js 与 src/ui/*.js。
  */
 
@@ -52,15 +52,6 @@ html[data-ui-scale-css] .app-shell {
 /* decorum 固定定位，按风格预留对应一侧；自绘按钮通过 flex 自行占位。 */
 :root[data-os="windows"] .titlebar {
   padding-right: calc(3 * var(--window-control-width));
-}
-
-:root[data-os="windows"][data-window-style="macos"] .titlebar {
-  padding-left: var(--window-mac-controls-width);
-}
-
-/* 窗口控制挪到左侧后设置钮成为最右一项，补上与之对称的右内缩。 */
-:root[data-window-style="macos"] .titlebar {
-  padding-right: var(--window-mac-control-inset);
 }
 
 .titlebar-tabs {
@@ -149,6 +140,14 @@ html[data-ui-scale-css] .app-shell {
   height: 28px;
   min-width: 140px;
   max-width: 240px;
+}
+
+.titlebar-connect .status-connection {
+  flex: none;
+  gap: 5px;
+  margin-inline-start: 2px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* ── 窗口按钮：同一批节点切换皮肤，真实 OS 仅决定节点来源 ── */
@@ -251,91 +250,13 @@ html[data-ui-scale-css] .app-shell {
   outline-offset: -3px;
 }
 
-/* macOS 风格：左侧红黄绿，24px 命中区包住 12px 色点；非原生交通灯。 */
-:root[data-window-style="macos"] .titlebar-controls {
-  order: -1;
-  width: var(--window-mac-controls-width);
-  padding: 0 var(--window-mac-control-inset);
-  align-items: center;
-  justify-content: center;
-}
-
-:root[data-window-style="macos"] div[data-tauri-decorum-tb] {
-  left: 0 !important;
-  right: auto !important;
-  width: var(--window-mac-controls-width) !important;
-  padding: 0 var(--window-mac-control-inset) !important;
-  align-items: center !important;
-  justify-content: center !important;
-  box-sizing: border-box;
-}
-
-:root[data-window-style="macos"] #decorum-tb-close:hover,
-:root[data-window-style="macos"] :is(.wc-btn, #decorum-tb-minimize, #decorum-tb-maximize, #decorum-tb-close) {
-  position: relative;
-  width: var(--window-mac-control-target) !important;
-  flex: 0 0 var(--window-mac-control-target) !important;
-  height: var(--window-mac-control-target) !important;
-  border-radius: var(--radius-full) !important;
-  background: transparent !important;
-  color: var(--window-control-symbol) !important;
-  /* decorum 会往按钮里写 \uE9xx 私用区文本并注入 font-size:10px；
-     交通灯皮肤下这颗字形按黑色绘制，10px 方框半对角线 7.07px > 色点半径 6px，四角会戳出圆外。
-     置零只压掉按钮自身文本，.fi 用的是自己的显式 font-size。 */
-  font-size: 0;
-}
-
-:root[data-window-style="macos"] :is(.wc-btn-close, #decorum-tb-close) {
-  order: -3;
-  --window-control-dot-fill: var(--window-close-fill);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn-minimize, #decorum-tb-minimize) {
-  order: -2;
-  --window-control-dot-fill: var(--window-minimize-fill);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn-maximize, #decorum-tb-maximize) {
-  order: -1;
-  --window-control-dot-fill: var(--window-maximize-fill);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn)::before {
-  content: "";
-  position: absolute;
-  /* 四边归零 + auto 外边距居中：abspos flex 子项的静态位置规则 WebKit 并不遵守。 */
-  inset: 0;
-  margin: auto;
-  width: var(--window-mac-control-dot);
-  height: var(--window-mac-control-dot);
-  border-radius: var(--radius-full);
-  background: var(--window-control-dot-fill);
-  box-shadow: inset 0 0 0 1px var(--black-alpha-20);
-  pointer-events: none;
-}
-
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):active::before {
-  filter: brightness(0.88);
-}
-
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn) .fi {
-  position: relative;
-  font-size: var(--window-mac-control-symbol);
-  opacity: 0;
-  pointer-events: none;
-}
-
-:root[data-window-style="macos"] :is(.titlebar-controls, [data-tauri-decorum-tb]):hover .fi,
-:root[data-window-style="macos"] :is(.wc-btn, .decorum-tb-btn):focus-visible .fi {
-  opacity: 1;
-}
-
 /* ── macOS：系统原生红绿灯 ──
    按钮由系统绘制在标题栏左侧（tauri.macos.conf.json），这里只留出位置、不自绘。
    原生按钮不随界面缩放：预留宽度按 --ui-scale 反比换算；缩小界面时标题栏的物理高度
    不低于 100% 时的高度，按钮始终落在标题栏内。放大界面时标题栏变高、按钮仍在原处。
    全屏时系统隐藏红绿灯，预留随之收起。 */
 :root[data-os="macos"] .titlebar {
+  padding-right: 12px;
   height: max(var(--titlebar-height), calc(var(--titlebar-height) / var(--ui-scale, 1)));
 }
 
@@ -346,11 +267,6 @@ html[data-ui-scale-css] .app-shell {
 }
 
 :root[data-os="macos"].is-fullscreen .titlebar-controls {
-  display: none;
-}
-
-/* 原生按钮不能换皮肤，设置里的窗口风格只对 Windows / Linux 有意义。 */
-:root[data-os="macos"] #window-style-row {
   display: none;
 }
 
@@ -472,8 +388,21 @@ html[data-ui-scale-css] .app-shell {
   user-select: none;
 }
 
-#view-monitor .commandbar {
-  overflow-x: auto;
+.monitor-commandbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 10px;
+  border-bottom: none;
+}
+
+.monitor-command-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.monitor-command-actions {
+  justify-self: end;
 }
 
 .chart-header {
@@ -729,81 +658,28 @@ html[data-ui-scale-css] .app-shell {
   background: var(--accent-fill);
 }
 
-/* ── 状态栏 ───────────────────────────────────────────────────── */
-
-.statusbar {
-  height: var(--statusbar-height);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  background: var(--surface-base);
-  border-top: 1px solid var(--stroke-divider);
-  font-size: 11px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  user-select: none;
-  overflow: hidden;
-}
+/* ── 记录状态 ─────────────────────────────────────────────────── */
 
 .status-metrics {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 82px 112px 96px 92px minmax(150px, 1fr);
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-self: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  max-width: 100%;
   min-height: 20px;
-  padding: 1px 8px;
-  border: 1px solid var(--stroke-divider);
-  border-radius: var(--radius-control);
-  background: var(--fill-control);
-  overflow: hidden;
-}
-
-.statusbar .status-item {
-  gap: 5px;
+  padding: 1px 6px;
   font-size: 11px;
-  white-space: nowrap;
-  min-width: 0;
-  overflow: hidden;
 }
 
-.statusbar .status-item > :last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
+.status-metrics .status-item {
+  gap: 4px;
   font-variant-numeric: tabular-nums;
 }
 
-.statusbar .status-duration > :last-child {
-  min-width: 9ch;
-}
-
-.statusbar .status-rate > :last-child {
-  min-width: 9ch;
-}
-
-.statusbar .status-count > :last-child {
-  min-width: 7ch;
-}
-
-.statusbar .status-remaining > :last-child {
-  min-width: 14ch;
-}
-
-.statusbar .status-remaining.is-warning {
+.status-metrics .status-remaining.is-warning {
   color: var(--status-caution);
-}
-
-.statusbar .status-indicator {
-  width: 8px;
-  height: 8px;
-}
-
-.statusbar .status-connection {
-  margin-left: auto;
-  flex: none;
 }
 
 /* ── 浮出面板内容行 ───────────────────────────────────────────── */
@@ -820,6 +696,126 @@ html[data-ui-scale-css] .app-shell {
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
   box-shadow: var(--shadow-16);
+}
+
+#flyout-display {
+  box-sizing: border-box;
+  width: min(396px, calc(100vw - 16px));
+  min-width: 0;
+}
+
+.display-config-head,
+#flyout-display .display-channel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px repeat(3, 66px);
+  align-items: center;
+  column-gap: 8px;
+}
+
+.display-config-head {
+  min-height: 22px;
+  color: var(--text-tertiary);
+  font: var(--type-caption);
+  text-align: center;
+}
+
+#flyout-display .display-channel-row {
+  justify-content: initial;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.display-channel-row .ribbon-checkbox {
+  min-width: 0;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.display-channel-row .ribbon-checkbox > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.display-number-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto 18px;
+  align-items: center;
+  min-height: 32px;
+  border: 1px solid var(--stroke-control);
+  border-radius: var(--radius-control);
+  background: var(--fill-control);
+  color: var(--text-primary);
+  font: var(--type-caption);
+}
+
+.display-number-wrap output {
+  justify-self: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.display-number-wrap .opacity-suffix {
+  position: static;
+  transform: none;
+  margin-inline-end: 3px;
+}
+
+.display-stepper-buttons {
+  display: grid;
+  align-self: stretch;
+  border-inline-start: 1px solid var(--stroke-divider);
+}
+
+.display-stepper-buttons button {
+  display: grid;
+  place-items: center;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.display-stepper-buttons button::before {
+  content: "";
+  width: 8px;
+  height: 5px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.display-stepper-buttons [data-direction="up"]::before {
+  transform: rotate(180deg);
+}
+
+.display-stepper-buttons button:hover:not([aria-disabled="true"]) {
+  background: var(--fill-subtle-hover);
+}
+
+.display-stepper-buttons button:focus-visible {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: -2px;
+}
+
+.display-stepper-buttons button[aria-disabled="true"] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#main-chart .u-over.is-pannable {
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+#main-chart .u-over.is-panning {
+  cursor: grabbing;
+}
+
+#main-chart .u-over.is-panning :is(.u-cursor-x, .u-cursor-pt) {
+  visibility: hidden;
 }
 
 .flyout-title {
@@ -867,7 +863,7 @@ html[data-ui-scale-css] .flyout-panel {
 
 .marker-time {
   font: var(--type-caption);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
 }
@@ -1044,11 +1040,6 @@ html[data-ui-scale-css] .flyout-panel {
   justify-content: space-between;
   gap: var(--space-3) var(--space-4);
   padding: 14px 0;
-  border-bottom: 1px solid var(--stroke-divider);
-}
-
-.settings-row:last-child {
-  border-bottom: none;
 }
 
 .settings-row-nested {
@@ -1084,6 +1075,30 @@ html[data-ui-scale-css] .flyout-panel {
   justify-content: flex-end;
   gap: 8px;
   flex: 0 1 auto;
+}
+
+.background-control {
+  flex-wrap: wrap;
+}
+
+.background-preview {
+  display: grid;
+  width: 72px;
+  height: 42px;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  background-color: var(--surface-content);
+  background-position: center;
+  background-size: cover;
+  border: 1px solid var(--stroke-control);
+  border-radius: 6px;
+}
+
+.background-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .settings-scale {
@@ -1565,7 +1580,7 @@ html[data-ui-scale-css] .about-legal-dialog {
 
 .scale-value {
   min-width: 3.5em;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-secondary);
   text-align: right;
@@ -1615,9 +1630,6 @@ html[data-ui-scale-css] .about-legal-dialog {
   color: var(--text-primary);
 }
 
-:root:not([data-theme="light"]) .realtime-panel,
-:root:not([data-theme="light"]) .chart-container,
-:root:not([data-theme="light"]) .timeline-container,
 :root:not([data-theme="light"]) .settings-group {
   box-shadow:
     var(--shadow-2),
@@ -1635,6 +1647,31 @@ html[data-ui-scale-css] .about-legal-dialog {
 .opacity-wrap .ribbon-input {
   width: 100%;
   padding-right: 16px;
+}
+
+.channel-color-picker {
+  flex: none;
+  width: 32px;
+  height: 26px;
+  padding: 3px;
+  border: 1px solid var(--stroke-control);
+  border-radius: 6px;
+  background: var(--fill-control);
+  cursor: pointer;
+}
+
+.channel-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.channel-color-picker::-webkit-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+
+.channel-color-picker:focus-visible {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: 2px;
 }
 
 .record-limit-wrap {
@@ -1674,7 +1711,7 @@ html[data-ui-scale-css] .about-legal-dialog {
 }
 
 .settings-kv-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-primary);
   user-select: text;

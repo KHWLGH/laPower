@@ -6,6 +6,7 @@
  */
 /** Pure CSV import computation, shared by the module Worker and benchmarks. */
 import { createCsvParser } from './csv-codec.js';
+import { CurrentDisplayColumn } from './current-display.js';
 import { calculateEnergyInRange } from './measurement.js';
 
 const STAT_KEYS = /** @type {const} */ (['voltage', 'current', 'power', 'temp']);
@@ -26,19 +27,16 @@ function summarize(imported) {
   };
   for (const key of STAT_KEYS) {
     const stat = stats[key];
-    cols[key].forEachChunk(
-      (values) => {
-        for (const value of values) {
-          if (!Number.isFinite(value)) continue;
-          if (value < stat.min) stat.min = value;
-          if (value > stat.max) stat.max = value;
-          stat.sum += value;
-          stat.count++;
-        }
-      },
-      0,
-      n,
-    );
+    const column = key === 'current' ? new CurrentDisplayColumn(cols.current, cols.currentMagnitudes) : cols[key];
+    for (const { values } of column.chunks(0, n)) {
+      for (const value of values) {
+        if (!Number.isFinite(value)) continue;
+        if (value < stat.min) stat.min = value;
+        if (value > stat.max) stat.max = value;
+        stat.sum += value;
+        stat.count++;
+      }
+    }
   }
   const hasTempData = stats.temp.count > 0;
   const energy = calculateEnergyInRange(

@@ -18,19 +18,27 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![\s\S])/;
 const CHECKSUMS = 'SHA256SUMS';
 
 export const PACKAGES = {
-  'windows-x64': { target: 'x86_64-pc-windows-msvc', bundles: ['msi', 'nsis'] },
+  'windows-x64': { target: 'x86_64-pc-windows-msvc', bundles: ['msi', 'nsis', 'portable'] },
   'linux-x64': { target: 'x86_64-unknown-linux-gnu', bundles: ['deb', 'rpm', 'appimage'] },
   'macos-x64': { target: 'x86_64-apple-darwin', bundles: ['dmg'] },
   'macos-arm64': { target: 'aarch64-apple-darwin', bundles: ['dmg'] },
 };
-const EXTENSIONS = { msi: '.msi', nsis: '.exe', deb: '.deb', rpm: '.rpm', appimage: '.AppImage', dmg: '.dmg' };
+const EXTENSIONS = {
+  msi: '.msi',
+  nsis: '.exe',
+  portable: '.zip',
+  deb: '.deb',
+  rpm: '.rpm',
+  appimage: '.AppImage',
+  dmg: '.dmg',
+};
+
+const SUFFIXES = { nsis: '_setup', portable: '_portable' };
 
 export function packageNames(version, id) {
   if (!VERSION.test(version)) throw new Error(`无效的产品版本：${version}`);
   if (!Object.hasOwn(PACKAGES, id)) throw new Error(`未知的打包目标：${id}`);
-  return PACKAGES[id].bundles.map(
-    (bundle) => `laPower_${version}_${id}${bundle === 'nsis' ? '_setup' : ''}${EXTENSIONS[bundle]}`,
-  );
+  return PACKAGES[id].bundles.map((bundle) => `laPower_${version}_${id}${SUFFIXES[bundle] ?? ''}${EXTENSIONS[bundle]}`);
 }
 
 async function fingerprint(path) {
@@ -78,7 +86,9 @@ export async function verifyPackages(directory, version, { writeChecksums = fals
     .sort();
   const actual = (await readdir(directory)).filter((name) => name !== CHECKSUMS).sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(`发布必须包含七个指定安装包\n期望：${expected.join(', ')}\n实际：${actual.join(', ')}`);
+    throw new Error(
+      `发布必须包含 ${expected.length} 个指定发布包\n期望：${expected.join(', ')}\n实际：${actual.join(', ')}`,
+    );
   }
   const assets = [];
   for (const name of expected) assets.push({ name, ...(await fingerprint(join(directory, name))) });

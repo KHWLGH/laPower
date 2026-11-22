@@ -10,13 +10,7 @@
 
 import { scheduleChartUpdate as requestChartUpdate, setChartXWindow, syncChartSeries, updateCharts } from './chart.js';
 import { firstIndexAfter, firstIndexAtOrAfter } from './chart-buckets.js';
-import {
-  classifyChartWindow,
-  emptyChartWindow,
-  minZoomSpan,
-  resolveChartWindow,
-  zoomTimeWindow,
-} from './chart-window.js';
+import { classifyChartWindow, emptyChartWindow, resolveChartWindow } from './chart-window.js';
 import { deviceStream } from './device-stream.js';
 import { displayFrames } from './frame-scheduler.js';
 import { currentMagnitude, energyMaxStepS, nextRecordingX, niceCeiling, streamSampleTime } from './measurement.js';
@@ -84,12 +78,6 @@ const meterPeak = {
   current: 0,
   power: 0,
   temp: 0,
-  energy: 0,
-  capacity: 0,
-  dp: 0,
-  dn: 0,
-  cc1: 0,
-  cc2: 0,
 };
 
 /** 监控视图隐藏期间只积累数据，恢复时从最新状态一次性补齐显示。 */
@@ -135,18 +123,7 @@ function setMeter(id, channel, value, axis) {
 
 function resetMeters() {
   for (const key of Object.keys(meterPeak)) meterPeak[key] = 0;
-  for (const id of [
-    'lv-voltage',
-    'lv-current',
-    'lv-power',
-    'lv-temp',
-    'lv-energy',
-    'lv-capacity',
-    'lv-dp',
-    'lv-dn',
-    'lv-cc1',
-    'lv-cc2',
-  ]) {
+  for (const id of ['lv-voltage', 'lv-current', 'lv-power', 'lv-temp']) {
     const el = document.getElementById(id);
     setTransformIfChanged(el, 'scaleX(0)');
   }
@@ -291,15 +268,12 @@ export function addDataPoint(data, segment) {
     tempValue = state.settings.tempSource === 'device' ? hidTemp : (state.currentTemp ?? Number.NaN);
   }
 
-  const realtime = { ...data, current: currentValue, power: powerAbs, temp: tempValue };
+  const realtime = { ...data, current: data.current, current_abs: currentAbs, power: powerAbs, temp: tempValue };
   lastRealtime = realtime;
   trackMeterPeak('voltage', data.voltage);
-  trackMeterPeak('current', currentValue);
+  trackMeterPeak('current', currentAbs);
   trackMeterPeak('power', powerAbs);
   trackMeterPeak('temp', tempValue);
-  for (const channel of /** @type {const} */ (['dp', 'dn', 'cc1', 'cc2'])) {
-    trackMeterPeak(channel, /** @type {number} */ (data[channel]));
-  }
 
   // Live preview coalesces too; native segment gating is independent of arrival-time UI state.
   if (!record) {
@@ -352,7 +326,7 @@ export function addDataPoint(data, segment) {
   cols.x.push(relSeconds);
 
   updateStats('voltage', data.voltage);
-  updateStats('current', currentValue);
+  updateStats('current', currentAbs);
   updateStats('power', powerAbs);
   const firstTemp = !state.hasTempData && Number.isFinite(tempValue);
   if (state.isTempConnected && Number.isFinite(tempValue)) {
@@ -380,8 +354,6 @@ export function addDataPoint(data, segment) {
   }
   if (segment) segment.lastX = relSeconds;
   state.energy.lastX = state.isRecording ? relSeconds : null;
-  trackMeterPeak('energy', state.energy.wh);
-  trackMeterPeak('capacity', state.energy.mah);
 
   scheduleStatsUpdate();
 
@@ -422,21 +394,26 @@ export function addDataPoint(data, segment) {
 // ─── Slider / range ──────────────────────────────────────────────────────────
 
 /** 更新滑块填充条的位置和宽度。 */
-export function updateSliderFill() {
+/** @param {[number,number]} [domain] Frozen overview domain during a pointer gesture. */
+export function updateSliderFill(domain) {
   if (!monitorDisplayVisible()) return;
   const startEl = /** @type {HTMLInputElement|null} */ (document.getElementById('range-start'));
   const endEl = /** @type {HTMLInputElement|null} */ (document.getElementById('range-end'));
   if (startEl && startEl.value !== String(state.settings.rangeStart)) startEl.value = String(state.settings.rangeStart);
   if (endEl && endEl.value !== String(state.settings.rangeEnd)) endEl.value = String(state.settings.rangeEnd);
 
-  const start = state.settings.rangeStart / 10;
-  const end = state.settings.rangeEnd / 10;
+  const xs = state.chartSeries.x;
+  const [min, max] = domain ?? [xs.at(0), xs.at(-1)];
+  const span = max - min;
+  const win = state.chartWindow;
+  const start = span > 0 && win.mode !== 'full' ? Math.max(0, ((win.min - min) * 100) / span) : 0;
+  const end = span > 0 && win.mode !== 'full' ? Math.min(100, ((win.max - min) * 100) / span) : 100;
   const fill = document.getElementById('slider-fill');
   if (fill?.style) {
     if (fill.style.left !== `${start}%`) fill.style.left = `${start}%`;
     if (fill.style.width !== `${end - start}%`) fill.style.width = `${end - start}%`;
   }
-  fill?.classList?.toggle('is-pannable', state.settings.rangeEnd - state.settings.rangeStart < 1000);
+  fill?.classList?.toggle('is-pannable', end - start < 100);
 
   const handleStart = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-start'));
   const handleEnd = /** @type {HTMLElement|null} */ (document.getElementById('range-handle-end'));
@@ -513,37 +490,27 @@ export function adoptWindowFromPermille() {
 }
 
 /**
- * 滚轮横向缩放：绕 pivot 缩放当前时间窗，写回滑块与 xWindow。
- * @param {number} pivotSec
- * @param {number} factor
+ * 主图缩放或平移时同步时间轴，交互结束后吸附录制边缘并更新选区统计。
+ * @param {number} min @param {number} max @param {boolean} settled
  */
-export function applyChartXZoom(pivotSec, factor) {
+function applyChartXWindow(min, max, settled, /** @type {[number,number]|undefined} */ overviewDomain) {
   const xs = state.chartSeries.x;
   const n = xs.length;
   if (n === 0) return;
   const dataMin = xs.at(0);
   const dataMax = xs.at(-1);
-  const current = resolveChartWindow(state.chartWindow, dataMin, dataMax);
-  const zoomed = zoomTimeWindow({
-    min: current.min,
-    max: current.max,
-    pivot: pivotSec,
-    factor,
-    dataMin,
-    dataMax,
-    minSpan: minZoomSpan(state.settings.sampleRate),
-  });
-  state.chartWindow = classifyChartWindow(zoomed.min, zoomed.max, dataMin, dataMax, sampleEdgeEps());
+  state.chartWindow = settled
+    ? classifyChartWindow(min, max, dataMin, dataMax, 1e-6)
+    : { mode: 'frozen', min, max, duration: max - min };
   paintFromWindow(xs, n, dataMin, dataMax);
   if (monitorDisplayVisible()) {
-    updateSliderFill();
+    updateSliderFill(overviewDomain);
     writeRangeLabels(xs);
   }
-  requestChartUpdate('interaction');
-  if (state.settings.statsRange) scheduleStatsUpdate();
+  if (settled && state.settings.statsRange) scheduleStatsUpdate();
 }
 
-state.__applyChartXZoom = applyChartXZoom;
+state.__applyChartXWindow = applyChartXWindow;
 
 function paintEmptyRangeLabels() {
   const el1 = document.getElementById('range-start-time');
@@ -650,7 +617,7 @@ export function updateStats(field, value) {
 
 /**
  * 更新实时数据显示面板。
- * @param {{ voltage: number, current: number, power: number, temp: number, dp?: number, dn?: number, cc1?: number, cc2?: number }} data
+ * @param {{ voltage: number, current: number, power: number, temp: number, current_abs?: number, dp?: number, dn?: number, cc1?: number, cc2?: number }} data
  */
 export function updateRealtimeDisplay(data) {
   lastRealtime = data;
@@ -660,7 +627,7 @@ export function updateRealtimeDisplay(data) {
   const pEl = document.getElementById('rt-power');
   setTextIfChanged(vEl, data.voltage.toFixed(4));
   // 电流数值恒显示幅值，方向由箭头表达（需求：不用正负号）
-  setTextIfChanged(cEl, Math.abs(data.current).toFixed(4));
+  setTextIfChanged(cEl, currentMagnitude(data.current, data.current_abs).toFixed(4));
   setTextIfChanged(pEl, data.power.toFixed(4));
 
   setMeter('lv-voltage', 'voltage', data.voltage, 'x');
@@ -699,10 +666,6 @@ export function updateRealtimeDisplay(data) {
   setSignal('rt-dn', data.dn);
   setSignal('rt-cc1', data.cc1);
   setSignal('rt-cc2', data.cc2);
-  setMeter('lv-dp', 'dp', Number.isFinite(data.dp) ? /** @type {number} */ (data.dp) : Number.NaN, 'x');
-  setMeter('lv-dn', 'dn', Number.isFinite(data.dn) ? /** @type {number} */ (data.dn) : Number.NaN, 'x');
-  setMeter('lv-cc1', 'cc1', Number.isFinite(data.cc1) ? /** @type {number} */ (data.cc1) : Number.NaN, 'x');
-  setMeter('lv-cc2', 'cc2', Number.isFinite(data.cc2) ? /** @type {number} */ (data.cc2) : Number.NaN, 'x');
 }
 
 /**
@@ -1016,10 +979,6 @@ function setRangeStatsPending(pending) {
       if (el && el.title !== '') el.title = '';
     }
   }
-  if (pending) {
-    setMeter('lv-energy', 'energy', Number.NaN, 'x');
-    setMeter('lv-capacity', 'capacity', Number.NaN, 'x');
-  }
 }
 
 /** @type {boolean|null} */
@@ -1094,7 +1053,7 @@ export function updateStatsDisplay() {
   const avgVoltageEl = document.getElementById('avg-voltage');
   const avgCurrentEl = document.getElementById('avg-current');
   setTextIfChanged(avgVoltageEl, isAvg(avgVoltage) ? avgVoltage.toFixed(3) : '--');
-  setTextIfChanged(avgCurrentEl, isAvg(avgCurrent) ? Math.abs(avgCurrent).toFixed(3) : '--');
+  setTextIfChanged(avgCurrentEl, isAvg(avgCurrent) ? avgCurrent.toFixed(3) : '--');
 
   const avgPowerEl = document.getElementById('avg-power');
   setTextIfChanged(avgPowerEl, isAvg(displayPowerAvg) ? displayPowerAvg.toFixed(3) : '--');
@@ -1130,15 +1089,9 @@ export function updateEnergyDisplay() {
   if (state.settings.statsRange && state.chartSeries.x.length > 0) {
     const range = getDisplayRangeStats();
     setRangeStatsPending(!range);
-    if (!range) {
-      setMeter('lv-energy', 'energy', Number.NaN, 'x');
-      setMeter('lv-capacity', 'capacity', Number.NaN, 'x');
-      return;
-    }
-    if (range) {
-      wh = range.wh;
-      mah = range.mah;
-    }
+    if (!range) return;
+    wh = range.wh;
+    mah = range.mah;
   } else {
     cancelRangeStatsJob();
     setRangeStatsPending(false);
@@ -1148,8 +1101,6 @@ export function updateEnergyDisplay() {
   const mahEl = document.getElementById('rt-capacity');
   setTextIfChanged(whEl, wh.toFixed(4));
   setTextIfChanged(mahEl, mah.toFixed(2));
-  setMeter('lv-energy', 'energy', wh, 'x');
-  setMeter('lv-capacity', 'capacity', mah, 'x');
 }
 
 // ─── Throttled stats refresh ─────────────────────────────────────────────────
@@ -1297,12 +1248,14 @@ export function scheduleStatsUpdate() {
     return;
   }
   if (!state.settings.statsRange) cancelRangeStatsJob();
+  else if (state.__rangeDragging) return;
   if (__statsUpdateTimer !== null) return;
   if (state.settings.statsRange) markStaleRangeStatsPending();
   __statsUpdateTimer = setTimeout(
     () => {
       const startedAt = performance.now();
       __statsUpdateTimer = null;
+      if (state.settings.statsRange && state.__rangeDragging) return;
       updateStatsDisplay();
       updateEnergyDisplay();
       performanceDiagnostics.domCommit('stats-ui', startedAt);

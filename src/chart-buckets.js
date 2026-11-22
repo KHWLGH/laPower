@@ -12,7 +12,7 @@ import { F64_CHUNK_SIZE } from './state.js';
 export const BUCKET_MIN = 64;
 export const DISPLAY_SERIES = 8;
 
-/** @typedef {ArrayLike<number>|import('./state.js').F64Col|import('./state.js').F64Snapshot} NumericColumn */
+/** @typedef {ArrayLike<number>|import('./state.js').F64Snapshot|import('./current-display.js').CurrentDisplayColumn} NumericColumn */
 
 /** @param {NumericColumn} column @param {number} index */
 export function columnValue(column, index) {
@@ -28,6 +28,11 @@ export function columnSpan(column, index, end) {
       base: (index >>> 12) * F64_CHUNK_SIZE,
       end: Math.min(end, ((index >>> 12) + 1) * F64_CHUNK_SIZE),
     };
+  }
+  if ('chunks' in column) {
+    const stop = Math.min(end, ((index >>> 12) + 1) * F64_CHUNK_SIZE);
+    const values = column.chunks(index, stop).next().value?.values ?? [];
+    return { values, base: index, end: stop };
   }
   return { values: column, base: 0, end };
 }
@@ -267,9 +272,16 @@ export class SeriesBuckets {
         bucketsRemaining = Math.max(1, maxBuckets);
       while (i < end && remaining > 0 && bucketsRemaining > 0) {
         if (!bucket) {
-          for (let s = 0; s < this.channels; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
-          bucket = makeBucket(columnValue(xs, i), values, i++);
-          remaining--;
+          if (index) {
+            // Query the entire bucket, including its first sample. An aligned
+            // power-of-two bucket can then use a single exact index node.
+            bucket = makeBucket(columnValue(xs, i), values, i);
+            bucket.n = 0;
+          } else {
+            for (let s = 0; s < this.channels; s++) values[s] = series[s] ? columnValue(series[s], i) : NaN;
+            bucket = makeBucket(columnValue(xs, i), values, i++);
+            remaining--;
+          }
         }
         const through = Math.min(end, bucket.start + this.ppb, i + remaining);
         if (index) index.fold(bucket, series, i, through);

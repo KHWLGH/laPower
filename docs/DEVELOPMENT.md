@@ -183,12 +183,12 @@ Rust 成员 crate 继续通过 `version.workspace = true` 继承版本；关于�
 
 | 目标 | Runner | Rust target | 安装包 |
 | --- | --- | --- | --- |
-| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE |
+| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE、便携 ZIP |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | DEB、RPM、AppImage |
 | macOS Intel | `macos-26-intel` | `x86_64-apple-darwin` | DMG |
 | macOS Apple Silicon | `macos-26` | `aarch64-apple-darwin` | DMG |
 
-每个成功目标提供独立的 `packages-*` 附件，保留 14 天。四目标全部成功后提供 `release-packages`，包含七个安装包与 `SHA256SUMS`；在解压目录中可用 `sha256sum -c SHA256SUMS` 校验。安装包名包含版本与平台架构，NSIS EXE 另带 `_setup`。
+每个成功目标提供独立的 `packages-*` 附件，保留 14 天。四目标全部成功后提供 `release-packages`，包含八个发布包与 `SHA256SUMS`；在解压目录中可用 `sha256sum -c SHA256SUMS` 校验。安装包名包含版本与平台架构，NSIS EXE 另带 `_setup`。Windows 便携 ZIP 命名为 `laPower_<版本>_windows-x64_portable.zip`。解压后双击 `laPower.exe`。系统须已有 Microsoft Edge WebView2 Runtime，应用配置仍保存在原有的用户数据目录。
 
 首次启用 Tag 自动发布前，先手动构建，检查 Windows 安装、两种 Mac 启动、Linux 安装及配置 udev 后的设备连接。macOS 12 兼容性需要单独实机验证。CI 验证 Mac 的架构、ad-hoc 签名、最低系统版本元数据和 DMG 完整性，不运行 GUI 或连接仪表。
 
@@ -205,7 +205,7 @@ git push origin v0.2.4
 
 Tag 必须为 `vX.Y.Z`，且与清单版本一致；不一致会在打包前失败。CI 使用 Node.js 24、Rust stable、固定的 Tauri CLI 2.12.1 和 `tauri-apps/tauri-action@v1`。npm 通过 `npm ci` 安装，Cargo 使用 `--locked`；Rust 缓存按目标区分并指向工作区根目录 `target/`。Linux 固定 Ubuntu 22.04，以减少对较新 glibc 的依赖。
 
-只有全部质量检查与四目标打包成功，才会汇总七个安装包并生成校验和。发布任务使用运行仓库的 `GITHUB_TOKEN` 创建临时草稿，上传七个包与校验文件，再核对远端附件数量、大小和 SHA-256，最后自动公开正式 Release。无需人工点击 Publish，也不需要另设 PAT；只有发布任务获得 `contents: write`，仓库的组织策略需允许这项权限。
+只有全部质量检查与四目标打包成功，才会汇总八个发布包并生成校验和。发布任务使用运行仓库的 `GITHUB_TOKEN` 创建临时草稿，上传八个包与校验文件，再核对远端附件数量、大小和 SHA-256，最后自动公开正式 Release。无需人工点击 Publish，也不需要另设 PAT；只有发布任务获得 `contents: write`，仓库的组织策略需允许这项权限。
 
 `scripts/release.mjs` 从当前版本目录读取中英 Markdown，而不是解析根目录历史长文。Tag 打包前与发布前都复用文案读取逻辑，仅检查双语文件存在且正文非空；相对链接固定到该版本 Tag，不使用 GitHub 自动生成的提交/PR 摘要。`npm run release:notes` 可重新生成本地预览，不修改源文档。
 
@@ -357,7 +357,7 @@ npm run showcase:capture -- --help
 | `backend-other-platforms` | Windows workspace test；macOS workspace test |
 | `crate-features` | 协议 crate 的非默认 feature 组合 Clippy 与 test |
 | `package` | 仅版本 Tag push / 手动触发；依赖以上三项检查，四目标并行打包，单个平台失败不会取消其他目标 |
-| `package-summary` | 四目标全部成功后验证七个安装包并生成 `SHA256SUMS` |
+| `package-summary` | 四目标全部成功后验证八个发布包并生成 `SHA256SUMS` |
 | `release` | 仅版本 Tag push；上传并核对附件后自动公开 Release |
 
 普通分支 push 和 PR 只运行核心检查，不打包或发布；CI 不安装浏览器，不运行 UI 矩阵、长时间采集或耗时 benchmark。按需使用无头接口调用已有工具；原有 **CI** 手动入口仍会打包。发布脚本的失败、重跑、附件完整性和公开版本保护由 `test/release.test.js` 离线验证。

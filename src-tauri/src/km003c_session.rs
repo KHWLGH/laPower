@@ -657,7 +657,7 @@ impl Km003cSource {
         if self.queue.is_none() {
             if self.queue_failed {
                 // The reader will have lowered the shared setting after the first failure.
-                return self.read_average(out);
+                return self.read_adc(out);
             }
             if let Err(error) = self.start_queue() {
                 self.queue_failed = true;
@@ -668,7 +668,7 @@ impl Km003cSource {
                     serde_json::json!({ "ok": false, "message": error,
                         "description": crate::app_error::AppError::new("backendFailure", error.clone()) }),
                 );
-                return self.read_average(out);
+                return self.read_adc(out);
             }
         }
         let now = Instant::now();
@@ -710,7 +710,7 @@ impl Km003cSource {
         }
     }
 
-    fn read_average(&mut self, out: &mut Vec<Arrival>) -> Result<(), Stop> {
+    fn read_adc(&mut self, out: &mut Vec<Arrival>) -> Result<(), Stop> {
         let now = Instant::now();
         if now < self.next_poll {
             thread::sleep((self.next_poll - now).min(MAX_WAIT));
@@ -807,13 +807,14 @@ impl Km003cSource {
     /// The sample goes first, so PD rows from the same poll carry its V/I.
     fn deliver(&self, response: DataResponse, received_us: u64, out: &mut Vec<Arrival>) {
         if let Some(adc) = response.adc {
+            let data = map_adc(&adc);
             self.pdo_cache.voltage_cache().record(
                 self.epoch + Duration::from_micros(received_us),
-                (adc.vbus_v() * 1000.0).round() as u32,
+                (data.voltage * 1000.0).round() as u32,
             );
             out.push(Arrival {
                 received_us,
-                payload: Payload::Sample(map_adc(&adc)),
+                payload: Payload::Sample(data),
             });
         }
         for event in response.pd_events {
@@ -979,13 +980,16 @@ fn next_on_grid(due: Instant, period: Duration, now: Instant) -> Instant {
     }
 }
 
-/// Averaged V/I (the values the meter itself displays); CC and D± are instantaneous.
+/// Use the instantaneous V/I fields. The shared acquisition loop already averages
+/// over the requested host interval; firmware display averages hide subsecond detail.
 fn map_adc(adc: &AdcData) -> DeviceData {
     let temperature = adc.temp_c() as f32;
+    let voltage = adc.vbus_instant_v() as f32;
+    let current = adc.ibus_instant_a() as f32;
     DeviceData {
-        voltage: adc.vbus_v() as f32,
-        current: adc.ibus_a() as f32,
-        power: adc.power_w() as f32,
+        voltage,
+        current,
+        power: voltage * current,
         dp: line_voltage(adc.vdp_v() as f32),
         dn: line_voltage(adc.vdm_v() as f32),
         cc1: adc.vcc1_v() as f32,
@@ -1160,10 +1164,12 @@ mod tests {
     }
 
     #[test]
-    fn adc_maps_to_averaged_readings_and_filters_implausible_lines() {
+    fn adc_preserves_instantaneous_changes_between_display_average_updates() {
         let mut bytes = vec![0u8; 44];
-        bytes[8..12].copy_from_slice(&9_000_000i32.to_le_bytes());
-        bytes[12..16].copy_from_slice(&(-2_000_000i32).to_le_bytes());
+        bytes[0..4].copy_from_slice(&9_000_000i32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&(-2_000_000i32).to_le_bytes());
+        bytes[8..12].copy_from_slice(&8_000_000i32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&(-1_000_000i32).to_le_bytes());
         bytes[24..26].copy_from_slice(&(25 * 128i16).to_le_bytes());
         bytes[26..28].copy_from_slice(&16_500u16.to_le_bytes());
         bytes[30..32].copy_from_slice(&6_000u16.to_le_bytes());
@@ -1173,6 +1179,13 @@ mod tests {
         assert_eq!(data.cc1, 1.65);
         assert_eq!(data.dp, Some(0.6));
         assert_eq!((data.ah, data.wh), (None, None));
+        bytes[0..4].copy_from_slice(&9_125_000i32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&(-2_250_000i32).to_le_bytes());
+        let next = map_adc(&AdcData::parse(&bytes).unwrap());
+        assert_eq!(
+            (next.voltage, next.current, next.power),
+            (9.125, -2.25, -20.53125)
+        );
         bytes[24..26].copy_from_slice(&(i16::MAX).to_le_bytes());
         assert_eq!(map_adc(&AdcData::parse(&bytes).unwrap()).temperature, None);
     }

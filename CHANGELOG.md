@@ -15,6 +15,38 @@ Link to this index for the full history, or directly to a version's `en.md` / `z
 
 [简体中文草稿](changelog/unreleased/zh-CN.md) · [English draft](changelog/unreleased/en.md)
 
+## [0.2.14] - 2026-11-22
+
+[English](changelog/0.2.14/en.md) · [简体中文](changelog/0.2.14/zh-CN.md)
+
+## [0.2.13] - 2026-11-22
+
+[English](changelog/0.2.13/en.md) · [简体中文](changelog/0.2.13/zh-CN.md)
+
+## [0.2.12] - 2026-11-21
+
+[English](changelog/0.2.12/en.md) · [简体中文](changelog/0.2.12/zh-CN.md)
+
+## [0.2.11] - 2026-11-21
+
+[English](changelog/0.2.11/en.md) · [简体中文](changelog/0.2.11/zh-CN.md)
+
+## [0.2.10] - 2026-11-21
+
+[English](changelog/0.2.10/en.md) · [简体中文](changelog/0.2.10/zh-CN.md)
+
+## [0.2.9] - 2026-11-21
+
+[English](changelog/0.2.9/en.md) · [简体中文](changelog/0.2.9/zh-CN.md)
+
+## [0.2.8] - 2026-11-20
+
+[English](changelog/0.2.8/en.md) · [简体中文](changelog/0.2.8/zh-CN.md)
+
+## [0.2.7] - 2026-11-20
+
+[English](changelog/0.2.7/en.md) · [简体中文](changelog/0.2.7/zh-CN.md)
+
 ## [0.2.6] - 2026-11-14
 
 [English](changelog/0.2.6/en.md) · [简体中文](changelog/0.2.6/zh-CN.md)

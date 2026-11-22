@@ -191,7 +191,7 @@ select {
   border-radius: var(--radius-control);
   color: var(--text-primary);
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   width: 80px;
   height: 24px; /* Fixed height for alignment */
   transition: background var(--dur-fast) var(--ease-standard);
@@ -426,8 +426,8 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .status-indicator {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: var(--radius-full);
   background: var(--status-danger);
   box-shadow: 0 0 8px var(--status-danger-bg);
@@ -461,11 +461,6 @@ input[type="number"]::-webkit-outer-spin-button {
   overflow-x: hidden;
   /* 矮窗口仍可滚动查看读数，但不显示滚动条或预留其宽度。 */
   scrollbar-width: none;
-  background: var(--surface-card);
-  border: 1px solid var(--stroke-card);
-  border-radius: var(--radius-surface);
-  box-shadow: var(--shadow-2);
-  padding: 0;
 }
 
 .realtime-panel::-webkit-scrollbar {
@@ -474,11 +469,10 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .realtime-card {
   background: transparent;
-  border-radius: 0;
+  border-radius: calc(var(--glass-radius) + 4px);
   padding: 6px 10px 6px 8px;
   text-align: left;
   border: none;
-  border-bottom: 1px solid var(--stroke-divider);
   transition: background var(--dur-fast) var(--ease-standard);
   position: relative;
   overflow: hidden;
@@ -543,20 +537,6 @@ input[type="number"]::-webkit-outer-spin-button {
   border-radius: inherit;
 }
 
-.level-bar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent calc(25% - 1px),
-    color-mix(in srgb, var(--stroke-control) 55%, transparent) calc(25% - 1px),
-    color-mix(in srgb, var(--stroke-control) 55%, transparent) 25%
-  );
-}
-
 .level-bar-fill {
   position: absolute;
   inset: 0;
@@ -599,42 +579,9 @@ input[type="number"]::-webkit-outer-spin-button {
   background: var(--ch-temp);
 }
 
-.mini-bar {
-  display: block;
-  height: 3px;
-  margin-top: 4px;
-  border-radius: 2px;
-  background: var(--fill-recess);
-  overflow: hidden;
-}
-
-.mini-bar-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform var(--dur-fast) var(--ease-standard);
-}
-
-.mini-bar-fill.energy {
-  background: var(--ch-energy);
-}
-.mini-bar-fill.dp {
-  background: var(--ch-dp);
-}
-.mini-bar-fill.dn {
-  background: var(--ch-dn);
-}
-.mini-bar-fill.cc1 {
-  background: var(--ch-cc1);
-}
-.mini-bar-fill.cc2 {
-  background: var(--ch-cc2);
-}
-
 .realtime-card:hover {
-  background: var(--fill-subtle-hover);
+  background: var(--glass-lens);
+  box-shadow: inset 0 1px color-mix(in srgb, var(--glass-reflection) 55%, transparent);
 }
 
 .realtime-label {
@@ -722,7 +669,6 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text-primary);
   margin-top: 2px;
   padding-top: 3px;
-  border-top: 1px solid var(--stroke-divider);
 }
 
 .realtime-stats > span {
@@ -775,7 +721,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .realtime-card.energy .realtime-value {
-  font: 700 18px / 20px var(--font-mono);
+  font: 700 18px / 20px var(--font-ui);
   text-align: left;
 }
 
@@ -792,12 +738,12 @@ input[type="number"]::-webkit-outer-spin-button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
 }
 
 #data-count {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
 }
 
@@ -821,10 +767,6 @@ input[type="number"]::-webkit-outer-spin-button {
   min-width: 0;
 }
 
-.signal-cell .mini-bar {
-  grid-column: 1 / -1;
-}
-
 .signal-name {
   font-weight: 600;
 }
@@ -843,7 +785,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .signal-value {
   margin-left: auto;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
@@ -921,7 +863,7 @@ input[type="number"]::-webkit-outer-spin-button {
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
   padding: 8px 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -1058,16 +1000,6 @@ input[type="number"]::-webkit-outer-spin-button {
   color: var(--text-disabled);
   cursor: not-allowed;
 }
-/* Locale fonts and wrapping apply to every native platform style. */
-:root[lang="ja"] {
-  --font-ui:
-    "Segoe UI", -apple-system, BlinkMacSystemFont, "Yu Gothic UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
-}
-:root[lang="zh-TW"] {
-  --font-ui:
-    "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft JhengHei UI", "PingFang TC", "Noto Sans CJK TC",
-    sans-serif;
-}
 .settings-row-text {
   min-width: 0;
 }
@@ -1079,15 +1011,6 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .settings-row-control {
   flex-shrink: 0;
-}
-.status-metrics {
-  grid-template-columns: repeat(4, max-content) minmax(0, 1fr);
-}
-.statusbar .status-duration > :last-child,
-.statusbar .status-rate > :last-child,
-.statusbar .status-count > :last-child,
-.statusbar .status-remaining > :last-child {
-  min-width: 0;
 }
 @media (max-width: 1000px) {
   .settings-row {

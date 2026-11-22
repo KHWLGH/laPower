@@ -9,20 +9,22 @@
  */
 
 import {
+  applyChartChannelColor,
   handleMonitorHidden,
   handleMonitorShown,
   initChart,
   refreshChartLanguage,
+  refreshChartLineWidths,
   refreshChartScales,
-  scheduleChartUpdate,
   setChartFillEnabled,
   setRangeDragging,
   setSeriesFill,
   setSeriesVisible,
   updateCharts,
 } from './chart.js';
-import { panPermilleWindow } from './chart-window.js';
+import { minZoomSpan, moveNavigatorWindow } from './chart-window.js';
 import { importCSV } from './csv.js';
+import { clearCustomBackground, initCustomBackgroundControls, loadCustomBackground } from './custom-background.js';
 import {
   adoptWindowFromPermille,
   clearAndResetStats,
@@ -53,6 +55,7 @@ import {
 import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
 import { initExportUI } from './export-ui.js';
+import { displayFrames } from './frame-scheduler.js';
 import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
 import { addMarkerFromShortcut, initMarkerUI } from './marker-ui.js';
 import { canExportBoth, exportBoth } from './paired-export.js';
@@ -61,6 +64,7 @@ import { clampLimitMb } from './recording-limit.js';
 import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
 import {
+  applyBackgroundTransparency,
   applyRealtimePanelWidth,
   applySampleRate,
   debouncedSaveSettings,
@@ -80,9 +84,10 @@ import {
   syncTempSourceUI,
   updateTempUIVisibility,
 } from './temperature.js';
-import { applyThemePreference } from './theme.js';
+import { applyThemePreference, setChannelColor } from './theme.js';
 import { syncAutoPauseUI, syncFollowLinkageUI, syncTempUI } from './ui/controlbar.js';
 import { ask } from './ui/dialog.js';
+import { bindDisplayStepper } from './ui/display-stepper.js';
 import { createFlyout } from './ui/flyout.js';
 import { initTabBar } from './ui/tabbar.js';
 import { toast } from './ui/toast.js';
@@ -109,7 +114,6 @@ import {
   syncTriggerConnection,
   syncTriggerView,
 } from './views/trigger.js';
-import { applyWindowStyle } from './window-style.js';
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -214,31 +218,58 @@ function setupChartToggles() {
     debouncedSaveSettings();
   });
 
-  // Fill controls — opacity input drives both opacity and fill (0 = fill off)
-  /** @type {{ opId: string, key: string }[]} */
-  const fillControls = [
-    { opId: 'opacity-voltage', key: 'Voltage' },
-    { opId: 'opacity-current', key: 'Current' },
-    { opId: 'opacity-power', key: 'Power' },
-    { opId: 'opacity-temp', key: 'Temp' },
-  ];
+  let colorFrame = 0;
+  let pendingColorIndex = -1;
+  const flushColorPreview = () => {
+    if (colorFrame) cancelAnimationFrame(colorFrame);
+    colorFrame = 0;
+    if (pendingColorIndex < 0) return;
+    applyChartChannelColor(pendingColorIndex);
+    pendingColorIndex = -1;
+  };
 
-  fillControls.forEach((ctrl, index) => {
-    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(ctrl.opId));
+  for (const [index, key] of /** @type {const} */ ([
+    [0, 'voltage'],
+    [1, 'current'],
+    [2, 'power'],
+    [3, 'temp'],
+  ])) {
+    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`color-${key}`));
+    if (!input) continue;
+    input.addEventListener('input', () => {
+      state.settings.channelColors[key] = input.value;
+      setChannelColor(key, input.value);
+      pendingColorIndex = index;
+      if (!colorFrame) colorFrame = requestAnimationFrame(flushColorPreview);
+    });
+    input.addEventListener('change', () => {
+      flushColorPreview();
+      debouncedSaveSettings();
+    });
+  }
 
-    if (input) {
-      input.addEventListener('input', (e) => {
-        let val = Number.parseInt(/** @type {HTMLInputElement} */ (e.target).value, 10);
-        if (Number.isNaN(val)) val = 15;
-        if (val < 0) val = 0;
-        if (val > 100) val = 100;
-
-        state.settings[`opacity${ctrl.key}`] = val;
-        setSeriesFill(index, val);
-        debouncedSaveSettings();
-      });
-    }
-  });
+  for (const [index, key, opacityKey] of /** @type {const} */ ([
+    [0, 'voltage', 'opacityVoltage'],
+    [1, 'current', 'opacityCurrent'],
+    [2, 'power', 'opacityPower'],
+    [3, 'temp', 'opacityTemp'],
+  ])) {
+    bindDisplayStepper(`opacity-${key}`, (value) => {
+      state.settings[opacityKey] = value;
+      setSeriesFill(index, value);
+      debouncedSaveSettings();
+    });
+    bindDisplayStepper(`line-width-${key}`, (value) => {
+      state.settings.chartLineWidths[key] = value;
+      refreshChartLineWidths();
+      debouncedSaveSettings();
+    });
+    bindDisplayStepper(`curve-offset-${key}`, (value) => {
+      state.settings.chartCurveNudge[key] = value;
+      refreshChartScales();
+      debouncedSaveSettings();
+    });
+  }
 
   // D+/D- 与 CC1/CC2 叠加曲线：一个复选框控制一对 series（复用电压 scale，无透明度输入）
   /** @param {string} id @param {'showDpDn'|'showCc'} key @param {number[]} datasetIndexes */
@@ -289,9 +320,8 @@ function setupControls() {
    * @param {number|string} nextStart
    * @param {number|string} nextEnd
    * @param {'start'|'end'} leader
-   * @param {boolean} [preview=false] 手柄拖动中：走 rAF 节流刷新，不立即提交绘制
    */
-  function applyRangeValues(nextStart, nextEnd, leader, preview = false) {
+  function applyRangeValues(nextStart, nextEnd, leader) {
     let start = clamp(Number.parseInt(String(nextStart), 10), 0, 1000);
     let end = clamp(Number.parseInt(String(nextEnd), 10), 0, 1000);
 
@@ -300,20 +330,12 @@ function setupControls() {
       else end = start;
     }
 
-    rangeStart.value = String(start);
-    rangeEnd.value = String(end);
     state.settings.rangeStart = start;
     state.settings.rangeEnd = end;
     adoptWindowFromPermille();
 
-    updateSliderFill();
     updateChartRange();
-    // 拖动中曲线已经换窗，数字不能停在旧窗口；scheduleStatsUpdate 自带 250ms 节流。
     if (state.settings.statsRange) scheduleStatsUpdate();
-    if (preview) {
-      scheduleChartUpdate('interaction');
-      return;
-    }
     updateCharts('interaction', { force: false, reason: 'release' });
   }
 
@@ -325,12 +347,69 @@ function setupControls() {
   rangeStart.addEventListener('input', () => onSliderChange('start'));
   rangeEnd.addEventListener('input', () => onSliderChange('end'));
 
-  /** @param {PointerEvent|MouseEvent} event @returns {number} */
-  function valueFromPointerEvent(event) {
-    if (!sliderContainer) return 0;
-    const rect = sliderContainer.getBoundingClientRect();
-    const ratio = (event.clientX - rect.left) / rect.width;
-    return clamp(Math.round(ratio * 1000), 0, 1000);
+  /** @param {HTMLElement|null} target @param {'start'|'end'|'pan'} part */
+  function bindNavigatorPointer(target, part) {
+    if (!target || !sliderContainer) return;
+    /** @type {{id:number, origin:number, x:number, secondsPerPixel:number, min:number, max:number, dataMin:number, dataMax:number, minSpan:number, columns:typeof state.chartSeries}|null} */
+    let gesture = null;
+    const drawPreview = () => draw(false);
+
+    /** @param {boolean} settled */
+    function draw(settled) {
+      if (!gesture || !state.__rangeDragging || gesture.columns !== state.chartSeries) return;
+      const { x, origin, secondsPerPixel, dataMin, dataMax, minSpan } = gesture;
+      const next = moveNavigatorWindow(gesture, part, (x - origin) * secondsPerPixel, dataMin, dataMax, minSpan);
+      if (settled) setRangeDragging(false);
+      const before = state.chartWindow;
+      if (!settled && before.min === next.min && before.max === next.max) return;
+      state.__applyChartXWindow?.(next.min, next.max, settled, settled ? undefined : [dataMin, dataMax]);
+      updateCharts('interaction', { force: false, reason: settled ? 'release' : 'interaction' });
+    }
+
+    target.addEventListener('pointerdown', (event) => {
+      const columns = state.chartSeries;
+      const dataMin = columns.x.at(0);
+      const dataMax = columns.x.at(-1);
+      const { min, max } = state.chartWindow;
+      if (gesture || !event.isPrimary || event.button !== 0 || !(dataMax > dataMin && max > min)) return;
+      if (part === 'pan' && max - min >= dataMax - dataMin) return;
+      const { width } = sliderContainer.getBoundingClientRect();
+      if (width <= 0) return;
+      event.preventDefault();
+      if (part !== 'pan') target.focus({ preventScroll: true });
+      target.setPointerCapture(event.pointerId);
+      gesture = {
+        id: event.pointerId,
+        origin: event.clientX,
+        x: event.clientX,
+        secondsPerPixel: (dataMax - dataMin) / width,
+        min,
+        max,
+        dataMin,
+        dataMax,
+        minSpan: minZoomSpan(state.settings.sampleRate),
+        columns,
+      };
+      if (part === 'pan') target.classList.add('is-panning');
+      setRangeDragging(true);
+    });
+    target.addEventListener('pointermove', (event) => {
+      if (gesture?.id !== event.pointerId) return;
+      gesture.x = event.clientX;
+      displayFrames.schedule('range-pointer', drawPreview);
+    });
+    /** @param {PointerEvent} event */
+    function finish(event) {
+      if (!gesture || gesture.id !== event.pointerId) return;
+      if (event.type === 'pointerup') gesture.x = event.clientX;
+      displayFrames.cancel('range-pointer');
+      draw(true);
+      gesture = null;
+      target?.classList.remove('is-panning');
+    }
+    target.addEventListener('pointerup', finish);
+    target.addEventListener('pointercancel', finish);
+    target.addEventListener('lostpointercapture', finish);
   }
 
   /**
@@ -339,43 +418,7 @@ function setupControls() {
    */
   function setupHandleInteractions(handle, which) {
     if (!handle) return;
-
-    let handleDragActive = false;
-    const beginHandleDrag = () => {
-      handleDragActive = true;
-      setRangeDragging(true);
-    };
-    const endHandleDrag = () => {
-      if (!handleDragActive) return;
-      handleDragActive = false;
-      setRangeDragging(false);
-      if (state.settings.statsRange) {
-        updateStatsDisplay();
-        updateEnergyDisplay();
-      }
-      updateCharts('interaction', { force: false, reason: 'release' });
-    };
-
-    handle.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      handle.focus();
-      handle.setPointerCapture(event.pointerId);
-      beginHandleDrag();
-
-      const newValue = valueFromPointerEvent(event);
-      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
-      else applyRangeValues(rangeStart.value, newValue, 'end', true);
-    });
-
-    handle.addEventListener('pointermove', (event) => {
-      if (!handle.hasPointerCapture(event.pointerId)) return;
-      const newValue = valueFromPointerEvent(event);
-      if (which === 'start') applyRangeValues(newValue, rangeEnd.value, 'start', true);
-      else applyRangeValues(rangeStart.value, newValue, 'end', true);
-    });
-
-    handle.addEventListener('pointerup', endHandleDrag);
-    handle.addEventListener('lostpointercapture', endHandleDrag);
+    bindNavigatorPointer(handle, which);
 
     handle.addEventListener('keydown', (event) => {
       const key = event.key;
@@ -387,66 +430,30 @@ function setupControls() {
 
       event.preventDefault();
 
-      const baseStep = event.shiftKey ? 10 : event.ctrlKey ? 50 : 1;
-      const current = which === 'start' ? Number.parseInt(rangeStart.value, 10) : Number.parseInt(rangeEnd.value, 10);
-      let next = current;
-
-      if (isHome) next = 0;
-      else if (isEnd) next = 1000;
-      else if (isLeft) next = current - baseStep;
-      else if (isRight) next = current + baseStep;
-
-      next = clamp(next, 0, 1000);
-      if (which === 'start') applyRangeValues(next, rangeEnd.value, 'start');
-      else applyRangeValues(rangeStart.value, next, 'end');
+      const xs = state.chartSeries.x;
+      const dataMin = xs.at(0);
+      const dataMax = xs.at(-1);
+      const span = dataMax - dataMin;
+      if (!(span > 0) || state.__rangeDragging) return;
+      const baseStep = (span * (event.shiftKey ? 10 : event.ctrlKey ? 50 : 1)) / 1000;
+      const delta = isHome ? -span : isEnd ? span : isLeft ? -baseStep : baseStep;
+      const next = moveNavigatorWindow(
+        state.chartWindow,
+        which,
+        delta,
+        dataMin,
+        dataMax,
+        minZoomSpan(state.settings.sampleRate),
+      );
+      state.__applyChartXWindow?.(next.min, next.max, true);
+      updateCharts('interaction', { force: false, reason: 'release' });
     });
   }
 
   setupHandleInteractions(handleStart, 'start');
   setupHandleInteractions(handleEnd, 'end');
 
-  const sliderFill = /** @type {HTMLElement|null} */ (document.getElementById('slider-fill'));
-  if (sliderFill && sliderContainer) {
-    let panActive = false;
-    let panOriginX = 0;
-    let panOriginStart = 0;
-    let panOriginEnd = 0;
-
-    const endFillPan = () => {
-      if (!panActive) return;
-      panActive = false;
-      sliderFill.classList.remove('is-panning');
-      setRangeDragging(false);
-      if (state.settings.statsRange) {
-        updateStatsDisplay();
-        updateEnergyDisplay();
-      }
-      updateCharts('interaction', { force: false, reason: 'release' });
-    };
-
-    sliderFill.addEventListener('pointerdown', (event) => {
-      if (state.settings.rangeEnd - state.settings.rangeStart >= 1000) return;
-      event.preventDefault();
-      sliderFill.setPointerCapture(event.pointerId);
-      panActive = true;
-      panOriginX = event.clientX;
-      panOriginStart = Number.parseInt(rangeStart.value, 10);
-      panOriginEnd = Number.parseInt(rangeEnd.value, 10);
-      sliderFill.classList.add('is-panning');
-      setRangeDragging(true);
-    });
-
-    sliderFill.addEventListener('pointermove', (event) => {
-      if (!panActive || !sliderFill.hasPointerCapture(event.pointerId)) return;
-      const width = sliderContainer.getBoundingClientRect().width;
-      const delta = width > 0 ? ((event.clientX - panOriginX) / width) * 1000 : 0;
-      const next = panPermilleWindow(panOriginStart, panOriginEnd, delta);
-      applyRangeValues(next.start, next.end, 'start', true);
-    });
-
-    sliderFill.addEventListener('pointerup', endFillPan);
-    sliderFill.addEventListener('lostpointercapture', endFillPan);
-  }
+  bindNavigatorPointer(document.getElementById('slider-fill'), 'pan');
 
   updateSliderFill();
 
@@ -532,11 +539,33 @@ function setupControls() {
     const yes = await ask(() => t('resetPrompt'), { title: () => t('confirmReset'), kind: 'warning' });
     if (!yes) return;
     // 只有真的落盘才算「已恢复默认」；写盘失败由 settings.js 说明，这里不再报成功。
-    if (await resetSettings()) toast.success(() => t('resetAll'));
+    if (await resetSettings()) {
+      try {
+        await clearCustomBackground();
+        toast.success(() => t('resetAll'));
+      } catch (error) {
+        toast.error(() => t('operationFailed', { detail: errorText(error) }));
+      }
+    }
     applyPdSplitLayout();
   });
 
   // 主题（设置页 外观 卡）
+  initCustomBackgroundControls();
+  const backgroundTransparency = /** @type {HTMLInputElement|null} */ (
+    document.getElementById('background-transparency')
+  );
+  backgroundTransparency?.addEventListener('input', () => {
+    state.settings.backgroundTransparency = backgroundTransparency.valueAsNumber;
+    applyBackgroundTransparency();
+    debouncedSaveSettings();
+  });
+  const autoLineWidth = /** @type {HTMLInputElement|null} */ (document.getElementById('chart-auto-line-width'));
+  autoLineWidth?.addEventListener('change', () => {
+    state.settings.chartAutoLineWidth = autoLineWidth.checked;
+    refreshChartLineWidths();
+    debouncedSaveSettings();
+  });
   /** @param {'dark'|'light'|'system'} pref */
   const applyThemeChoice = (pref) => {
     state.settings.theme = pref;
@@ -588,16 +617,6 @@ function setupControls() {
     refreshPdLanguage();
     document.dispatchEvent(new CustomEvent('witrn:language-changed'));
   });
-
-  // 窗口风格只更新 CSS 属性；动作始终由真实 OS 决定。
-  for (const choice of ['windows', 'macos']) {
-    const input = /** @type {HTMLInputElement|null} */ (document.getElementById(`window-style-${choice}`));
-    input?.addEventListener('change', () => {
-      if (!input.checked) return;
-      state.settings.windowStyle = applyWindowStyle(choice);
-      debouncedSaveSettings();
-    });
-  }
 
   // 界面缩放（设置页 外观 卡）
   // 拖动只改读数：整页缩放会改滑条几何，原生 range 再跟指针就会抽搐。
@@ -966,7 +985,6 @@ function setupShell() {
   wireFlyout('btn-flyout-temp', 'flyout-temp');
   wireFlyout('btn-device-info', 'flyout-device-info');
 
-  applyWindowStyle(state.settings.windowStyle);
   initWindowControls();
 
   restoreView(state.settings.activeView);
@@ -1056,6 +1074,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   setConnectionReady(false);
   const platformReady = probePlatform();
   const settingsReady = loadSettings();
+  const backgroundReady = loadCustomBackground().catch((error) => {
+    console.warn('Failed to restore custom background:', error);
+  });
   const languageReady = settingsReady.then(() => initI18n());
   const closeReady = setupCloseConfirm()
     .then(() => true)
@@ -1078,7 +1099,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.__WITRN_BOOT__?.mark('devicesScanned');
   });
 
-  await Promise.all([platformReady, settingsReady, languageReady]);
+  await Promise.all([platformReady, settingsReady, languageReady, backgroundReady]);
   // Native selects retain loaded values; enhance them only after locale resolution.
   enhanceSelects();
   initChart();

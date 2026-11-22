@@ -180,6 +180,36 @@ test('a healthy store produces no failure toasts', async () => {
   assert.deepEqual(errorToasts, [], '干净路径不该出现任何错误提示');
 });
 
+test('background transparency and automatic stroke width survive reload and reset', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    state.settings = { ...defaultSettings, backgroundTransparency: 64, chartAutoLineWidth: false };
+    assert.equal(await saveSettings(), true);
+    state.settings = { ...defaultSettings };
+    await loadSettings();
+    assert.equal(state.settings.backgroundTransparency, 64);
+    assert.equal(el('background-transparency').value, '64');
+    assert.equal(el('background-transparency-value').textContent, '64%');
+    assert.equal(state.settings.chartAutoLineWidth, false);
+    assert.equal(el('chart-auto-line-width').checked, false);
+
+    state.settings.backgroundTransparency = 250;
+    assert.equal(await saveSettings(), true);
+    await loadSettings();
+    assert.equal(state.settings.backgroundTransparency, 100);
+
+    assert.equal(await resetSettings(), true);
+    assert.equal(el('background-transparency-value').textContent, '0%');
+    assert.equal(el('chart-auto-line-width').checked, true);
+  } finally {
+    state.settings = previous;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
 test('old and invalid language preferences use auto; valid choices survive a store reload', async () => {
   installStoreStub();
   const previous = state.settings;
@@ -214,7 +244,7 @@ test('old and invalid language preferences use auto; valid choices survive a sto
   }
 });
 
-test('legacy window style migrates, persists and resets to Windows while explicit macOS survives reload', async () => {
+test('retired window style is dropped when loading, saving and resetting settings', async () => {
   installStoreStub();
   const previous = state.settings;
   const invoke = window.__TAURI__.core.invoke;
@@ -228,19 +258,15 @@ test('legacy window style migrates, persists and resets to Windows while explici
       };
       state.settings = { ...defaultSettings };
       await loadSettings();
-      assert.equal(state.settings.windowStyle, windowStyle === 'macos' ? 'macos' : 'windows');
-      assert.equal(el(`window-style-${state.settings.windowStyle}`).checked, true);
+      assert.equal(Object.hasOwn(state.settings, 'windowStyle'), false);
     }
     window.__TAURI__.core.invoke = invoke;
-    for (const choice of ['macos', 'windows']) {
-      state.settings.windowStyle = choice;
-      assert.equal(await saveSettings(), true);
-      state.settings = { ...defaultSettings };
-      await loadSettings();
-      assert.equal(state.settings.windowStyle, choice);
-    }
+    assert.equal(await saveSettings(), true);
+    const saved = calls.findLast(({ command }) => command === 'plugin:store|set');
+    assert.ok(saved);
+    assert.equal(Object.hasOwn(saved.args.value, 'windowStyle'), false);
     assert.equal(await resetSettings(), true);
-    assert.equal(state.settings.windowStyle, 'windows');
+    assert.equal(Object.hasOwn(state.settings, 'windowStyle'), false);
   } finally {
     state.settings = previous;
     window.__TAURI__.core.invoke = invoke;
@@ -313,6 +339,40 @@ test('curve shading defaults on, preserves opacity across reloads and resets', a
     }
     assert.equal(await resetSettings(), true);
     assert.equal(state.settings.chartFillEnabled, true);
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
+test('custom channel colors are validated, echoed, persisted and reset', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    window.__TAURI__.core.invoke = async (command, args = {}) => {
+      if (command === 'plugin:store|get' && args.key === 'appSettings') {
+        return [{ channelColors: { voltage: '#112233', current: 'green', power: '#aabbcc', temp: '#ABCDEF' } }, true];
+      }
+      return invoke(command, args);
+    };
+    await loadSettings();
+    assert.deepEqual(state.settings.channelColors, { voltage: '#112233', power: '#aabbcc', temp: '#ABCDEF' });
+    assert.equal(el('color-voltage').value, '#112233');
+    assert.equal(el('color-current').value, '#34d889');
+
+    window.__TAURI__.core.invoke = invoke;
+    assert.equal(await saveSettings(), true);
+    state.settings = { ...defaultSettings, channelColors: {} };
+    await loadSettings();
+    assert.deepEqual(state.settings.channelColors, { voltage: '#112233', power: '#aabbcc', temp: '#ABCDEF' });
+    assert.equal(el('color-temp').value, '#ABCDEF');
+
+    assert.equal(await resetSettings(), true);
+    assert.deepEqual(state.settings.channelColors, {});
   } finally {
     state.settings = previous;
     window.__TAURI__.core.invoke = invoke;

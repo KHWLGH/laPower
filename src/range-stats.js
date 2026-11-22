@@ -118,7 +118,7 @@ function foldPoint(
   magnitude,
 ) {
   const v = voltages[offset];
-  const c = currents[offset];
+  const c = currentMagnitude(currents[offset], magnitude);
   const p = powers[offset];
   const t = temps[offset];
   if (Number.isFinite(v)) {
@@ -148,18 +148,17 @@ function foldPoint(
   if (i <= stats.startIndex) return;
   if (Number.isFinite(segments[offset]) && segments[offset] !== previousSegment) return;
   const dt = (xValues[offset] - previousX) / 3600;
-  const currentAbs = currentMagnitude(c, magnitude);
   const powerAbs = Math.abs(p);
   if (
     dt < 0 ||
     dt > pointEnergyMaxStepS(interval, stats.maxStepS) / 3600 ||
     !Number.isFinite(dt) ||
-    !Number.isFinite(currentAbs) ||
+    !Number.isFinite(c) ||
     !Number.isFinite(powerAbs)
   )
     return;
   stats.wh += powerAbs * dt;
-  stats.mah += currentAbs * 1000 * dt;
+  stats.mah += c * 1000 * dt;
 }
 
 /** @param {RangeStats} stats @param {RangeStatsSnapshot} snapshot @param {number} from @param {number} end */

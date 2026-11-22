@@ -88,6 +88,7 @@ function seed(recording = true, count = 5000, interval = 1) {
     if (key === 'x') for (let i = 0; i < count; i++) values[i] = (i * interval) / 1000;
     else if (key === 'voltage') for (let i = 0; i < count; i++) values[i] = i % 2;
     else if (key === 'sampleIntervals') values.fill(interval);
+    else if (key === 'currentMagnitudes') values.fill(NaN);
     else values.fill(1);
     col.set(values);
   }
@@ -285,14 +286,18 @@ test('unfilled review paints exact extrema into a bounded transparent bitmap and
     await submit();
     assert.equal(allocations, 1, 'repaints reuse the canvas-sized buffer');
     assert.equal(performanceDiagnostics.snapshot().charts.main.last.stages.intervalsCachedCount, 1);
-    u.series[1].width++;
-    await submit();
+    const widths = state.settings.chartLineWidths;
+    try {
+      state.settings.chartLineWidths = { ...widths, voltage: widths.voltage + 1 };
+      await submit();
+    } finally {
+      state.settings.chartLineWidths = widths;
+    }
     assert.equal(
       performanceDiagnostics.snapshot().charts.main.last.stages.intervalsCount,
       1,
       'stroke width invalidates intervals',
     );
-    u.series[1].width--;
     u.scales = { x: { min: 0, max: 4.999 }, voltage: { min: 0, max: 2 } };
     u.valToPos = (value, scale) => (scale === 'x' ? 11 + (value / 4.999) * 600 : 12 + value);
     await submit();

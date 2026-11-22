@@ -49,14 +49,14 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 ## 📸 界面预览
 
-以下展示图为 Windows 上的 **0.2.6** 版本，使用独立开发工具生成的模拟设备与数据，保留软件完整标题栏，浅色主题优先展示。软件默认跟随系统，开发展示工具默认浅色。每次发布前更新整套截图，重新生成方法见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
+以下展示图为 Windows 上的 **0.2.13** 版本，使用独立开发工具生成的模拟设备与数据，保留软件完整标题栏，浅色主题优先展示。软件默认跟随系统，开发展示工具默认浅色。每次发布前更新整套截图，重新生成方法见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
 
 | 浅色主题 | 深色主题 |
 | :---: | :---: |
 | <img src="docs/screenshots/zh-CN/light-record.png" alt="监控工作区（浅色）：实时读数卡片、8 通道图表、时间线导航器" /><br><sub>**监控** · 实时读数卡 / 8 通道 4 轴图表 / 时间线导航器</sub> | <img src="docs/screenshots/zh-CN/dark-record.png" alt="监控工作区（深色）" /><br><sub>**监控** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-pd.png" alt="PD 分析工作区（浅色）：报文列表与逐字段解码树" /><br><sub>**PD 分析** · 报文列表 / PDO 速览 / 逐字段解码</sub> | <img src="docs/screenshots/zh-CN/dark-pd.png" alt="PD 分析工作区（深色）" /><br><sub>**PD 分析** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-trigger.png" alt="协议控制工作区（浅色）：PDM、PDO 列表与检测日志" /><br><sub>**协议控制** · PDM / PDO / 协议检测与电压触发</sub> | <img src="docs/screenshots/zh-CN/dark-trigger.png" alt="协议控制工作区（深色）" /><br><sub>**协议控制** · 深色主题</sub> |
-| <img src="docs/screenshots/zh-CN/light-settings.png" alt="设置页（浅色）：固定目录、外观与语言、图表与记录" /><br><sub>**设置** · 固定目录 / 外观与语言 / 图表与记录</sub> | <img src="docs/screenshots/zh-CN/dark-settings.png" alt="设置页（深色）" /><br><sub>**设置** · 深色主题</sub> |
+| <img src="docs/screenshots/zh-CN/light-settings.png" alt="设置页（浅色）：固定目录、主题、自定义背景图片与语言、图表与记录" /><br><sub>**设置** · 主题 / 持久化自定义背景 / 语言 / 图表与记录</sub> | <img src="docs/screenshots/zh-CN/dark-settings.png" alt="设置页（深色）" /><br><sub>**设置** · 深色主题</sub> |
 | <img src="docs/screenshots/zh-CN/light-detection.png" alt="协议检测（浅色主题）" /><br><sub>**协议检测** · 逐协议状态 / 电压档位 / 独立依据</sub> | <img src="docs/screenshots/zh-CN/dark-detection.png" alt="协议检测（深色主题）" /><br><sub>**协议检测** · 深色主题</sub> |
 
 ### 报告样式
@@ -134,7 +134,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 项目原名 WITRN-RS。laPower 的应用标识为 `io.github.khwlgh.lapower`，使用独立的设置与缓存目录，不自动迁移旧应用设置；已有 CSV 和 PD 捕获文件仍可导入。
 
-**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包，安装后即可运行。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
+**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包。若系统已装有 Microsoft Edge WebView2 Runtime，也可下载 `*_windows-x64_portable.zip`，解压后双击 `laPower.exe`。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
 
 Windows 安装包当前未做证书签名，首次运行可能显示 SmartScreen 提示。
 
@@ -142,7 +142,7 @@ Windows 安装包当前未做证书签名，首次运行可能显示 SmartScreen
 
 **Linux (x64)** —— 下载带 `linux-x64` 的 `.deb`、`.rpm` 或 `.AppImage`。Debian / Ubuntu 可用 `sudo apt install ./laPower_<版本>_linux-x64.deb`；Fedora 等使用 RPM 的发行版可用 `sudo dnf install ./laPower_<版本>_linux-x64.rpm`。AppImage 先执行 `chmod +x ./laPower_<版本>_linux-x64.AppImage`，再直接运行；可能需要安装发行版的 FUSE 2 运行库。安装包基于 Ubuntu 22.04 构建，不承诺适用于所有发行版。
 
-Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [udev 规则](docs/DEVELOPMENT.md#udev-规则必需)，否则可能无法扫描或打开设备。Release 中的 `SHA256SUMS` 可用于校验七个安装包。
+Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [udev 规则](docs/DEVELOPMENT.md#udev-规则必需)，否则可能无法扫描或打开设备。Release 中的 `SHA256SUMS` 可用于校验八个发布包。
 
 ## 🚀 快速上手
 
