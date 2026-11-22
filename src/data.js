@@ -1396,9 +1396,6 @@ export async function startRecording() {
     state.energy.lastX = null;
     state.autoPauseSettings.triggerStartTime = null;
 
-    const el = document.getElementById('record-status');
-    if (el) el.textContent = t('recording');
-
     // 来源先于临时恢复文件的表头登记：表头里要写明这份数据由哪台仪表采集。
     noteRecordedSource(state.chartSeries, state.connectedDevice);
     spoolRecordingStarted();
@@ -1438,9 +1435,6 @@ export function stopRecording({ discard = false } = {}) {
   state.autoPauseSettings.triggerStartTime = null;
   // 排空原生尾点后再同步恢复文件；显示刷新不等待栅栏或磁盘。
   void paused.then(spoolRecordingPaused, spoolRecordingPaused);
-
-  const el = document.getElementById('record-status');
-  if (el) el.textContent = t('stopRecording');
 
   stopDurationTicker();
 

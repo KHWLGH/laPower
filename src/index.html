@@ -899,8 +899,19 @@
       <!-- 全局状态栏 -->
       <footer class="statusbar" id="statusbar">
         <div class="status-metrics" role="group" aria-label="Recording status" data-i18n-aria-label="statsRecording">
-          <span class="status-item status-record" id="status-record" role="button" tabindex="0" title="Start or pause recording" data-i18n-title="toggleRecording">
-            <span class="status-label"><span data-i18n="statusRecording">Recording:</span></span><span id="record-status"><span data-i18n="stopRecording">Stopped</span></span>
+          <span
+            class="status-item status-record is-paused is-disabled"
+            id="status-record"
+            role="button"
+            tabindex="0"
+            aria-pressed="false"
+            aria-disabled="true"
+            aria-label="Start or pause recording"
+            data-i18n-aria-label="toggleRecording"
+            title="Start or pause recording"
+            data-i18n-title="toggleRecording"
+          >
+            <i class="fi fi-pause" id="record-status-icon" aria-hidden="true"></i>
           </span>
           <span class="status-item status-duration"><span class="status-label"><span data-i18n="statusDuration">Duration:</span></span><span id="record-duration">--</span></span>
           <span class="status-item status-rate"><span class="status-label"><span data-i18n="statusSample">Sample:</span></span><span id="status-sample-rate"><span data-i18n="rate4">4 samples/s</span></span></span>
@@ -909,10 +920,6 @@
             <span class="status-label"><span data-i18n="remainingLabel">Remaining:</span></span><span id="record-remaining">--</span>
           </span>
         </div>
-        <span class="status-item status-connection" role="status" title="Connection status" data-i18n-title="connectionState">
-          <span class="status-indicator" id="connection-status" aria-hidden="true"></span>
-          <span id="connection-text"><span data-i18n="disconnectedStatus">Disconnected</span></span>
-        </span>
       </footer>
     </div>
 

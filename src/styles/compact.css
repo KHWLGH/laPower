@@ -43,6 +43,10 @@
   .trigger-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  #view-monitor .commandbar > .cmd-label {
+    display: none;
+  }
 }
 
 /* ── W3：视口 ≤ 900（最小窗宽 + 极端 DPI / 浏览器安全网） ───── */

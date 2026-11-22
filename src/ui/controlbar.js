@@ -40,26 +40,40 @@ function setButtonLabel(button, icon, text) {
  */
 export function syncRecordUI(s) {
   const button = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-record-toggle'));
-  if (!button) return;
+  if (button) {
+    const linked = s.followPd ? `；${t('followRecordingHint')}` : '';
+    if (s.recording) {
+      setButtonLabel(button, 'pause', t('pauseRecording'));
+      setTip(button, `${t('pauseRecording')}，${t('pauseRecordingHint')}${linked}`);
+    } else if (!s.connected) {
+      setButtonLabel(button, 'record', s.hasData ? t('continueRecording') : t('startRecording'));
+      setTip(button, t('pleaseConnect'));
+    } else if (s.hasData) {
+      setButtonLabel(button, 'record', t('continueRecording'));
+      setTip(button, `${t('continueRecordingHint')}${linked}`);
+    } else {
+      setButtonLabel(button, 'record', t('startRecording'));
+      setTip(button, `${t('startRecording')}${linked}`);
+    }
 
-  const linked = s.followPd ? `；${t('followRecordingHint')}` : '';
-  if (s.recording) {
-    setButtonLabel(button, 'pause', t('pauseRecording'));
-    setTip(button, `${t('pauseRecording')}，${t('pauseRecordingHint')}${linked}`);
-  } else if (!s.connected) {
-    setButtonLabel(button, 'record', s.hasData ? t('continueRecording') : t('startRecording'));
-    setTip(button, t('pleaseConnect'));
-  } else if (s.hasData) {
-    setButtonLabel(button, 'record', t('continueRecording'));
-    setTip(button, `${t('continueRecordingHint')}${linked}`);
-  } else {
-    setButtonLabel(button, 'record', t('startRecording'));
-    setTip(button, `${t('startRecording')}${linked}`);
+    button.disabled = !s.connected;
+    button.classList.toggle('is-recording', s.recording);
+    button.setAttribute('aria-pressed', String(s.recording));
   }
 
-  button.disabled = !s.connected;
-  button.classList.toggle('is-recording', s.recording);
-  button.setAttribute('aria-pressed', String(s.recording));
+  const indicator = document.getElementById('status-record');
+  if (indicator) {
+    indicator.classList.toggle('is-recording', s.recording);
+    indicator.classList.toggle('is-paused', !s.recording);
+    indicator.classList.toggle('is-disabled', !s.connected);
+    indicator.setAttribute('aria-pressed', String(s.recording));
+    indicator.setAttribute('aria-disabled', String(!s.connected));
+  }
+
+  const indicatorIcon = document.getElementById('record-status-icon');
+  if (indicatorIcon) {
+    indicatorIcon.setAttribute('class', s.recording ? 'fi fi-play' : 'fi fi-pause');
+  }
 }
 
 /**
@@ -92,13 +106,14 @@ export function syncTempUI(connected, busy = false) {
   const label = document.getElementById('temp-toggle-label');
   if (!button) return;
 
-  const text = busy
+  const statusText = busy
     ? connected
       ? `${t('temperatureService')} ${t('connected')}`
       : t('tempConnecting')
     : connected
       ? `${t('temperatureService')} ${t('connected')}`
       : t('temperatureService');
+  const labelText = busy && !connected ? t('tempConnecting') : t('temperatureService');
   const action = connected
     ? `${t('disconnect')} ${t('temperatureService')}`
     : `${t('connect')} ${t('temperatureService')}`;
@@ -106,8 +121,8 @@ export function syncTempUI(connected, busy = false) {
   button.setAttribute('aria-busy', String(busy));
   button.setAttribute('aria-pressed', String(connected));
   button.classList.toggle('is-active', connected);
-  setTip(button, busy ? text : action);
-  if (label) label.textContent = text;
+  setTip(button, busy ? statusText : action);
+  if (label) label.textContent = labelText;
 }
 
 /**

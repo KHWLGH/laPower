@@ -598,8 +598,6 @@ function setupControls() {
   // the views whose text is derived from current state.
   onLanguageChange(() => {
     fillUiScaleHint();
-    const recordStatus = document.getElementById('record-status');
-    if (recordStatus) recordStatus.textContent = t(state.isRecording ? 'recording' : 'stopRecording');
     refreshChartLanguage();
     updateSampleRateStatus();
     updateDurationDisplay();

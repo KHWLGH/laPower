@@ -120,6 +120,10 @@ html[data-ui-scale-css] .app-shell {
   align-self: center;
 }
 
+.titlebar > .tab-icon-only {
+  margin-inline: 2px 4px;
+}
+
 .titlebar-drag {
   flex: 1;
   min-width: 16px;
@@ -131,8 +135,8 @@ html[data-ui-scale-css] .app-shell {
 .titlebar-connect {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
+  gap: 4px;
+  padding: 0 6px;
   margin-left: auto;
 }
 
@@ -370,8 +374,8 @@ html[data-ui-scale-css] .app-shell {
 .commandbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
+  gap: 3px;
+  padding: 5px 10px;
   background: var(--surface-base);
   border-bottom: 1px solid var(--stroke-divider);
   flex-shrink: 0;
@@ -403,13 +407,14 @@ html[data-ui-scale-css] .app-shell {
 }
 .split-button > .cmd-btn:first-child {
   border-radius: var(--radius-control) 0 0 var(--radius-control);
+  padding-inline: 8px 6px;
 }
 .split-button > .cmd-btn:last-child {
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
   border-left-color: var(--stroke-divider);
 }
 .split-button > .cmd-btn-icon {
-  width: 28px;
+  width: 22px;
   color: var(--text-secondary);
 }
 .temp-state {
@@ -471,9 +476,9 @@ html[data-ui-scale-css] .app-shell {
 .cmd-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 1px solid transparent;
   background: transparent;
   border-radius: var(--radius-control);
@@ -596,7 +601,7 @@ html[data-ui-scale-css] .app-shell {
   width: 1px;
   height: 14px;
   align-self: center;
-  margin: 0 4px;
+  margin: 0 3px;
   background: var(--glass-divider, var(--stroke-divider));
   flex-shrink: 0;
 }
@@ -608,6 +613,7 @@ html[data-ui-scale-css] .app-shell {
 
 .commandbar .ribbon-select {
   height: 28px;
+  min-width: 0;
 }
 
 .cmd-label {
@@ -649,22 +655,15 @@ html[data-ui-scale-css] .app-shell {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
   padding: 0 12px;
   background: transparent;
   border-top: none;
   font-size: 11px;
+  line-height: 16px;
   color: var(--text-secondary);
   flex-shrink: 0;
   user-select: none;
   overflow: hidden;
-}
-
-.statusbar .status-connection {
-  flex: none;
-  gap: 5px;
-  font-size: 11px;
-  white-space: nowrap;
 }
 
 .status-metrics {
@@ -672,18 +671,27 @@ html[data-ui-scale-css] .app-shell {
   align-items: center;
   justify-content: center;
   flex-wrap: nowrap;
-  gap: 14px;
+  gap: 18px;
   max-width: 100%;
-  min-height: 20px;
-  padding: 1px 8px;
+  height: 20px;
+  padding: 0 8px;
   font-size: 11px;
+  line-height: 16px;
   overflow: hidden;
 }
 
 .status-metrics .status-item {
+  display: inline-flex;
+  align-items: baseline;
   gap: 5px;
+  line-height: 16px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.status-metrics .status-label,
+.status-metrics .status-item > :last-child {
+  line-height: 16px;
 }
 
 .status-metrics .status-item > :last-child {
@@ -692,6 +700,14 @@ html[data-ui-scale-css] .app-shell {
   text-overflow: ellipsis;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.status-metrics .status-duration > :last-child {
+  min-width: 8ch;
+}
+
+.status-metrics .status-count > :last-child {
+  min-width: 4ch;
 }
 
 .status-metrics .status-remaining.is-warning {
@@ -1636,15 +1652,41 @@ html[data-ui-scale-css] .about-legal-dialog {
   display: none;
 }
 
-.status-record {
-  cursor: pointer;
+.status-metrics .status-record {
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border-radius: var(--radius-control);
-  padding: 0 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
 }
 
-.status-record:hover {
+.status-metrics .status-record.is-recording {
+  color: var(--status-success);
+}
+
+.status-metrics .status-record.is-paused {
+  color: var(--status-danger);
+}
+
+.status-metrics .status-record.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.status-metrics .status-record:hover:not(.is-disabled) {
   background: var(--fill-subtle-hover);
-  color: var(--text-primary);
+}
+
+.status-metrics .status-record:focus-visible {
+  outline: 2px solid var(--stroke-focus-outer);
+  outline-offset: -2px;
 }
 
 :root:not([data-theme="light"]) .settings-group {
