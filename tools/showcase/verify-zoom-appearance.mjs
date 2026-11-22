@@ -125,12 +125,15 @@ assert.ok(Math.abs(followAppend.span - followBeforeAppend.span) < 0.02, 'the fol
 assert.equal(followAppend.overviewLatest, followAppend.latest);
 await app.pause();
 
-// The min/max geometry should remain intact, but the preview renderer must
-// place the zero load baseline inside its native clip instead of at the edge.
+// Idle data needs an honest main scale and a readable overview, even when its
+// complete power range consists of micro-watt spikes.
 const preview = await page.evaluate(async () => {
   const { syncChartSeries, updateCharts } = await import('/chart.js');
   const state = window.__zoomTestState;
-  const power = state.chartSeries.power;
+  const { voltage, current, power } = state.chartSeries;
+  for (let series = 5; series <= 8; series++) state.mainChart.setSeries(series, { show: false });
+  voltage.set(Float64Array.from({ length: voltage.length }, (_, i) => (i % 2 === 0 ? 0.003125 : 0.0125)));
+  current.set(Float64Array.from({ length: current.length }, (_, i) => (i % 251 === 0 ? 0.002 : 0)));
   power.set(Float64Array.from({ length: power.length }, (_, i) => (i % 251 === 0 ? 0.000035 : 0)));
   syncChartSeries();
   updateCharts();
@@ -142,11 +145,20 @@ const preview = await page.evaluate(async () => {
     bottom: nav.bbox.top + nav.bbox.height,
     top: nav.bbox.top,
     latest: nav.data[0].at(-1),
+    voltage: [state.mainChart.scales.voltage.min, state.mainChart.scales.voltage.max],
+    current: [state.mainChart.scales.current.min, state.mainChart.scales.current.max],
+    power: [state.mainChart.scales.power.min, state.mainChart.scales.power.max],
   };
 });
-assert.ok(preview.zero <= preview.bottom - 0.9, 'the zero baseline is inside the plot by at least a pixel');
+assert.ok(preview.zero <= preview.bottom - 2.5, 'the zero baseline is inset far enough for the native stroke');
 assert.ok(preview.peak > preview.top && preview.peak < preview.zero, 'the measured peak remains inside the plot');
-assert.ok(preview.zero - preview.peak < (preview.bottom - preview.top) * 0.1, 'idle noise stays near the baseline');
+assert.ok(
+  preview.zero - preview.peak > (preview.bottom - preview.top) * 0.5,
+  'micro-watt spikes are visible in the overview',
+);
+assert.deepEqual(preview.voltage, [0, 0.05]);
+assert.deepEqual(preview.current, [0, 0.01]);
+assert.deepEqual(preview.power, [0, 0.005]);
 assert.equal(preview.latest, followAppend.latest);
 
 const hover = async (selector) => {

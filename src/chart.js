@@ -2228,6 +2228,9 @@ function syncDivisionsAfterResize(/** @type {any} */ u) {
 
 /** 量化步长的候选尾数。比常见的 1/2/5 更细，用于压低量化引入的额外余量。 */
 const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
+// Display-only floors for unloaded meters. Applying a narrow ripple scale to
+// a few ADC steps at zero load makes idle noise look like a large excursion.
+const IDLE_AXIS_CEILING = { voltage: 0.05, current: 0.01, power: 0.005, temp: 0 };
 
 /**
  * 把量程量化为「整齐步长 × 等分数」，使刻度既是整数值又正好铺满绘图区。
@@ -2285,6 +2288,10 @@ function mkYRange(channel, seriesIndexes, symmetric = false) {
       }
       const [min, max] = quantizeRange(lo, hi, divisions);
       const initialSpan = max - min;
+      const idleCeiling = IDLE_AXIS_CEILING[channel];
+      if (!symmetric && agg.min >= 0 && agg.max <= idleCeiling) {
+        return [0, Math.max(idleCeiling, agg.max * (1 + h))];
+      }
       // Align peaks, not the independent zero lines. A grid row is always 1 / divisions of the plot.
       // Signal overlays share the voltage scale but should not determine its reference peak.
       const peak = channel === 'voltage' && u.series[1].show ? seriesMax[1] : agg.max;
@@ -3186,7 +3193,8 @@ function makeGpuiFrame(chart, slot) {
       }
       projected.push(
         (chart.valToPos(x, 'x', true) - bbox.left) * pointScaleX,
-        (chart.valToPos(y, scale, true) - bbox.top) * pointScaleY,
+        nativeStrokeY(chart.valToPos(y, scale, true) - bbox.top, bbox.height, (current.width || 1) * backingRatio) *
+          pointScaleY,
       );
     }
 
@@ -3217,6 +3225,15 @@ function makeGpuiFrame(chart, slot) {
     ratio,
     series,
   });
+}
+
+/** Keep a stroke centered just inside the native surface when the value is on an axis edge.
+ * @param {number} y @param {number} height @param {number} width
+ */
+function nativeStrokeY(y, height, width) {
+  if (y < 0 || y > height) return y;
+  const inset = Math.min(height / 2, width / 2 + 0.5);
+  return Math.min(height - inset, Math.max(inset, y));
 }
 
 function deactivateGpuiCharts(error) {
@@ -3429,11 +3446,11 @@ function initNavigatorChart() {
         range: /** @type {any} */ (
           () => {
             const max = seriesMax[3];
-            const ceiling = max > 0 && Number.isFinite(max) ? Math.max(0.001, max * (1 + headroomFrac())) : 1;
-            // GPUI clips to the plot bounds. Keep the zero baseline and the
-            // topmost peak inside that clip even when headroom is set to 0%.
-            const rows = Math.max(8, (host.clientHeight || 46) - 4);
-            const inset = ceiling / (rows - 2);
+            // Fit even micro-watt spikes in the overview. Its vertical scale
+            // represents the full recording, independently of the main axes.
+            const ceiling = max > 0 && Number.isFinite(max) ? max * (1 + headroomFrac()) : 1;
+            const rows = Math.max(12, (host.clientHeight || 46) - 4);
+            const inset = (3 * ceiling) / (rows - 6);
             return [-inset, ceiling + inset];
           }
         ),
@@ -3445,7 +3462,7 @@ function initNavigatorChart() {
         scale: 'y',
         auto: false,
         stroke: () => chartTheme.power,
-        width: 1,
+        width: 1.25,
         points: { show: false },
         ...(linearBuilder != null ? { paths: chartPaths } : {}),
       },

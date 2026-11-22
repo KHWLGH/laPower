@@ -15,6 +15,10 @@ Link to this index for the full history, or directly to a version's `en.md` / `z
 
 [简体中文草稿](changelog/unreleased/zh-CN.md) · [English draft](changelog/unreleased/en.md)
 
+## [0.2.14] - 2026-11-22
+
+[English](changelog/0.2.14/en.md) · [简体中文](changelog/0.2.14/zh-CN.md)
+
 ## [0.2.13] - 2026-11-22
 
 [English](changelog/0.2.13/en.md) · [简体中文](changelog/0.2.13/zh-CN.md)

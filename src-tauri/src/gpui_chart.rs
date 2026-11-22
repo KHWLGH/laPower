@@ -6,8 +6,8 @@
 mod platform {
     use gpui::{
         canvas, div, point, prelude::*, px, rgba, size, App, Application, Bounds, Context, Path,
-        PathBuilder, Pixels, Render, Window, WindowBackgroundAppearance, WindowBounds,
-        WindowHandle, WindowKind, WindowOptions,
+        PathBuilder, Pixels, Render, TitlebarOptions, Window, WindowBackgroundAppearance,
+        WindowBounds, WindowHandle, WindowKind, WindowOptions,
     };
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::sync::{
@@ -20,9 +20,10 @@ mod platform {
         Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF},
         UI::WindowsAndMessaging::{
             GetAncestor, GetWindowLongPtrW, IsWindow, SetParent, SetWindowLongPtrW, SetWindowPos,
-            ShowWindow, GA_PARENT, GWL_EXSTYLE, GWL_STYLE, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
-            SWP_SHOWWINDOW, SW_HIDE, WS_CHILD, WS_DISABLED, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
-            WS_POPUP,
+            ShowWindow, GA_PARENT, GWL_EXSTYLE, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+            SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE,
+            WS_BORDER, WS_CAPTION, WS_CHILD, WS_DISABLED, WS_DLGFRAME, WS_EX_NOACTIVATE,
+            WS_EX_TRANSPARENT, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
         },
     };
 
@@ -350,7 +351,15 @@ mod platform {
             SetWindowLongPtrW(
                 window,
                 GWL_STYLE,
-                ((style & !WS_POPUP) | WS_CHILD | WS_DISABLED) as isize,
+                ((style
+                    & !(WS_POPUP
+                        | WS_BORDER
+                        | WS_CAPTION
+                        | WS_DLGFRAME
+                        | WS_SYSMENU
+                        | WS_THICKFRAME))
+                    | WS_CHILD
+                    | WS_DISABLED) as isize,
             );
             let ex_style = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
             SetWindowLongPtrW(
@@ -364,6 +373,29 @@ mod platform {
             if GetAncestor(window, GA_PARENT) != parent {
                 return Err(format!(
                     "无法嵌入 GPUI 图层: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            // Recompute the client area after changing this popup into a child.
+            // Without SWP_FRAMECHANGED, the old top-level non-client border
+            // survives reparenting and consumes almost the entire overview height.
+            if SetWindowPos(
+                window,
+                std::ptr::null_mut(),
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED
+                    | SWP_NOMOVE
+                    | SWP_NOSIZE
+                    | SWP_NOACTIVATE
+                    | SWP_NOOWNERZORDER
+                    | SWP_NOZORDER,
+            ) == 0
+            {
+                return Err(format!(
+                    "无法刷新 GPUI 子窗口边框: {}",
                     std::io::Error::last_os_error()
                 ));
             }
@@ -439,7 +471,14 @@ mod platform {
         let handle = cx
             .open_window(
                 WindowOptions {
-                    titlebar: None,
+                    // The popup style has no frame. `None` instead enables GPUI's
+                    // custom titlebar handling, which insets WM_NCCALCSIZE as
+                    // though this were a resizable top-level window. That clips
+                    // the axes-aligned child surface on the sides and bottom.
+                    titlebar: Some(TitlebarOptions {
+                        appears_transparent: false,
+                        ..Default::default()
+                    }),
                     window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                         point(px(0.0), px(0.0)),
                         size(px(640.0), px(480.0)),
