@@ -10,6 +10,7 @@
   --glass-control: rgba(25, 35, 56, 0.13);
   --glass-control-hover: rgba(217, 230, 252, 0.17);
   --glass-edge: rgba(226, 236, 255, 0.3);
+  --glass-divider: rgba(226, 236, 255, 0.08);
   --glass-reflection: rgba(249, 251, 255, 0.36);
   --glass-lens: rgba(218, 232, 255, 0.12);
   --glass-shadow: 0 5px 18px rgba(12, 18, 40, 0.14);
@@ -29,6 +30,7 @@
   --glass-control: rgba(252, 253, 255, 0.22);
   --glass-control-hover: rgba(252, 253, 255, 0.55);
   --glass-edge: rgba(86, 107, 145, 0.27);
+  --glass-divider: rgba(86, 107, 145, 0.09);
   --glass-reflection: rgba(255, 255, 255, 0.76);
   --glass-lens: rgba(255, 255, 255, 0.23);
   --glass-shadow: 0 5px 18px rgba(49, 69, 104, 0.12);
@@ -117,7 +119,7 @@
 
 .app-shell::after {
   background: radial-gradient(ellipse at 18% 0, var(--glass-lens), transparent 61%);
-  box-shadow: inset 0 0 0 1px var(--glass-edge);
+  box-shadow: inset 0 0 0 1px var(--glass-divider);
 }
 
 :root:not([data-theme="light"]) {
@@ -131,12 +133,13 @@
 .commandbar,
 .pd-table-head {
   background: var(--glass-sheen), var(--glass-chrome);
-  border-color: var(--glass-edge);
-  box-shadow: var(--glass-rim);
+  border-color: var(--glass-divider);
+  box-shadow: none;
 }
 
 .monitor-commandbar {
-  box-shadow: inset 0 1px var(--glass-reflection);
+  border-bottom: none;
+  box-shadow: none;
 }
 
 .chart-area {
@@ -149,9 +152,7 @@
 
 .timeline-container,
 .settings-group,
-.settings-nav,
-.trigger-log-pane,
-.pd-detail-pane {
+.settings-nav {
   background: var(--glass-sheen), var(--glass-panel);
   border-color: var(--glass-edge);
   box-shadow: var(--glass-rim), var(--glass-shadow);
@@ -166,8 +167,12 @@
 
 /* 列表与协议表单复用磨砂壁纸层，避免滚动内容参与滤镜合成。 */
 .pd-master,
-.trigger-controls {
+.pd-detail-pane,
+.trigger-controls,
+.trigger-log-pane {
   background: var(--glass-panel);
+  border-color: var(--glass-divider);
+  box-shadow: none;
 }
 
 .chart-container {

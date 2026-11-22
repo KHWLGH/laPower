@@ -142,14 +142,6 @@ html[data-ui-scale-css] .app-shell {
   max-width: 240px;
 }
 
-.titlebar-connect .status-connection {
-  flex: none;
-  gap: 5px;
-  margin-inline-start: 2px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
 /* ── 窗口按钮：同一批节点切换皮肤，真实 OS 仅决定节点来源 ── */
 
 .titlebar-controls {
@@ -388,21 +380,12 @@ html[data-ui-scale-css] .app-shell {
   user-select: none;
 }
 
+#view-monitor .commandbar {
+  overflow-x: auto;
+}
+
 .monitor-commandbar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  column-gap: 10px;
   border-bottom: none;
-}
-
-.monitor-command-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.monitor-command-actions {
-  justify-self: end;
 }
 
 .chart-header {
@@ -611,9 +594,10 @@ html[data-ui-scale-css] .app-shell {
 
 .cmd-sep {
   width: 1px;
-  align-self: stretch;
-  margin: 4px 4px;
-  background: var(--stroke-divider);
+  height: 14px;
+  align-self: center;
+  margin: 0 4px;
+  background: var(--glass-divider, var(--stroke-divider));
   flex-shrink: 0;
 }
 
@@ -638,7 +622,7 @@ html[data-ui-scale-css] .app-shell {
   flex: 1;
   display: flex;
   gap: var(--monitor-gutter);
-  padding: var(--monitor-gutter);
+  padding: var(--monitor-gutter) var(--monitor-gutter) 4px;
   min-height: 0;
   overflow: hidden;
 }
@@ -658,23 +642,47 @@ html[data-ui-scale-css] .app-shell {
   background: var(--accent-fill);
 }
 
-/* ── 记录状态 ─────────────────────────────────────────────────── */
+/* ── 状态栏 ───────────────────────────────────────────────────── */
+
+.statusbar {
+  height: var(--statusbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: transparent;
+  border-top: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  user-select: none;
+  overflow: hidden;
+}
+
+.statusbar .status-connection {
+  flex: none;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+}
 
 .status-metrics {
   display: flex;
   align-items: center;
-  justify-self: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  flex-wrap: nowrap;
+  gap: 14px;
   max-width: 100%;
   min-height: 20px;
-  padding: 1px 6px;
+  padding: 1px 8px;
   font-size: 11px;
+  overflow: hidden;
 }
 
 .status-metrics .status-item {
-  gap: 4px;
+  gap: 5px;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
