@@ -4,7 +4,7 @@
 
 # 技术架构
 
-本文描述 laPower 的内部结构。使用说明见 [使用指南](USAGE.md)，构建方式见 [开发与构建](DEVELOPMENT.md)。
+本文描述 laPower 的内部架构。操作说明见 [使用指南](USAGE.md)，构建与开发流程见 [开发与构建](DEVELOPMENT.md)。
 
 - [仓库布局](#仓库布局)
 - [后端](#后端)
@@ -17,271 +17,174 @@
 
 ## 仓库布局
 
-Cargo workspace，四个成员 + 一个原生 JavaScript 前端源码目录；发布构建由 esbuild 生成前端产物。
+Cargo workspace 包含四个成员 crate 与原生 JavaScript 前端源码目录；发布构建由 esbuild 生成 `out/`。
 
-```
+```text
 laPower/
 ├── src-tauri/            Tauri v2 应用（后端）
-│   ├── src/lib.rs        应用状态、Tauri 命令、HID 读线程与 IPC 发射线程
+│   ├── src/lib.rs        应用状态、Tauri 命令注册与生命周期管理
+│   ├── src/acquire.rs    采集循环、节拍网格分窗与时间戳回推
+│   ├── src/stream.rs     流会话管理、有界通道、背压与末包回执
 │   ├── src/pd_capture.rs USB-PD 捕获会话（seq / generation / 按需解码）
-│   ├── src/usb_port.rs   分平台 USB 拓扑解析
+│   ├── src/km003c_session.rs POWER-Z Bulk / AdcQueue 与 CDC 控制会话
+│   ├── src/video_export.rs 静态图片与视频报告导出及其平台渲染编码子模块
+│   ├── src/usb_port.rs   分平台 USB 拓扑端口解析
 │   ├── src/updates.rs    手动 GitHub 更新检查与受限浏览器跳转
 │   ├── capabilities/     Tauri ACL 能力声明
-│   └── tauri.conf.json   窗口、CSP、打包配置
+│   └── tauri.conf.json   窗口、CSP 与打包配置
 ├── crates/
 │   ├── usbpd-parser/     USB-PD 报文解码库
-│   ├── km003c/            POWER-Z Bulk 协议、AdcQueue 与 CDC 控制
+│   ├── km003c/           POWER-Z Bulk 协议、AdcQueue、CDC 与协议检测
 │   └── witrn-hid/        WITRN HID 设备封装
-├── src/                  前端源文件（原生 ES Modules）
-├── out/                  构建后的 frontendDist（不入库）
+├── src/                  前端源码（原生 ES Modules）
+├── out/                  构建产物 frontendDist（不入库）
 ├── tools/showcase/       虚拟设备与截图开发工具（不随应用发货）
-├── test/                 前端单元测试（node --test）
+├── test/                 前端核心测试（node --test）
+├── bench/                算法、存储、内存与渲染基准
 ├── temperature-example/  外部温度服务 Python 示例
-└── docs/                 本文档目录
+└── docs/                 文档目录
 ```
 
-工作区在 `Cargo.toml` 里统一了 `version`、`edition = 2021`、`rust-version = 1.85` 与公共依赖（`serde`、`serde_json`、`hidapi 2.6`、`chrono 0.4`）。
+根目录 `Cargo.toml` 统一管理 `version`、`edition = 2021`、`rust-version = 1.85` 及公共依赖（`serde`、`serde_json`、`hidapi 2.6`、`chrono 0.4`）。
 
 ## 后端
 
 ### `src-tauri/src/lib.rs`
 
-承载应用状态、设备命令与各模块 Tauri 命令的注册。共享状态的设计原则是**只在必要处加锁**：
+承载应用状态、设备命令与模块命令注册，共享状态仅在必要处加锁：
 
-- `sample_rate: Arc<AtomicU64>` —— HID 读循环每次迭代都要读采样率，用原子量避免每帧取一次锁。
-- 其余共享状态用 `Arc<Mutex<...>>`。
+- `sample_rate: Arc<AtomicU64>` —— 采集读循环每次迭代均读取采样率，使用原子量避免每帧加锁。
+- 其余共享状态使用 `Arc<Mutex<...>>`。
 
 ### 线程模型
 
-每个设备连接持有读线程与 IPC 发射线程；POWER-Z 另外持有一个 CDC 协议控制线程：
+每个设备连接拥有读线程与 IPC 发射线程；POWER-Z 额外拥有独立 CDC 协议控制线程：
 
+```text
+HID / Bulk 读线程 ──── 有界 channel ────> IPC 发射线程 ──── emit ────> WebView
+  只解码与分窗，不 emit                    合批 / 转发 / ACK 追踪
+                                      ↘ POWER-Z CDC 控制线程
 ```
-HID 读线程 ──── channel ────> IPC 发射线程 ──── emit ────> WebView
- 只解码，不 emit                合并 / 转发
-                         ↘ POWER-Z CDC 控制线程
-```
 
-- **采集读线程** —— WITRN 阻塞读 HID 报告，读到后再非阻塞排空主机已排队的报告；POWER-Z 读取 Vendor Bulk / AdcQueue；解码后按采样间隔的节拍网格分窗，每个窗口求平均（电压、电流、功率、D+ / D−；时间、CC、温度取窗口内最后一帧）成一个点，写入容量 4096 的有界通道。PD 事件在通道满时进入最多 256 条的 pending，完整报文仍保留在后端日志。测量样本的未确认量达到 8192 时明确停止采集并报错。
-- **IPC 发射线程** —— 测量与 PD 分别发为 `device-data-batch` / `pd-data-batch`。测量按最多 64 点或 `clamp(4 × 采样间隔, 8 ms, 50 ms)` 合批，保留每点的序号、录制段与时间戳；前端消费后通过 ACK 确认。采集停止时先排空残留，再发末包回执与断开事件。
-
-因为采集能否继续取决于前端 ACK，窗口不可见时前端也必须照常运行。macOS 上两件事会破坏这一点，因此分别处理：WKWebView 默认挂起不可见的页面，主窗口配置 `backgroundThrottling: "disabled"`（macOS 14+）；App Nap 会合并整个进程的定时器并降低线程优先级，读线程存活期间持有 `NSProcessInfo` activity（`src-tauri/src/app_nap.rs`）退出 App Nap，并带 `LatencyCritical`：只退出 App Nap 时，最小化窗口下读线程仍偶尔迟醒（实测最大 36 ms）。迟醒无法完全避免（系统负载高时窗口可见也会出现，70 分钟实测最长 89.9 ms），所以 WITRN 读取源（`HidSource`）在每次读到报告后用非阻塞读排空 hidapi 队列，再由 `acquire::stamp_drained` 把这批样本的时间戳均匀回推到上一个样本与当前时刻之间（相邻不超过设备节拍 10 ms，最新一个仍是接收时刻）。否则积压报告会全部打上同一个接收时刻、落进同一个 10 ms 选择窗口，被同一个选择窗口合并成一个点。PD 报告按事件到达，不参与回推。读线程收到非零的录制段（`set_recording_segment`）时换成同时阻止系统空闲睡眠的 activity，收到 0（暂停、停止、清空）时换回只退出 App Nap 的那个；先开始新的再结束旧的，切换时不留空档。屏幕熄灭、合盖和手动睡眠不受影响。Windows 的 WebView2 最小化时仍在运行，不受这两项影响。
-
-录制段和采样率边界先由 `HidSource::barrier` 非阻塞排空旧队列，旧报告仍按旧段／旧采样率处理；队列超过有界排空容量时明确停止，而不是把残留报告带入新段。窗口封口后通过 `seal_boundary` 将下一批回推时间戳限制在屏障之后。
-
-`BackgroundTask::stop()` 先置停止标志再 `join`，且**顺序固定为先生产者后消费者** —— 反过来会让读线程写入一个没人消费的通道。
-
-`shutdown` 命令标注 `#[tauri::command(async)]`，这样它不会在主线程上 join 那些正在 `emit` 的工作线程（否则互相等待会死锁）。停完线程后 `destroy` 主窗口，而不是 `close` —— Tauri v2 的 `close()` 会重新派发 `close-requested`，造成退出回环。
-
-退出前必须先「消费完并 ACK 末包」，这条校验只在 `shutdown` 上；一旦流进入终态（`seq` 空洞、背压超限、屏障超时），`fail()` 已经把生产端 drain 停掉，屏障保护的样本不可能再出现，此时继续坚持校验只会让**断开 / 重连 / 退出永久全部失败**。前端因此改走 `abandon_device_stream`：它只接受「已停止 + 线程已 join + 已有末包回执 + 同 generation」的会话并退休该槽位，**且不写 `consumed`**，所以空洞依旧算未消费。`shutdown` 的谓词一字未改，放宽只发生在这条显式路径上。
+- **采集读线程**：WITRN 阻塞读 HID 报告后再非阻塞排空主机队列；POWER-Z 读取 Vendor Bulk / AdcQueue（非队列轮询路径使用 `vbus_instant_v()` 与 `ibus_instant_a()` 瞬时字段并计算 `voltage × current`）。解码后按采样间隔节拍分窗求平均（电压、电流、功率、D+/D− 取窗口均值，同时保留逐帧电流幅值均值；时间、CC 与温度取窗口末帧），写入容量 4096 的有界通道。PD 事件在通道满时进入最多 256 条的 pending，完整报文保留在后端日志。未确认测量样本达 8192 时停止采集并报错。
+- **IPC 发射线程**：在队列为空时阻塞等待，首条消息到达后启动合批期限，分别发出 `device-data-batch`（最多 64 点或 `clamp(4 × 采样间隔, 8 ms, 50 ms)`）与 `pd-data-batch`。前端消费后通过 `ack_device_stream` 确认；停止时排空残留并发出末包回执与断开事件。
+- **macOS 后台保活与时间戳回推**：WKWebView 不可见时配置 `backgroundThrottling: "disabled"`（macOS 14+）；读线程存活期间持有 `NSProcessInfo` `LatencyCritical` activity（`src-tauri/src/app_nap.rs`）退出 App Nap，非零录制段切换为同时阻止系统空闲睡眠的 activity（先开新后关旧）。迟醒积压的 WITRN 报告由 `HidSource` 排空并经 `acquire::stamp_drained` 按设备节拍（≤ 10 ms）均匀回推时间戳；录制段与采样率切换先经 `HidSource::barrier` 排空并 `seal_boundary`。
+- **有序停止与终态退休**：`BackgroundTask::stop()` 严格执行**先生产者、后消费者**停止；`shutdown` 为 `#[tauri::command(async)]` 以免主线程死锁，停完线程后 `destroy` 主窗口（避免 `close()` 重派发退出回环）。当流因空洞、背压或屏障超时进入终态并停止生产者后，前端改走 `abandon_device_stream` 退休已 join 会话而不伪造 `consumed` ACK，使断开、重连与退出重新可达。
 
 ### Tauri 命令
 
 | 命令 | 作用 |
 | --- | --- |
 | `enumerate_devices` | 合并 WITRN HID 与 POWER-Z Vendor Bulk 设备枚举 |
-| `connect_device_by_path` | 按枚举返回的设备路径连接 WITRN HID 或 POWER-Z Bulk（前端实际使用的入口） |
-| `disconnect_device` | 断开并停止该连接的后台线程 |
-| `get_current_device_info` | 返回当前连接的设备信息 |
-| `set_sample_rate` | 设置采样间隔，接受 1 – 60000 ms；按设备下限钳制 |
+| `connect_device_by_path` | 按设备路径连接 WITRN HID 或 POWER-Z Bulk |
+| `disconnect_device` | 断开连接并停止对应后台线程 |
+| `get_current_device_info` | 返回当前连接设备信息 |
+| `set_sample_rate` | 设置采样间隔（1–60000 ms，按设备下限钳制） |
 | `set_pd_capture_enabled` | 开关 PD 报文采集 |
-| `pd_log_clear` | 清空 PD 日志，返回新的 generation |
-| `pd_log_after` | 后台分页补洞，每页最多 512 条，携带 generation 和固定 `throughSeq` 终点 |
-| `pd_log_replace` | 用导入的报文替换日志，并盖上新 generation |
-| `decode_pd_at` | 按 `seq` 和匹配的 generation 取捕获时的解码树，O(1) |
-| `drain_device_stream` | 停止该连接的后台线程并取回末包回执（幂等，可重复调用） |
-| `ack_device_stream` | 确认同 generation 中已消费的样本序号 |
-| `set_recording_segment` | 在采集源建立录制段边界，同步 PD 跟随状态 |
-| `abandon_device_stream` | 退休一个终态会话，让断开 / 重连 / 退出重新可达；不改写 `consumed` |
-| `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源 |
-| `check_for_updates` | 仅手动请求 GitHub 正式 Release，10 秒超时，SemVer 比较；错误返回稳定错误码 |
-| `open_project_page` | 用系统浏览器打开固定仓库首页或经校验的该仓库发布页 |
-| `shutdown` | 停止全部后台线程后销毁主窗口 |
-| `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制命令 |
-| `video_export_capabilities` | 返回宿主实际可用的分辨率／帧率／编码组合；进程内只探测一次 |
-| `video_export_pick` | 用原生保存对话框选择目标位置并返回一次性 ticket；路径不经过前端 |
-| `video_export_start` | 校验冻结载荷并在后台线程开始编码，返回任务状态 |
-| `video_export_status` | 按 id 返回任务状态、进度与失败信息 |
-| `video_export_current` | 返回当前任务，供重开的对话框接回进度 |
-| `video_export_cancel` | 请求取消当前任务；编码线程退出前任务仍占用唯一的编码槽 |
+| `pd_log_clear` / `pd_log_after` / `pd_log_replace` / `decode_pd_at` | PD 日志清空、分页补洞（≤ 512 条/页）、导入替换与 O(1) 详情查询 |
+| `drain_device_stream` / `ack_device_stream` / `set_recording_segment` / `abandon_device_stream` | 流停止排空、消费确认、录制段边界与终态会话退休 |
+| `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源连接管理 |
+| `check_for_updates` / `open_project_page` | 手动请求 GitHub Releases（10 s 超时）与受限仓库页面跳转 |
+| `shutdown` | 停止全部后台线程并销毁主窗口 |
+| `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制与检测命令 |
+| `png_export_pick` | 选择协议检测报告 PNG 保存路径（受控单次文件写入） |
+| `video_export_capabilities` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | 报告图片/视频导出探测、一次性目标 ticket、后台单槽任务控制与进度查询 |
 
 ### `src-tauri/src/pd_capture.rs`
 
-PD 日志是一个只追加的 `Vec`，**`seq` 就是报文下标**。原始帧与包含会话上下文的解码树在捕获时保留；`decode_pd_at` 校验 generation 后执行 O(1) 查找。前端按需取得的树只进入最多 8 条的缓存，旧版导入文件自带的 `meta` 继续保留。迟到详情还须核对数据代次、条目身份和选择代次。
+PD 日志为只追加 `Vec`，**`seq` 即报文下标**。捕获时即保留原始帧与上下文解码树，供 `decode_pd_at` 校验 `generation` 后 O(1) 查询（前端仅缓存最多 8 条已取得树；旧版导入保留自带 `meta`）。
 
-- `generation` —— 每次清空或导入替换都递增；补洞分页与详情请求都校验它。
-- 前端只推进连续消费游标。跳号后由单个后台分页任务顺序追赶，实时事件只更新待追赶终点；每页持锁克隆最多 512 条。首个响应固定 `throughSeq`，后续页沿用；仍有新事件时再开始下一轮。
-- 断开分隔行保留前端顺序，不占 `seq`；清空或导入使旧补洞与详情任务失效。
-- `PD_LOG_HARD_CAP = 1_000_000` 是硬上限；前端 `PD_SOFT_CAP = 500_000` 时弹出提示。
+- 清空或导入替换递增 `generation`，使旧补洞分页与详情请求失效；断开分隔行保留前端顺序而不占 `seq`。
+- 前端仅推进连续消费游标，跳号时由单后台分页循环按固定 `throughSeq` 每次持锁克隆最多 512 条追赶。
+- 硬上限 `PD_LOG_HARD_CAP = 1_000_000`，前端软上限 `PD_SOFT_CAP = 500_000` 弹出提示。
 
 ### `src-tauri/src/temperature_reader.rs`
 
-TCP 温度线程每次读取固定 1024 字节，增量解析器最多保存 256 字节的行缓冲（包含 CRLF）。超长后一直丢弃至下一换行，不把尾部误认为新读数；半行跨读取超时续接。有界读取之间检查停止标志，空闲超时不关闭连接，EOF 和读取错误仍触发断线通知。
+TCP 温度线程每次读取固定 1024 字节并进入 256 字节行缓冲增量解析（含 CRLF）：超长行丢弃至下一换行，半行跨 250 ms 读超时续接；空闲超时保持连接，EOF 或读取错误触发断开通知。
 
 ### `src-tauri/src/usb_port.rs`
 
-把 HID 路径反解成 USB 拓扑端口（如 `4-4`），用于在设备名里区分插在不同口上的同型号仪表。三套实现：
-
-- **Windows** —— `CM_Get_DevNode_PropertyW` + `DEVPKEY_Device_LocationPaths`，解析 `PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(4)#USB(4)` 形式的字符串。
-- **Linux** —— 取 `hidraw*` 名，`canonicalize` `/sys/class/hidraw/<name>/device`，逐级向上读 `devpath` 拼出端口路径。纯只读 sysfs 访问，不需要特殊权限（与打开 `/dev/hidrawN` 不同）。
-- **macOS** —— 非独占方式打开设备读 `get_location_id`。
-
-其他平台返回 `None`，设备名退化为不带端口后缀的形式。
-
-> 维简硬件的 USB 序列号是**生产批次日期**而非单机编号，同批次的两台仪表序列号相同。枚举时先按 USB 端口分组，再叠加序列号，以便标题栏区分插在不同口上的同型号仪表。
+解析物理 USB 拓扑端口（如 `4-4`）以区分共享批号序列号的同型号仪表：Windows 使用 `CM_Get_DevNode_PropertyW` + `DEVPKEY_Device_LocationPaths`；Linux 只读遍历 `/sys/class/hidraw/<name>/device` 的 `devpath`（无需特权）；macOS 非独占读取 `get_location_id`。
 
 ### `src/protocol-report*.js`
 
-协议检测图片由独立的 `protocol-report` 前端模块生成，Canvas 使用 1920×1080 逻辑画布，并从随包 CSS 设计令牌解析所选浅深主题，不切换应用主题或截取工作区。检测开始时保留仪表、时间与方式，打开导出对话框时深拷贝本轮报告；`DetectionReport.pdos` 默认空数组并仅携带本轮独立读取的 PDO，保留 AVS 分段。`TriggerPdo.max_power_mw` 可选，保留 Battery／EPR AVS 明确功率；报告将它与 Vmax×I 参考计算分开标注。PNG 经 `png_export_pick` 原生选择目标，复用受控文件句柄与最多 4 MiB 的字节写入，以及暂存、同步、成功提交／失败清理机制，不增加文件系统 capability。选项独立存于 `protocolReportExport`，与监控报告分开；共用文件导出互斥。
+协议检测图片报告在独立前端模块中以 1920×1080 逻辑 Canvas 绘制（从随包 CSS design tokens 解析当前选择主题），打开对话框即深拷贝本轮快照；`DetectionReport.pdos` 仅含本轮独立读取的 PDO（保留 SPR AVS 分段，`TriggerPdo.max_power_mw` 区分实报功率与参考计算），经 `png_export_pick` 受控暂存写盘。选项独立存于 `protocolReportExport`。
 
 ### `src-tauri/src/video_export.rs`
 
-报告入口统一为“导出报告”，图片和视频复用冻结快照、单任务状态、原生目标 ticket、暂存文件与成功后提交机制。内部 IPC 名称保留 `video_export_*` 以兼容现有调用。`VideoOptions` 增加 `reportType`（image/video）、`imageLayout`（widescreen/long）及独立的 `showMarkers`、`showMarkerDetails`；缺字段的旧后端载荷按 video、widescreen、两项开启解释，前端首次使用默认 image。设置仍保存在原 `videoExport` 块中，不丢弃已有视频选项。PNG 绕过视频能力探测与编码器，Windows 用 Direct2D/WIC，其他平台用 tiny-skia 保存无损 PNG。
+监控命令栏“导出报告”统一 PNG 图片与短视频导出，共享冻结载荷、单后台任务槽（`lapower-video`）、原生 `video_export_pick` 一次性 ticket（路径留在后端，写同目录隐藏暂存文件并在完成后原子替换）、500 ms 进度轮询及 `shutdown` 最长 2 秒取消等待：
 
-静态报告展示整段统计、完整曲线与总时长，不绘制播放光标、动态读数和进度条。平均电压按有效时间加权，统计与曲线沿用原始数据及缺测语义；两个打点开关分别控制曲线标记和下方详情。视频及 16:9 图片最多含前八个打点，长图保留全部打点并按详情行扩展高度。后端限制载荷数量、图片高度和总像素，超限显式失败，取消或失败不覆盖原目标。
-
-报告视频导出是宿主侧的单槽任务。`video_export_capability` 按用户当前选中的那一组选项用真实的一帧试编码探测，结果按组合缓存在进程内——一次打开对话框只探测一个组合，而不是逐个试完全部 24 个；`video_export_pick` 打开原生保存对话框并返回一次性 ticket，路径留在后端，前端无法指定任意目标；`video_export_start` 校验冻结载荷后启动 `lapower-video` 线程；`video_export_status` 与 `video_export_current` 分别服务对话框每 500 ms 一次的进度轮询和重开后的接回；`video_export_cancel` 只置位取消标志，由编码循环逐帧检查。关闭对话框或切换工作区不会中止编码；同一时刻只有一个任务，取消请求也要等编码线程真正退出才释放槽位。退出时 `shutdown` 取消当前任务并最多等待两秒回收编码线程；超时只记日志，残留的暂存文件带进程号，便于识别。
-
-前后端投影上限统一为 256 桶 × 10 点（首尾与四通道极值），共 2560 点。能力探测完成后才允许提交；对话框关闭后仍每 500 ms 跟踪活动任务并只通知一次终态。查询使用任务版本和请求序号忽略过期结果，临时失败保留任务重试；错误展示保留原始诊断。
-
-采样只存在于前端的列式存储里，后端没有可按时间查询的记录库，因此 `src/video-export.js` 在用户确认时冻结列快照，`src/video-projection.js`（纯函数）一次投影出自包含的载荷：汇总统计、256 个时间桶的曲线投影（每桶保留首样本、末样本和各通道的最小／最大值，短记录直接使用原始点）、每个视频帧的一组通道读数（最后一帧对应最后一个样本）以及最多 8 个打点。`src/video-export-options.js` 是分辨率、帧率、编码、容器白名单与帧数公式的唯一来源，`src/video-palette.js` 带出浅深两套已解析的颜色。载荷交给后端后不再读取任何记录数据，编码期间继续记录也不会改变这份报告。
-
-`src-tauri/src/video_export.rs` 及其子模块只负责渲染与封装。`model.rs` 校验载荷结构与长度。`scene.rs` 是唯一的排版实现（逻辑画布固定 1920 × 1080，按 `width / 1920` 缩放），通过 `Painter` 抽象交给两个后端：Windows 的 `windows.rs` 用 Direct2D/DirectWrite 绘制，macOS 与 Linux 的 `skia.rs` 用 tiny-skia 加系统字体绘制。
-
-Windows 编码有两档：`gpu.rs` 把同一套排版直接画进 D3D11 纹理，`ID3D11VideoProcessor` 在显卡上转成 BT.709 NV12，再由 Media Foundation 的硬件编码器经 DXGI 采样写盘；零拷贝路径不可用时，`windows.rs` 改走 WIC 位图加 CPU NV12，但这条路径**仍开着** `MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS`，所以系统内存里的帧照旧可以交给硬件编码器，只有整条链路都拿不到硬件时才落到软件编码。两条路径都只用编码器自己报告的 `MFT_ENUM_HARDWARE_URL_Attribute` 判断是否算硬件。`gpu.rs` 通过 `IDXGIFactory1` 枚举适配器，跳过 `DXGI_ADAPTER_FLAG_SOFTWARE` 并逐个尝试，避免虚拟显示适配器抢到默认设备。编码器在**第一次尝试开始前**就写入任务状态，对话框从第一帧起显示的就是真实编码器；回退到软件编码时同时写入 `fallback` 原因。非 Windows 主机走 `portable.rs` 的帧循环：macOS 优先用 `apple.rs` 的 VideoToolbox 硬件会话（建会话后读取 `UsingHardwareAcceleratedVideoEncoder` 如实报告，失败则回退），Linux 用内置的 `software.rs`（OpenH264，随包编译）；`mp4.rs` 负责写 MP4／MOV（MOV 直接按 QuickTime 品牌与 `mhlr` 处理器写出，无需事后改写）。`mov.rs` 仍只服务 Media Foundation 产出的 MP4：在 `Finalize` 之后就地把 `ftyp` 品牌和 `hdlr` 处理器改写成 QuickTime 形式，样本偏移保持不变。
-
-目标路径来自原生对话框。编码器先在目标同目录创建隐藏暂存文件，成功后才重命名到目标；失败或取消会删除暂存文件，因此已有文件不会被半成品覆盖，也不会留下临时文件。能力按组合给出：Windows 先试零拷贝路径、失败再试 CPU 帧路径，记录实际生效的编码器；macOS 用 VideoToolbox 真编码一帧并读取 `UsingHardwareAcceleratedVideoEncoder`；Linux 由内置编码器提供 H.264（软件编码），`H.265 (HEVC)` 标记为不可用并在对话框说明原因。CSV 导出不受影响。
-
-报告视频选项新增 `acceleration`（auto / hardware / software，默认 auto）和 `quality`（standard / high / ultra，默认 high），包含在冻结载荷和任务状态中。前后端能力缓存均按分辨率、帧率、编码、模式和画质区分；探测与实际编码采用相同的选择策略。Windows 自动模式依次尝试 GPU 纹理硬件、CPU 帧硬件、禁用硬件变换的软件编码；强制模式只尝试对应编码器，并核验真实属性。macOS 在创建 VideoToolbox 会话时通过 encoder specification 要求或禁用硬件，再读取实际模式；软件 H.264 可使用内置 OpenH264，HEVC 软件模式必须通过真实探测。Linux 明确拒绝硬件模式。只有自动模式跨硬件／软件重试，取消后不再重试，重试前清空暂存容器。
-
-`VideoOptions::bitrate()` 统一三种编码器的目标码率。1080p30 的 H.264 标准／高清／极清为 10／20／30 Mbps，HEVC 为其 65%；按像素数和帧率线性缩放，分别最低 4／3 Mbps，最高 240 Mbps。能力响应增加 `bitrate`，供界面显示；空间预检查使用目标流大小的 125% 加 64 MiB 预留。共享排版使用 144 高参数卡和独立的名称、摘要、主读数区域，`VideoLabels` 新增 average / maximum / range / energy，保持统计口径不变。
+- **前端冻结与投影**：`src/video-export.js` 冻结列快照，纯函数模块 `src/video-projection.js` 分片投影最多 256 桶 × 10 点（首尾与四通道极值，上限 2560 点）、视频逐帧读数与最多 8 个打点（长图保留全部打点并按详情行增高，后端对尺寸与总像素做安全上限校验）；`src/video-export-options.js` 与 `src/video-palette.js` 提供选项白名单、帧数公式与主题色板。
+- **跨平台绘制与编码**：`model.rs` 校验载荷；`scene.rs` 按 1920×1080 逻辑布局通过 `Painter` 抽象分发至 Windows `windows.rs`（Direct2D / DirectWrite / WIC）或 macOS / Linux `skia.rs`（tiny-skia + 系统字体）。PNG 直接保存无损图像，绕过视频探测器。
+- **视频码率与编码策略**：`VideoOptions::bitrate()` 按像素数与帧率线性缩放（1080p30 下 H.264 为 10 / 20 / 30 Mbps、HEVC 为 65%，下限 4 / 3 Mbps、上限 240 Mbps），空间预检留足 125% + 64 MiB。探测与编码共用 `acceleration`（auto / hardware / software）与 `quality`（standard / high / ultra）缓存：`windows` 自动模式依次尝试 `gpu.rs`（DXGI + `ID3D11VideoProcessor` BT.709 NV12 硬编）、WIC + CPU NV12 硬件变换与纯软件编码（MOV 由 `mov.rs` 原地改写）；`apple.rs` 使用 VideoToolbox（核验真实硬件标志，软件 H.264 可用内置编码器）；Linux 由 `software.rs`（内置 OpenH264）提供软件 H.264，`mp4.rs` 直接输出 MP4 / MOV。
 
 ## 协议库
 
-`usbpd-parser` 与 `witrn-hid` 源于已停止维护的独立 `WITRN-API-RS` 仓库，最后导入提交为 `30c4bdb`。现在三个协议库统一在本仓库维护，通过 `workspace.package.version` 与应用共同版本管理，不单独发布。集成增加数值 `GeneralSample` 与由调用者维护上下文的 `decode_pd_report`；HID 设备封装保留兼容性，而 `src-tauri` 自行拥有设备句柄与后台线程。各库的 API 与示例见对应目录下的中英文 README。
-
-三个 crate 都不依赖 Tauri，可被其他 Rust 项目直接引用；均为 `publish = false`，仅在本工作区内使用。协议库及 `crates/` 下自有测试、例子等采用 LGPL-3.0-or-later，应用采用 GPL-3.0-only；版权范围、原始 Python 署名和退役仓库／厂商表的证据缺口见 [`COPYRIGHT`](../COPYRIGHT)。
+工作区内置三个独立协议 crate（`publish = false`，不依赖 Tauri），`usbpd-parser` 与 `witrn-hid` 源于退役的 `WITRN-API-RS`（最后导入 `30c4bdb`），随应用共享 `workspace.package.version` 并采用 LGPL-3.0-or-later（来源与范围见 [`COPYRIGHT`](../COPYRIGHT)）。
 
 ### `crates/usbpd-parser`
 
-USB-PD 报文解码。按报文结构分模块：`header`、`data_msg`、`ext_msg`、`pdo`、`rdo`、`vdo`、`crc`、`context`、`render`。
-
-- 覆盖控制报文、数据报文、扩展报文，以及 Hard Reset / Cable Reset（SOP 字节 32 步编码）。
-- 识别 Structured VDM 2.1。
-- 解析结果是一棵带字段名、原始位范围和渲染文本的树，前端直接用来渲染详情面板。
-- Feature `vendor-ids`（默认开启）内嵌 USB-IF 厂商表（13,542 条，约 500 KB），用于把 VID 显示成厂商名。
-- Feature `serde`（默认开启）提供序列化。
+拆分为 `header`、`data_msg`、`ext_msg`、`pdo`、`rdo`、`vdo`、`crc`、`context`、`render`，覆盖控制/数据/扩展报文、Hard/Cable Reset 与 Structured VDM 2.1，输出带位范围和渲染文本的字段树；默认开启 `vendor-ids`（内嵌 13,542 条 USB-IF 厂商表）与 `serde`。
 
 ### `crates/witrn-hid`
 
-WITRN HID 设备封装。`device.rs` 负责打开与读取，`general.rs` 负责解码测量帧。
-
-`decode_general_sample` 返回的 `GeneralSample`：
-
-| 字段 | 类型 | 单位 |
-| --- | --- | --- |
-| `voltage` | `f32` | V |
-| `current` | `f32` | A |
-| `power` | `f32` | W（由 `voltage × current` 计算，不是读出来的） |
-| `dp` / `dn` | `f32` | V |
-| `cc1` / `cc2` | `f32` | V |
-| `temperature` | `Option<f32>` | °C，字段不可信时为 `None` |
-| `ah` | `f32` | Ah（仪表内部累加器） |
-| `wh` | `f32` | Wh（仪表内部累加器） |
+`device.rs` 封装设备打开与读取，`general.rs` 解码测量帧为 `GeneralSample`（`voltage`、`current`、`power = voltage × current`、`dp`/`dn`、`cc1`/`cc2`、`temperature: Option<f32>`、`ah`/`wh` 仪表累加器）。
 
 ### `crates/km003c`
 
-POWER-Z KM003C/KM002C 的 Interface 0 Vendor Bulk 协议与虚拟串口控制。`protocol::auth` 实现
-MemoryRead / StreamingAuth 的 AES-128-ECB 包，`protocol::queue` 解析 20 字节 AdcQueue 样本，
-`transport::bulk` 负责连接、认证、StartGraph、队列读取与 StopGraph，`trigger` 负责 CDC 文本命令。
-1 ms 会话的队列序号由 `src-tauri/src/km003c_session.rs` 展开为单调主机时间，并统计序号空洞。
+Interface 0 Vendor Bulk 与 CDC 串口控制：`protocol::auth`（AES-128-ECB）、`protocol::queue`（20 字节 AdcQueue）、`transport::bulk`（连接、认证、StartGraph/StopGraph）、`trigger`（CDC 命令）及 `detection`（有时限可取消的扫描/回退/补探状态机，普通/完整预算 240/420 秒，正常结束或取消后 15 秒内复位并验证 5 V）。
 
-`detection` 将列表扫描、扩展扫描回退和常规协议缺失项补探编排成一次有时限、可取消的操作。完整检测无论报告的 PDM 版本如何，都会先尝试 `entry list+`；缺少结束标记时回退常规扫描。结果区分支持、不支持、未检查和未确认，保留扫描／补探来源和原始依据；已明确否定的协议不重试，也不从 PD 功率推断私有认证。扩展扫描等待独立 `done`，普通／完整操作的总预算为 240／420 秒。扫描正常终止后，即使仍有未确认项，命令状态也是“部分完成”；只有传输错误、缺少扫描终止标记、复位失败、取消或超时才是执行失败。检测共用已有 CDC/PDM 会话及已确认配置，不写固定 PDM 参数覆盖用户选择；正常结束及取消后立即复位并验证 5 V；恢复使用独立取消标志，仍服从会话存活状态，合计最多 15 秒。
+- `TriggerSession::run_with_detection` 通过 `km003c-trigger-progress` 推送绑定 `generation` 与 `req_id` 的快照；协议能力项区分 PD 与 UFCS（保留 `NUM` 编号），`VoltageCache` 仅由唯一 Bulk 采集线程写入并用 5 个新鲜样本中位数按 `max(200 mV, 3%)` 校验（500 ms 稳定期、最长 12 秒）。
+- 检测忽略列表扫描中的 PD 状态，独立执行 `reset → entry pd → pd pdo`；PD 版本优先采用完整非扩展 `Get_Revision` 帧，其次为扫描明确声明的 PD 3.0/3.1/3.2，最后为结构化 PDO 下限（PPS ≥ 3.0、EPR ≥ 3.1、SPR AVS ≥ 3.2）。
 
-`TriggerSession::run_with_detection` 提供结构化快照回调，Tauri 通过原有 `km003c-trigger-progress` 事件的可选 `detection` 字段转发。最终 `TriggerOutcome` 也包含本轮报告。所有快照仍绑定连接 `generation` 和命令 `req_id`；前端新扫描清空旧结果，取消只请求停止，直到后端返回才解锁，防止过期事件和并发命令污染本轮状态。触发动作校验实际请求的确认回复，不使用前一条协议进入回复代替。
-
-PD 是列表结果的例外：扫描中的 PD 状态和 PDO 均不进入报告，其他扫描／补探完成后始终独立执行 `reset → entry pd → pd pdo`（取消或出错时停止）。在已进入 PD 且独立读到有效 PDO 后，直接发送只读 `Get_Revision` 查询，不以额外的 5 V 请求或串口就绪电压格式作为前置条件；若没有标准响应，则依序采用完整扫描明确报告的 PD 3.0/3.1/3.2、或 PDO 能力证明的最低版本（PPS、EPR、SPR AVS 分别证明至少 PD 3.0、3.1、3.2）。版本查询失败不会覆盖 PD 支持状态或独立 PDO，也不会阻断最终复位；查询前为复位预留预算。`ProtocolDetection.voltages` 保存本协议的电压档位／范围及类型；列表仅解析对应协议字段，单项验证只记录确认过的 5 V，PD 从独立读取的结构化 PDO 生成。仪表扫描版本与当前 PDM 设置下的 PDO 保持为不同证据；原始依据也按协议隔离，不将整段列表日志作为 PD 依据。检测不改写 `type / em / sink`。
-
-> 仪表自己的 `ah` / `wh` 累加器会一路转发到前端，但**界面上的「累计能量 / 累计容量」并不使用它们** —— 前端对采样点自行积分，这样才能实现「暂停期间不计入积分」和「仅统计选中范围」，并由 `一键重置` 统一归零。
->
-> 积分跳过「相邻点间隔过大」的空档（休眠 / NTP 前跳 / 漏采），阈值是 `max(2 s, 8 × 标称采样间隔)`，与 x 轴 `nextRecordingX` 放行点数用的是同一个倍数 —— 固定 2 秒会让 5 s / 10 s 档的每一步都被当成空档，能量恒为 `0.0000`。标称间隔的来源依次是：原生流的 `rate_ms`、导入 CSV 的 `SampTime(ms)`（旧文件从相对秒反推中位数）、`settings.sampleRate`；三者都拿不到时阈值退回 2 秒。
-
-能力项通过 `protocol` 区分 PD 与 UFCS，旧数据缺省为 PD；UFCS 保留 NUM 物理编号。固定 PDO 请求省略 volt；未编号的 EPR 文本表保留七个 SPR 位置。完整 SPR 表直接返回，可选重试失败保留首次有效结果。共享证据缓存只由原有 Bulk 采集线程写入，容量有界，带单调样本时间并排除重放；命令确认 500 ms 后以五个新鲜样本的中位数验证电压，容差 max(200 mV, 3%)，最多 12 秒。ACK 与实测结果分别表达。`pdm_open` 可携带冻结配置，结果与报告通过可选 context / reset_verification 返回固件、PDM 版本、当前已应用配置与复位证据。Raw 命令使旧协议缓存失效。仪表固件在唯一 Bulk 通道中读取，未知布局或失败不阻断连接。
-
-版本查询只把完整的非扩展 PD 3.x Source Revision 帧作为二进制版本依据，不在任意字节缓冲中搜索六字节窗口。与本次请求对应的 SOP Source 响应优先于 CDC 文本字段；进度日志保留 CDC 原始字节和相关 CC 帧，PD 依据注明选用的来源与版本，便于区分真实对端报告和解析异常。
+> 前端显示的累计能量（Wh）与容量（mAh）**不使用仪表自带累加器**，而是基于样本幅值积分（跳过 `max(2 s, 8 × 标称间隔)` 以上空档），以支持暂停排除、选区统计与一键归零。
 
 ## 前端
 
-PD 版本显示同时校验 `pd_version_inference` 和本项独立 PDO 读取得到的 `voltages`，采用能力所证明的较高下限，兼容缺少摘要或摘要偏低的结果。SPR AVS 与 EPR AVS 分别证明至少 PD 3.2 与 PD 3.1；不从混合文本日志或 PDM 工作模式推断版本。较低的 `Get_Revision` 响应保留为冲突依据，不能直接覆盖能力下限。
-
-协议控制进度事件保持原有 `generation / req_id / text / detection` 字段。Tauri 控制线程同时保存每条命令最多 256 KiB 的 UTF-8 过程，按完整行淘汰旧内容；最终 IPC 结果附带 `transcript` 和 `transcript_truncated`，前端以此补齐事件交付与结果返回之间的时序窗口。历史总容量仍为 64,000 字符，优先淘汰最旧的已完成命令，单条超限显式标记截断；历史节点按命令 ID 复用以保留展开与滚动状态。
-
-过程不按文本去重，相同回复在不同时间或命令中出现时分别记录。PDO 最终回复保留全部握手／状态行及两次尝试的顺序，仅能力表选优后展示一次。检测完整回复只修复固件拆分字段，不使用摘要去重处理状态输入，避免重复的末次状态被删除后改写最终结果；`normalize_scan_text` 仅用于展示摘要。
-
-`src/` 是前端源码，`tauri.conf.json` 的 `frontendDist` 指向构建生成的 `out/`。`npm run build` 合并样式并保留原生 JS 模块；`npm run build:dist` 进一步分别合并应用入口和 Worker。未配置 `devUrl`，改动源码后需重建前端并重新链接 Rust 二进制；按需浏览器预览由独立的 `tools/showcase/` 提供。`withGlobalTauri: true`，前端通过 `window.__TAURI__` 调用后端，类型在 `src/global.d.ts` 中声明，模块开启 `// @ts-check`。
-
-关于页图标在构建时从 `src-tauri/icons/128x128@2x.png` 复制到 `out/assets/app-icon.png`，与桌面图标使用同一份资源；开发展示服务器也直接读取该文件。
-
-关于页组件清单来自 `src/third-party-components.json`；共享许可阅读器在首次点击时按需读取本地 `src/legal-notices.json`，成功后在会话中缓存，失败可重试。生成脚本保守合并四个发布目标的锁定 normal 依赖与内置资源，并从根许可声明、依赖真实文件和预存补件收集全文；普通前端构建只校验并复制材料，不使用 Cargo 或网络。阅读器用文本呈现原文，支持文档切换、选择和复制；维护方法见 [运行组件清单](DEVELOPMENT.md#运行组件清单)。
-
-按职责分组：
+`src/` 为前端 ES Modules 源码，`frontendDist` 指向 `out/`（未配置 `devUrl`，改动后须重建前端并重连后端；`withGlobalTauri: true`，类型声明位于 `src/global.d.ts`，模块开启 `// @ts-check`）。关于页图标在构建时由 `src-tauri/icons/128x128@2x.png` 复制至 `out/assets/app-icon.png`；组件清单与许可阅读器按需读取 `src/third-party-components.json` 与 `src/legal-notices.json`。
 
 | 分组 | 模块 | 职责 |
 | --- | --- | --- |
-| 装配 | `app.js`、`shell.js`、`state.js` | 入口与事件绑定、视图注册表与 Tab 切换、共享状态与类型定义 |
-| 图表 | `chart.js`、`chart-buckets.js`、`chart-extrema.js`、`chart-pacing.js`、`chart-window.js`、`performance-diagnostics.js`、`theme.js` | uPlot 渲染调度、窗口极值桶与历史索引、自动刷新和绘制反馈、时间窗缩放、性能诊断与 Canvas 主题 |
-| 数据 | `data.js`、`measurement.js`、`csv.js`、`provenance.js` | 采集与统计、纯函数的时间解析与能量积分、CSV 导入导出、数据来源（仪表、选点规则、软件版本） |
-| 打点 | `markers.js`、`marker-ui.js` | 标记按数据集保存、标签清洗与行号规则（纯函数）；打点按钮、快捷键 M 与标记列表 |
-| PD | `pd-model.js`、`views/pd.js` | 纯函数的报文摘要与过滤、PD 工作区视图 |
-| 设备 | `device.js`、`temperature.js` | 连接管理、标题栏设备信息浮层（VID/PID/SN）、TCP 温度源 |
-| 设置 | `settings.js`、`views/settings-view.js`、`ui-scale.js`、`theme-boot.js` | 防抖持久化、单页设置目录与会话滚动位置、50–200% 缩放、默认跟随系统并同步首帧主题 |
-| 关于 | `views/about-view.js`、`third-party-components.json`、`legal-notices.json` | 应用版权、离线组件与许可阅读器、手动更新检查和 GitHub 跳转；检查结果仅保留于会话内 |
-| 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `windowcontrols` |
-| 样式 | `styles/` | `tokens`（三层设计令牌）→ `base` → `components` → `app` → `views` → `compact`（窄窗分级布局） |
-| 依赖 | `vendor/` | uPlot 与 Store 插件 shim，运行时无 CDN 请求 |
+| 装配与基础 | `app.js`、`shell.js`、`state.js`、`utils.js`、`dropdown.js`、`event-listeners.js`、`boot-timing.js` | 应用装配、Tab 路由、共享状态/类型与冷启动打点 |
+| 国际化 | `i18n.js`、`i18n-messages.js` | 四语词典、locale 解析与无刷新切换订阅 |
+| 图表 | `chart.js`、`chart-buckets.js`、`chart-extrema.js`、`chart-fill.js`、`chart-pacing.js`、`chart-window.js`、`performance-diagnostics.js`、`theme.js` | uPlot 调度、像素桶与 `OffscreenCanvas` 栅格化、极值索引、解析填充、帧压反馈、时间窗与诊断 |
+| 数据与文件 | `data.js`、`measurement.js`、`provenance.js`、`device-stream.js`、`recording-spool.js`、`recording-recovery.js`、`recording-limit.js`、`file-io.js`、`cooperative.js` | 采集、纯函数积分、来源记录、流控制、按秒恢复文件、容量上限、分块文件句柄与协作调度 |
+| 导出与报告 | `csv.js`、`csv-codec.js`、`csv-export.js`、`csv-export-worker.js`、`csv-import-core.js`、`csv-import-worker.js`、`export-options.js`、`export-session.js`、`export-ui.js`、`paired-export.js`、`range-stats*.js`、`video-export*.js`、`video-palette.js`、`video-projection.js`、`protocol-report*.js` | CSV/PD/联合导出、分块 Worker、统计 Worker、报告冻结与协作投影、协议图片报告 |
+| 打点与快捷键 | `markers.js`、`marker-ui.js`、`shortcuts-core.js`、`shortcuts.js`、`shortcut-hints.js` | 数据集标记管理（纯函数）与全局快捷键绑定 |
+| PD 与协议控制 | `pd-model.js`、`pd-export*.js`、`views/pd.js`、`km003c-model.js`、`views/trigger.js` | PD 摘要/过滤/导出、KM003C 模型与触发/检测视图 |
+| 设备与温度 | `device.js`、`temperature.js` | 设备连接生命周期、信息浮层与 TCP 温度状态 |
+| 设置、外观与关于 | `settings.js`、`views/settings-view.js`、`custom-background.js`、`ui-scale.js`、`theme-boot.js`、`views/about-view.js` | 持久化设置、自定义本地壁纸、50–200% 缩放、首帧主题、组件清单与更新检查 |
+| 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `display-stepper` `windowcontrols` |
+| 样式与依赖 | `styles/`、`vendor/` | `tokens` → `base` → `components` → `app` → `views` → `compact` → `glass`；内置 uPlot 与 Store shim |
 
-`measurement.js`、`pd-model.js`、`chart-window.js` 与 `markers.js` 是刻意抽出来的**纯函数模块** —— 不接触 DOM 也不接触 Tauri，因此可以在 Node 里直接单元测试。
+`measurement.js`、`pd-model.js`、`chart-window.js`、`markers.js`、`km003c-model.js` 等纯函数模块不接触 DOM 与 Tauri，可在 Node 直接单测。窗口均值同时保存有符号净电流与逐帧电流幅值（`CurrentMagnitude(A)`），使双向充放电曲线显示净方向的同时，功率与 mAh 积分始终按幅值一致计算。
 
-窗口平均同时保留有符号读数和逐帧幅值均值。前端的功率／Wh 使用功率幅值；有符号电流曲线保持净值，而 mAh 使用可选的 `currentMagnitudes` 列。`CurrentMagnitude(A)` 在需要时进入 CSV，恢复文件固定携带该列；范围统计与 Worker 复用同一幅值积分规则，缺省值回退至原有 `abs(current)`。
+### 协议控制前端投影
+
+- PD 版本展示同时校验 `pd_version_inference` 与独立读取的 `voltages`，取能力证明的较高下限，冲突时保留低 `Get_Revision` 响应并给出警告。
+- 后端控制线程每条命令保留最多 256 KiB UTF-8 过程（按完整行淘汰）并在最终结果返回 `transcript`，前端历史上限 64,000 字符按命令 ID 复用 DOM 节点且不按文本去重，保持重复握手与状态时序。
 
 ### 图表渲染
 
-列按 4096 点分块，完整常量块可复用该列最近一个相同常量块；尾块独占缓冲，历史修改和 CSV 收尾补值按块复制，固定长度快照保持有效。共享使用 `Object.is` 区分正负零并保留缺失值，CSV Worker 转移时按缓冲去重。`byteLength` 统计独立缓冲，记录容量上限仍使用保守估算。
+- **分块列存储**：`F64Col` 按 4096 点分块，完整常量块在列内共享最近相同常量块（`Object.is` 区分正负零并保留缺失值），尾块独占缓冲，历史修改按块写时复制。
+- **增量极值与协作切片**：`ExactExtremaIndex`（每页 256 节点保存 8 通道极值下标，24 KiB/页）复用已完成前缀，窗口缩短或回看无需全量扫描；已索引投影按每步 32 桶查询并先在 ~4 ms 内尝试完成，其余工作与冷建按 ~1.5 ms 协作分片。
+- **Canvas 2D / `OffscreenCanvas` 管线**：密集主图在具备 `OffscreenCanvas` 且主曲线为纯色不透明描边时，把各通道有序极值段按设备像素列光栅化至转置位图（`Uint32Array`），跟踪二维脏矩形边界实现局部 `putImageData` / `drawImage` 并只清空上一帧脏区；3 点仿射探针跳过大部分样本投影调用；开启曲线阴影时使用 `chart-fill.js` 的解析面积覆盖在同一次上传中合成填充。非 `OffscreenCanvas` 或半透明颜色回退标准 Canvas 2D；导航缩略图维持独立的 uPlot 描边与单通道功率极值索引。
+- **刷新调度与阴影语义**：绘图区分 `live`、`interaction`、`maintenance` 并按帧合并窗口（1 ms 采样时自动绘图在 50–100 ms 间调节）；曲线阴影完全由持久化设置 `chartFillEnabled` 与各通道透明度控制，不再受慢帧自动关闭。
 
-数据以列式数组存储（`F64Col`），不是 `{x, y}` 对象数组。密集窗口切换为增量 min/max 像素桶，但**完整数据仍在列里**，悬停时二分回查原始采样点，读到的是真实值。录制按 CSS 宽度调整预算，回看按实际画布像素宽度分桶；点数不超过对应分辨率时提交原始点及裁剪邻点。画布后备宽度与 CSS 宽度的比值决定实际 DPI，避免系统缩放改变而画布未更新时误算密度。主图 X 窗是会话态的时间窗口（`full` / `follow` / `frozen`），录制中右沿可贴着最新数据滑动。uPlot 侧设 `series auto: false`，避免它每帧全量扫描 min/max。
+### 后台任务复用
 
-`ExactExtremaIndex` 按已完成的数据前缀复用，较早或较短的窗口只查询索引，追加样本补建尾部；清空、替换及修改原始列使索引失效。窗口变化取消过期投影，但保留已完成的索引。已有索引的投影每步最多查询 32 个桶，先在约 4 ms 内尝试完成并提交；未完成的查询、原始扫描和历史冷建使用约 1.5 ms 的协作片，只有完整投影可以发布。
-
-绘图请求区分 `live`、`interaction` 和 `maintenance`，同帧合并到最新窗口。实际采样间隔为 1 ms 时，自动绘图在 50–100 ms 间调节；交互及维护请求可打断自动刷新计时器。健康的 100 Hz 绘图不按历史长度固定限帧。采样间隔读取记录尾部的逐点间隔，没有有效值时回退到当前设置，设备协议、CSV 和设置格式兼容性保持不变。
-
-录制与回看各自维护密度策略；回看固定以一个画布像素为桶预算单位，慢帧不降低其精细度。回看密集曲线按通道复用同一份有界 RGBA 位图绘制原有 min/max 像素列，仅提交该通道覆盖的行；关闭填充时按原叠加顺序合并所有通道，一次上传。保留不均匀时间戳间的连线、缺失值断点和通道叠加顺序。面积填充拆成相邻条带的独立四边形，保留原有边界、基线和填充面积，避免一个大轮廓含有大量折返边；原始点仍走 uPlot 路径。
-
-像素列位图和独立条带填充只作用于主图。导航缩略图保持 uPlot 描边，按自己的全历史点数和固定桶预算选择原始点或线性分桶路径；主图放大到原始点窗口不会改变导航投影。导航路径构建不读写主图的填充几何缓存，避免导入后描边被清空，以及导航重绘后主图填充消失。
-
-压力反馈只测量实际 JS 绘制及绘制后的帧延迟，不计准备或导入耗时。阴影由持久化设置 `chartFillEnabled` 和各通道透明度控制，不再随压力、暂停、拖动或窗口密度自动变化。连续交互每帧合并最新窗口，松手立即提交最终投影；密度调节和节流不影响采集、保存、统计或积分。测量与边界见[性能文档](PERFORMANCE.md#测量与硬件边界)。
-
-### 显示与后台任务复用
-
-帧诊断默认按实际绘图和可见性恢复短暂采样，完整诊断由显式调试入口启停。非监控页的全局状态最多每 250 ms 提交一次，回到监控立即补齐。导航保留独立的单通道功率索引，尺寸失效只重建显示投影，数据源失效才清空索引。主图和导航沿用原桶预算及有序极值规则。
-
-范围统计在单个可复用 Worker 上串行处理固定快照；任务和请求编号隔离迟到回复，八列、最多 4096 行的 scratch 缓冲在消费后归还。源列不转移，取消不发布部分结果，故障回退到原有协作折叠；退出在设备生产者结束后取消统计并释放 Worker。
-
-PD 的过滤、列宽和显示恢复合并成一次有效投影，隐藏后取消 DOM 提交，恢复时补洞；入库条目保持不可变，导出冻结引用数组。协议进度逐条入库，历史和检测 DOM 按帧更新变化项。恢复文件仅在持久化行数／表头版本变化时检查点同步；发射线程空队列阻塞等待，首条消息才启动原合批期限。
-
-### 报告协作准备
-
-图片与视频报告共用 `video-projection.js` 的增量内核，同步入口 `projectVideo` 和异步入口 `projectVideoAsync` 只在调度上不同。界面在首次让出线程前冻结列、标记值、来源、文案、选项和录制状态。统计与积分、分桶扫描、逐帧游标推进和标记排序按最多 4096 个样本或操作分步，复用约 1.5 ms 的协作预算；预算在步间检查，不是任务耗时的硬保证。取消时丢弃尚未发布的载荷，退出前等待准备取消，迟到的保存对话框结果也不能提交已取消的报告。原始样本、积分顺序和载荷字段保持不变。
+范围统计串行复用单个可复用 Worker（转移最多 4096 行 scratch 缓冲并归还，取消不发布部分结果）；PD 过滤与隐藏恢复合并投影并在页面不可见时取消 DOM 提交；图片/视频报告共用 `video-projection.js` 的 ~1.5 ms 协作分片内核，并在首次让出前冻结快照。
 
 ## 数据流
 
-1. 前端调 `enumerate_devices` 合并 WITRN HID 与 POWER-Z Bulk 设备列表。
-2. 前端调 `connect_device_by_path` 连接选中的接口；POWER-Z 先完成 Bulk 握手。
-3. 后端按设备家族启动采集源、IPC 发射线程；POWER-Z 的协议控制由独立 CDC 线程拥有串口。
-4. 选择 1 ms 时，采集源执行 HardwareID 读取、StreamingAuth、StartGraph(3)，每 20 ms 请求 AdcQueue；认证失败自动切回 10 ms。
-5. 合法数据经事件系统推送：测量帧走 `device-data-batch`，PD 报文走 `pd-data-batch`，前端更新读数卡、图表、统计与记录文件。
+1. 前端调用 `enumerate_devices` 合并 WITRN HID 与 POWER-Z Bulk 设备。
+2. `connect_device_by_path` 建立连接（POWER-Z 先完成 Bulk 握手并启动独立 CDC 线程）。
+3. 1 ms 采样时执行 HardwareID、StreamingAuth 与 StartGraph(3)，每 20 ms 轮询 AdcQueue（认证失败回退 10 ms）；轮询模式使用 `vbus_instant_v()` / `ibus_instant_a()`。
+4. 采集窗口聚合后经 `device-data-batch` 与 `pd-data-batch` 推送前端，驱动卡片、图表、统计与按秒刷新的临时恢复文件。
 
 ## HID 报文布局
 
-报告固定 **64 字节**，第 0 字节为报告类型；`0xFF` 是测量帧。数值均为**小端**。
+WITRN 报告固定 **64 字节**（小端编码），第 0 字节为报告类型（`0xFF` 为测量帧）：
 
 | 偏移 | 类型 | 字段 | 校验 |
 | --- | --- | --- | --- |
@@ -294,56 +197,43 @@ PD 的过滤、列宽和显示恢复合并成一次有效投影，隐藏后取�
 | 42–45 | `f32` | 温度 (°C) | 超出 −40 – 150 视为无温度 |
 | 46–49 | `f32` | 总线电压 (V) | 超出 0 – 60 拒帧 |
 | 50–53 | `f32` | 总线电流 (A) | 超出 −20 – 20 拒帧 |
-| 55 | `u8` | CC1 电压，值 ÷ 10 | — |
-| 56 | `u8` | CC2 电压，值 ÷ 10 | — |
+| 55 | `u8` | CC1 电压（值 ÷ 10） | — |
+| 56 | `u8` | CC2 电压（值 ÷ 10） | — |
 
-功率不在报文里，由 `voltage × current` 计算。
-
-几点重要说明：
-
-- **电流范围放宽到 ±20 A**（K2 标称 ±10 A）是有意的：略微过冲或量化误差不应该让整帧被丢掉。
-- **温度越界只按「无温度」处理，不丢整帧** —— 该偏移只在部分型号上验证过，误判温度不该连带丢掉可信的电压电流。
-- **目前未实现协议校验和验证。** 新增设备型号或固件前，应先用实机样本确认字节布局与量程。
+功率由 `voltage × current` 计算；电流范围放宽至 ±20 A 以容纳过冲，温度越界仅置空而不丢帧；协议暂未启用校验和验证，新增型号/固件须以实机样本确认布局。
 
 ## 测试
 
 ### 前端 —— `test/`
 
-Node 内置测试运行器（`node --test`）覆盖核心逻辑和跨文件契约，需要浏览器 API 的部分使用 mock。主要文件按领域组织如下，实际数量以 `npm test` 输出为准：
+`npm test`（`node --test`）覆盖纯逻辑、数据处理、协议/文件契约、安全 CSP、发布同步与核心回归（实际数量与运行细节见 `npm test` 输出；新增测试边界见 [测试与回归边界](DEVELOPMENT.md#测试与回归边界)）：
 
+```text
+bench-gate        chart-binding     chart-buckets    chart-columns     chart-cooperative
+chart-cursor      chart-extrema     chart-feedback   chart-fill        chart-pacing
+chart-window      clean             csv-codec        csv-import        device-stream
+export-workflows  frame-scheduler   i18n             ingest            km003c-model
+macos-menu        marker-ui         markers          measurement       pd-capture-file
+pd-model          provenance        range-stats      recording         recording-spool
+release           security-csp      settings-persistence shortcuts     tauri-config
+temp-disconnect   third-party-components version-sync video-export
 ```
-bench-gate  chart-binding  chart-buckets  chart-columns  chart-cooperative
-chart-cursor  chart-extrema  chart-feedback  chart-pacing  chart-window  csv-codec  csv-import
-device-stream  frame-scheduler  ingest  km003c-model  measurement
-pd-capture-file  pd-model  range-stats  recording  recording-spool
-security-csp  settings-persistence  tauri-config  temp-disconnect  version-sync
-```
-
-这些测试保护数据处理、CSV、采集、录制、协议解析、性能门禁、安全 CSP、发布版本同步和已确认的高影响缺陷。普通 UI 布局、样式、文案、控件数量和功能表面变化不单独建立回归测试；规则详见 [开发与构建：测试与回归边界](DEVELOPMENT.md#测试与回归边界)。
 
 ### Rust workspace
 
-四个 crate 的单元、集成和文档测试由 `cargo test --workspace` 运行；`cargo fmt --check --all`、workspace Clippy 以及协议 crate 的非默认 feature 组合由 CI 固定检查。真实 HID 设备和外部温度服务仍按需手动检查，不属于自动化回归链路。
+`cargo test --workspace`、`cargo fmt --check --all`、workspace Clippy 与协议 crate 非默认 feature 组合检查在 CI 固定执行（详见 [CI 门禁](DEVELOPMENT.md#ci-门禁)）：
 
 | 位置 | 覆盖 |
 | --- | --- |
 | `crates/usbpd-parser` | 协议字段、渲染及完整会话回放 |
 | `crates/witrn-hid` | 设备接口筛选与测量帧解析 |
-| `crates/km003c` | 协议、Bulk、CDC 与触发状态机 |
+| `crates/km003c` | 协议、Bulk、CDC 与触发检测状态机 |
 | `src-tauri` | 采集、合批、队列时基、文件句柄与恢复文件 |
 
-协议库的文档测试随 `cargo test --workspace` 一并运行；测试数量以该命令的实际输出为准。
-
-硬件相关路径（真实 HID 设备、TCP 温度服务）未接入自动化测试。
-
-CI 的 Rust 步骤都是工作区范围（`--all` / `--workspace`），四个包全部受 fmt / clippy / test 检查；另有一个 `crate-features` job 专门跑协议 crate 的非默认特性组合。详见 [开发与构建 · CI](DEVELOPMENT.md#ci-门禁)。
-
-开发预览由 `tools/showcase/server.mjs` 在本地 HTTP 响应中注入虚拟 Tauri 桥接，设备数据仍通过前端现有事件流摄入。模拟代码、场景与 PD 样例均位于 `src/` 外；正常构建只从 `src/` 生成 `out/`，因此安装包不包含开发工具。详见 [开发展示工具](DEVELOPMENT.md#开发展示工具)。
+真机 HID / Bulk 硬件及外部 TCP 温度服务未接入自动化 CI，需按需手动验证。浏览器预览由 `tools/showcase/server.mjs` 注入虚拟桥接，不进入 `src/` 或安装包（见 [开发展示工具](DEVELOPMENT.md#开发展示工具)）。
 
 ## 安全边界
 
-- **CSP** —— WebView 启用内容安全策略，`img-src` 只允许 `self`、`asset:` 与 `blob:`，`connect-src` 只允许 `self` 与 IPC。`script-src` / `style-src` 均为 `'self'`，不含 `'unsafe-inline'`（Tauri 编译期会给本地脚本补 hash、给样式补 nonce）。
-- **对话框能力最小化** —— `capabilities/default.json` 只授予 `dialog:allow-open` 与 `dialog:allow-save`。应用内确认框走 `<dialog>`，不授权原生 message/ask。
-- **文件系统能力最小化** —— 插件权限保留 `fs:default` 与 `fs:allow-write-text-file`，不授予主目录递归写权限。CSV / PD 文件通过 Rust 文件句柄接口分块读写；路径由原生对话框或受控缓存目录决定，前端不能提交任意路径打开文件，单块最多 4 MiB。
-- **窗口能力** —— 因为使用无边框自定义标题栏，需要一组 `core:window:allow-*` 权限（拖动、缩放、最大化等）。
-- **本地资源与网络边界** —— 前端运行依赖全部 vendor 到 `src/vendor/`，运行时不从 CDN 加载脚本或样式。网络请求由 Rust 后端执行：用户配置的外部温度服务使用出站 TCP；仅点击关于页的“检查更新”才请求固定仓库 `KHWLGH/laPower` 的 GitHub Releases。启动和进入设置不发起更新请求。GitHub 快捷按钮经后端验证目标后调用 opener 打开系统浏览器，不接受任意 URL。
+- **CSP**：`img-src` 仅允许 `self`、`asset:`、`blob:`；`connect-src` 仅允许 `self` 与 IPC；`script-src` / `style-src` 为 `'self'` 且无 `'unsafe-inline'`（Tauri 编译期补 script hash 与 style nonce）。
+- **最小对话与文件权限**：`capabilities/default.json` 仅授予 `dialog:allow-open` / `dialog:allow-save`、`fs:default` / `fs:allow-write-text-file` 与自定义无边框窗口所需 `core:window:allow-*`；应用确认框使用 `<dialog>`，CSV/PD/报告读写全部经过受控 Rust 句柄与一次性票据（路径不经过前端任意打开，单块上限 4 MiB）。
+- **本地资源与网络**：所有前端运行依赖内置于 `src/vendor/`，无外部 CDN；出站网络仅限后端发起的用户配置 TCP 温度连接及手动点击触发的 `KHWLGH/laPower` GitHub Releases 检查与仓库链接打开。

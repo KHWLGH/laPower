@@ -4,7 +4,7 @@
 
 # User guide
 
-This guide covers laPower **0.3.0**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
+This guide covers laPower **0.3.0**. Screenshots come from a simulated Windows setup; enabled temperature, signal channels, and sample rates do not reflect first-run defaults. Dark mode uses identical controls.
 
 - [Getting started](#getting-started)
 - [Interface overview](#interface-overview)
@@ -17,37 +17,37 @@ This guide covers laPower **0.3.0**. Screenshots were taken on Windows with simu
 
 ## Getting started
 
-1. Connect the meter's data port to your computer. Click the title-bar refresh icon, select the meter, then click `Connect`. On Linux, first configure the [udev rules](DEVELOPMENT.md#udev-rules-required).
-2. Open `Monitor` and choose a `Sample rate`; the default is `4 samples/s`. Connecting updates the large live readings, but does not start recording.
-3. Click `Start recording`. The chart and recorded point count grow, with recorded statistics and accumulated energy/capacity. Changing workspaces does not pause recording.
-4. To include temperature, enable it separately using [Temperature service](#temperature-service). Connecting the meter alone does not enable temperature acquisition.
-5. Click `Pause recording` to inspect data, or `Continue recording` to append to the same recording. Live readings can still change while paused; the chart and accumulated totals do not grow.
-6. Click `Export CSV` and select a destination. Use its arrow first to include temperature or change the export contents. Export files for long-term storage; recovery files do not replace exports.
+1. Connect the meter's data port to your computer, click the title-bar refresh icon, select the device, and click `Connect`. On Linux, configure [udev rules](DEVELOPMENT.md#udev-rules-required) first.
+2. Open `Monitor` and choose a `Sample rate` (default `4 samples/s`). Connecting updates the large live readings without starting a recording.
+3. Click `Start recording` (or press `P`). Charts, point count, min/avg/max statistics, and energy/capacity integration start immediately and continue across workspace switches.
+4. For temperature readings, connect a source separately under [Temperature service](#temperature-service).
+5. Click `Pause recording` to inspect data or `Continue recording` to append to the same session (live previews still update while paused without adding recorded points).
+6. Use `Export CSV` for long-term storage (temporary recovery files do not replace exports); open the arrow beside `Export CSV` to configure columns or run a joint CSV/PD export.
 
 ## Interface overview
 
 ### Title bar
 
-`Monitor`, `PD analysis` and `Protocol control` are always available on the left. On the right are device selection, refresh, information, connect/disconnect and the Settings gear. Windows and Linux use Windows-style controls on the right. macOS uses native controls on the left.
+On the left are `Monitor`, `PD analysis`, and `Protocol control`; on the right are device selection, refresh, device info, connect/disconnect, and the Settings gear. Windows/Linux use Windows-style window controls on the right; macOS uses native controls on the left.
 
 | Entry | Purpose |
 | --- | --- |
-| `Monitor` | Live readings, chart recording, markers and CSV import/export |
-| `PD analysis` | USB-PD capture, message inspection and PD JSON import/export |
-| `Protocol control` | POWER-Z PDM sessions, protocol detection and voltage requests. The tab stays visible; control actions require a supported KM003C/KM002C connection |
+| `Monitor` | Live readings, chart recording, markers, CSV import/export, and report export |
+| `PD analysis` | USB-PD capture, field-tree inspection, and PD JSON import/export |
+| `Protocol control` | POWER-Z PDM sessions, protocol detection, and voltage requests (always visible; actions enable on supported KM003C/KM002C connections) |
 | Settings gear | Appearance & language, Charts & recording, Keyboard shortcuts, Recovery & reset, and About |
 
-Narrow windows can show icons without text; hover to identify them. Reduce `UI scale` in Settings if controls feel crowded.
+Narrow windows collapse labels to icons (hover to read names); lower `UI scale` in Settings if controls feel crowded.
 
 ### Device connection and information
 
-The information-only icon sits between Refresh and Connect. It opens the model, `VID`, `PID`, `SN` and device description, prioritizing the connected meter, then the selected meter, or an empty state. It works before connecting and updates when the selection or device list changes.
+The info icon between Refresh and Connect opens model, `VID`, `PID`, `SN`, and device notes (preferring the connected device, otherwise the selected device, without requiring a connection).
 
-Device names may include a USB port, such as `WITRN K2 (USB 4-4)`, and an interface suffix when several HID interfaces remain for the same physical device. WITRN serial numbers can be shared; use ports to distinguish identical models. Disconnect before selecting another meter.
+Device entries append the USB topology port when available (e.g., `WITRN K2 (USB 4-4)`) and any extra interface suffix. Because WITRN serial numbers can be shared across production batches, use the USB port to distinguish identical units. Disconnect before switching to another meter.
 
 ### Status bar
 
-The bottom bar shows recording state, duration, sample rate, recorded points, remaining recording capacity/estimated time, and connection state. Click its recording state to start or pause Monitor recording; starting requires a connected meter. Duration and points describe the recording, not the time the meter has been connected.
+Centered along the bottom are the recording toggle button, duration, sample rate, recorded point count, and remaining capacity/estimated time. Once a meter is connected, clicking the left icon button (showing play while paused and pause while recording) toggles Monitor recording. Duration and point count reflect recorded data rather than connection uptime.
 
 ## Monitor workspace
 
@@ -59,18 +59,18 @@ The bottom bar shows recording state, duration, sample rate, recorded points, re
 
 | Control | Action and limits |
 | --- | --- |
-| `Start recording` / `Continue recording` / `Pause recording` | Start an empty recording, append to existing data, or pause. Disconnection preserves recorded data; reconnect to continue |
-| `Sample rate` | Set the live sample interval; see below |
-| Main `Export CSV` button | Export the entire recording using saved options; the chart selection does not limit the export |
-| Arrow beside `Export CSV` | Open CSV content options and joint export |
-| `Report video` | Turn the whole recording into a short video; available after two recorded samples. See [Report video export](#report-video-export) |
-| `Import CSV` | Load a file; confirm replacement if data exists or recording is active. Confirmation pauses the current recording. Import stays paused and replaces existing markers with markers from the file |
-| `Reset` | Disabled while recording. Once paused, confirm to clear the chart, statistics, totals and markers. Also clears PD messages when Follow recording is enabled |
-| `Display` | Choose visible channels, fill opacity and statistics scope |
-| `Auto pause` and its arrow | Main button enables/disables; arrow configures the trigger |
-| `Temperature service` and its arrow | Main button connects/disconnects; arrow configures source, IP and port |
+| `Start recording` / `Continue recording` / `Pause recording` | Start empty, append to existing data, or pause; existing data stays intact across disconnects |
+| `Sample rate` | Set the live sample interval (see table below) |
+| Main `Export CSV` button | Export the entire recording with saved options (unaffected by chart selection) |
+| Arrow beside `Export CSV` | Configure CSV content options and joint CSV/PD export |
+| `Export report` | Export the recording as a PNG image (16:9 or long) or short video; available after two recorded samples. See [Export report](#export-report) |
+| `Import CSV` | Load a CSV file; prompts to replace and pauses recording if data exists or recording is active, restoring markers from the file |
+| `Reset` | Available when paused; confirms before clearing the chart, statistics, totals, and markers (and PD messages when Follow recording is on) |
+| `Display` | Configure channel visibility, curve shading, fill opacity, colors, line width, Y offset, and statistics scope |
+| `Auto pause` and arrow | Main button enables/disables auto pause; arrow configures trigger rule, threshold, and hold duration |
+| `Temperature service` and arrow | Main button connects/disconnects the temperature source; arrow selects Device/External TCP, IP, and port |
 
-Main and arrow actions are independent. Opening configuration does not start recording, enable auto pause or connect temperature. Click outside to close a flyout; Escape closes it and returns focus to its trigger.
+Split-button main actions and arrows work independently; opening a flyout does not start recording or connect sources. Click outside or press Escape to close a flyout (Escape returns focus to the button).
 
 ### Sample rate
 
@@ -85,62 +85,53 @@ Main and arrow actions are independent. Opening configuration does not start rec
 | `0.2 samples/s (1 every 5s)` | 5000 ms |
 | `0.1 samples/s (1 every 10s)` | 10000 ms |
 
-If POWER-Z high-rate sampling is unavailable or authentication fails, the app falls back to `100 samples/s` and explains why. Slower rates combine multiple frames into a point and can average out short spikes; use a faster supported rate to inspect transients. Import uses the file's timestamps and intervals without changing the preferred live recording rate.
+If POWER-Z 1000 samples/s is unsupported or authentication fails, the app falls back to `100 samples/s` and explains why. Slower rates average all frames in each interval, smoothing short spikes; pick a higher rate to inspect transients. CSV import uses the file's timestamps without altering your preferred live rate.
 
 ### Readings and statistics
 
-The left panel contains voltage, current, power, temperature, energy, capacity and signal lines. Large values are live previews after connection. The `Min` / `Average` / `Max` statistics beneath the main readings use recorded samples. A changing live preview during a pause is not a new recorded point.
+The left panel shows voltage, current, power, temperature, energy, capacity, and signal lines. Beneath each main card, `Min` / `Average` / `Max` reflect recorded samples only (live preview changes during pauses are excluded).
 
-Energy (Wh) and capacity (mAh) are integrated from recorded data. Pauses are excluded; continuing retains totals, and importing recalculates them from the file. Long data gaps are also excluded. `Record current direction` enables the current direction arrow; power and accumulated totals use magnitudes.
-
-Drag the panel's right divider to resize it; narrow windows limit the resulting width. If readings do not fit vertically, scroll inside the panel. Its scrollbar is hidden without reserving blank space.
+Energy (Wh) and capacity (mAh) are integrated from samples, excluding pauses and excessively large time gaps, and are preserved on resume or recalculated on import. Enabling `Record current direction` displays a direction arrow while computing power and totals from magnitudes. Drag the panel divider to resize; overflow scrolls inside the panel without reserving scrollbar space.
 
 ### Display, chart and timeline
 
-- Open `Display` to choose curves. Voltage, current, power and temperature are selected by default; D+/D- and CC1/CC2 are off. Selecting the temperature curve does not connect its source.
-- The Curve shading switch at the top of Display defaults on and saves your choice. Turning it off preserves each main channel’s opacity; turning it back on restores those values. Recording, pausing, dragging and zooming never change shading automatically. This switch affects the monitor chart only.
-- Each main channel has a fill opacity from 0–100%, default 15%. Zero removes fill, not the curve. The legend identifies visible channels; it does not toggle them.
-- By default, Y axes start at zero (extending negative when negative values exist) with shared quantized grid steps and clean round ticks across all four axes. Use `Display` to customize channel colors, fill opacity, line width (auto or manual) and vertical offset (`Y offset`, `0` restores the default position) without modifying recorded samples or integrated totals.
-- Hover for enabled channels with valid values at that time. Scroll to zoom around the pointer, then drag the main plot horizontally to pan.
-- The wheel, main plot drag, and overview selection change the time range without refitting the vertical axes to the selection. During recording, new peaks affect the scale after the gesture ends.
-- Scroll over the main plot or the overview to zoom. If the plot is following the latest samples during recording, zoom changes the displayed duration without stopping follow. Zooming a historical window does not jump to live data.
-- Drag the bottom timeline's end handles to resize the range or its middle to pan. A range touching the newest point follows new data; a historical range stays in place.
-- `Selected range only` is off by default. Enabling it limits min/average/max and energy/capacity to the selected range; the large live readings still show current previews. It neither removes data nor limits exports. Missing values are excluded from statistics.
+- Open `Display` to toggle curves. Voltage, current, power, and temperature are enabled by default (enabling the temperature curve does not connect its source); D+/D− and CC1/CC2 default off.
+- `Curve shading` at the top defaults on and persists; disabling it preserves each main channel's fill opacity (0–100%, default 15%; `0` removes fill only) and restores them when re-enabled. Recording, pausing, and zooming never change shading automatically. The legend reflects currently visible channels.
+- Y axes start at zero (extending negative when needed) with quantized shared grid steps and aligned round ticks across all four axes. `Display` adjusts per-channel color, fill opacity, line width (auto/manual), and `Y offset` (`0` resets) as visual projections without modifying stored samples or integrals.
+- Hover the main plot for exact valid channel readings at that timestamp. Scroll over the main plot or timeline navigator to zoom horizontally (zooming a historical window stays in history; zooming while following live data preserves live follow), drag the main plot horizontally to pan when zoomed in, and drag the timeline handles to resize/pan the selected window. Vertical axes do not refit while scrolling/dragging; new peaks apply once the gesture ends.
+- `Selected range only` (off by default) restricts min/avg/max and energy/capacity statistics to the timeline window without removing data or limiting exports.
 
-Rendering does not run at the same rate as acquisition. See [Performance notes](PERFORMANCE.md) and [Architecture](ARCHITECTURE.md) for rendering and integration details.
+See [Performance benchmarks and limits](PERFORMANCE.md) and [Architecture](ARCHITECTURE.md) for rendering and integration internals.
 
 ### Markers
 
-1. Click `Mark` above the chart or press the default `M` shortcut, enter a label and confirm. Defaults look like `Mark 1`.
-2. While recording, the button marks the next arriving point; while paused, it marks the last point. Pressing `M` over the main chart marks the nearest point under the pointer. The position is chosen before the label dialog opens.
-3. Its arrow opens the marker list, available once markers exist. Click a label to rename it; an empty name or the delete icon removes it.
+1. Click `Mark` above the chart or press `M` to enter a label (e.g. `Mark 1`). Clicking while recording marks the next incoming sample; while paused, the last sample; pressing `M` over the plot marks the nearest point under the pointer.
+2. The arrow beside `Mark` opens the marker list once markers exist; click a label to rename it or clear/delete it.
 
-Enable `Mark immediately` under `Settings → Charts & recording` to skip the label dialog. Labels have a 40-character limit and CSV separators are cleaned. The CSV `Marker` column stores markers, and importing it restores them; `Reset` clears them.
+Enable `Mark immediately` under `Settings → Charts & recording` to skip the prompt. Labels are capped at 40 characters (CSV separators cleaned), stored in the CSV `Marker` column, restored on import, and cleared on `Reset`.
 
 ### Auto pause
 
-1. Open the arrow beside `Auto pause` and select `Voltage <`, `Current <` or `Power <`.
-2. Enter `Threshold` and `Hold duration` in seconds, then close the flyout.
-3. Click the main `Auto pause` button to enable it, indicated by highlighting, then start or continue recording.
+1. Open the `Auto pause` arrow, choose `Voltage <`, `Current <`, or `Power <`, enter `Threshold` and `Hold duration` (seconds), and close the flyout.
+2. Click the main `Auto pause` button (highlighted when active), then start or continue recording.
 
-Recording pauses when the measurement stays at or below the threshold for the hold duration. Although the condition label shows `<`, equality also satisfies the current check. A duration of 0 triggers on the first qualifying recorded sample. Defaults are disabled, `None`, threshold 0 and duration 0. Changing configuration does not enable the feature; `None` never triggers it.
+Recording pauses when readings stay at or below the threshold (equality is included) for the hold duration; a `0` duration triggers on the first matching sample. Defaults are disabled, `None`, and `0`; changing fields alone does not enable it.
 
 ### Temperature service
 
-Temperature acquisition, curve visibility and the CSV temperature column are separate controls.
+Temperature acquisition, curve visibility, and the CSV temperature column are independent controls:
 
-1. Open the arrow beside `Temperature service` and choose a `Source`.
-2. For meter temperature choose `Device` and connect the meter first; no external program is needed. For TCP choose `External` and enter `IP` and `Port`, default `127.0.0.1:1573`. First-run defaults are External and disconnected.
-3. Close the flyout and click the main `Temperature service` button to connect. Valid data appears in the temperature card and is stored with Monitor recording.
-4. Select temperature in `Display` to show its curve, and separately enable `Include temperature` to include it in CSV.
+1. Open the `Temperature service` arrow and pick `Source`: `Device` reads the meter sensor (connect the meter first, no external tool needed); `External` connects to a TCP server (default `127.0.0.1:1573`).
+2. Close the flyout and click the main `Temperature service` button to connect; valid readings populate the card and record with Monitor.
+3. Toggle temperature visibility in `Display` and `Include temperature` in CSV options separately as needed.
 
-Source, IP and port cannot change while connected; disconnect with the main button first. Restarting requires manual reconnection. Meter temperature ends with the meter connection; external TCP is independent. Historical data stays after disconnection, and missing values are blank. The TCP server sends one Celsius number per line; see [External temperature service](DEVELOPMENT.md#external-temperature-service) for the protocol and examples.
+Source, IP, and port lock while connected (disconnect first); restart requires manual reconnection. `Device` temperature resets when the meter disconnects, whereas `External` TCP runs independently; historical readings remain after disconnection with missing values left blank. See [External temperature service](DEVELOPMENT.md#external-temperature-service) for the protocol and Python examples.
 
 ### CSV options and joint export
 
-The three CSV options are saved: `Include temperature` is off by default; `Include device information` and `Include markers` are on. Selected temperature/marker columns remain with blank cells when data is missing. Unknown device provenance is not filled from the currently connected meter.
+Three CSV flags persist: `Include temperature` (default off), `Include device information` (default on), and `Include markers` (default on). Selected empty columns remain blank; unknown device provenance is never backfilled from the current meter.
 
-`Export CSV and PD data…` in the same flyout requires Monitor and PD data. One destination selection creates `name.csv` and `name.pd.json`, with overwrite confirmation. Both exports use all data regardless of chart selection or PD filters. Their snapshots are fixed after destination selection; later samples are not appended to that export. When Follow recording is off, time ranges can differ and are not cropped or aligned automatically.
+`Export CSV and PD data…` requires data in both Monitor and PD. Selecting one destination freezes both snapshots and writes `name.csv` and `name.pd.json` with all data (unaffected by chart selection or PD filters; confirms before overwriting). If `Follow recording` is off, time spans can differ and are not auto-trimmed.
 
 ### Export report
 
@@ -156,22 +147,16 @@ The three CSV options are saved: `Include temperature` is off by default; `Inclu
 
 [Dark theme](../screenshots/en/dark-report-video.png)
 
-Use the document-chart icon beside CSV export to open **Export report**. Choose a lossless PNG image or a short video of the whole frozen recording. The first use defaults to image; subsequent uses remember the selected type, resolution (720p–4K), theme and content.
+Click **Export report** in the Monitor command bar to save the entire frozen recording as a lossless PNG image or short video (persisting type, 720p–4K resolution, theme, and content choices). **Report content** independently toggles voltage, current, power, temperature, **Markers**, and **Marker details** (markers on the chart vs. detail rows below).
 
-**Report content** provides matching checkboxes for voltage, current, power, temperature, **Markers** and **Marker details**. The two marker controls are independent: markers alone appear only on the chart; details add names, times and readings below it. Details alone and neither are also supported for both images and videos.
+- **PNG image report**: static layout displaying full curves, duration, point count, time-weighted average voltage/power, peak current, maximum temperature, and capacity/energy (missing values explicit). **16:9** retains up to the first 8 markers (warning if more exist); **Long image** retains all markers and expands height (reporting an explicit error if dimensions exceed safe limits rather than silently dropping markers).
+- **Video report**: supports MP4/MOV, H.264/H.265, 24/30/60 fps, and 1–60 s duration, fast-forwarding the whole recording while updating the five reading cards along the timeline (card upper-right summaries cover the full recording; up to 8 markers).
 
-PNG reports use a static layout with full curves, total duration, sample count, time-weighted average voltage and power, peak current, maximum temperature, capacity and energy. Missing values remain explicit. There is no playback cursor or progress bar, and no video encoder is needed.
+Clicking **Generate image** or **Generate video** freezes data and runs in a single background slot (closing the dialog keeps encoding alive and reopening reattaches progress); only successful completion writes the final file, while cancellation or failure removes staging files.
 
-- **16:9** keeps a fixed landscape canvas and includes the first eight markers in time order. The dialog warns when more exist.
-- **Long image** retains every marker and extends the details area as needed. If the image exceeds safe dimensions, export fails explicitly; choose a lower resolution or hide details to retry. Markers are never silently dropped in this layout.
+#### Video quality and encoding mode
 
-Video retains MP4/MOV, H.264/H.265, 24/30/60 fps, 1–60 seconds, quality and encoding mode. It fast-forwards the recording, ends at the final sample, and includes up to eight markers. Invalid duration disables video generation; hidden video settings do not block PNG export.
-
-**Generate image** or **Generate video** freezes the data, then opens the native save dialog. Both types share one background task slot. Closing the dialog keeps the task running; reopening restores its progress and actual options. **Cancel export** cancels the task. Completion, cancellation and failure produce notifications. Only a successful export replaces the destination; cancellation and failure preserve existing files and remove staging files.
-
-### Video quality and encoding mode
-
-The export dialog adds `Encoding mode` and `Quality`, defaulting to `Automatic` and `High`. Both are saved with the other video options. Changing either probes the selected combination again; generation stays disabled until the probe finishes. The dialog shows the target bitrate; actual file size varies with content.
+The export dialog provides `Encoding mode` (default `Automatic`) and `Quality` (default `High`). Changing either re-probes host support and shows the target bitrate:
 
 | Quality | H.264 (1080p / 30 fps) | H.265 (1080p / 30 fps) |
 | --- | --- | --- |
@@ -179,12 +164,7 @@ The export dialog adds `Encoding mode` and `Quality`, defaulting to `Automatic` 
 | High (default) | 20 Mbps | 13 Mbps |
 | Ultra | 30 Mbps | 19.5 Mbps |
 
-Bitrate scales linearly with pixel count and frame rate, with a 4 Mbps floor for H.264, a 3 Mbps floor for H.265, and a 240 Mbps ceiling. Higher quality usually needs more space and encoding time.
-
-`Automatic` tries hardware first and reports the reason if it falls back to software. `Hardware encoding` requires a verified hardware encoder: Windows may retry with CPU-rendered frames submitted to hardware if the GPU texture path fails; export fails if neither works. `Software encoding` goes directly to a software encoder without a hardware fallback warning. macOS creates and verifies a VideoToolbox session for the selected mode, with bundled H.264 as a software fallback; software HEVC is available only when the system probe succeeds. Linux supports H.264 in automatic or software mode only. Unavailable combinations keep your choices and explain the failure. No ffmpeg installation is needed.
-
-The five video reading cards use separate name, summary and main-reading areas. Their upper-right summaries identify voltage `Range`, current `Maximum`, power `Average`, temperature `Maximum`, and capacity's `Energy`. Missing readings keep these labels. Summaries describe the entire frozen recording; main readings follow the video timeline.
-
+Bitrates scale linearly with pixel count and frame rate (4 Mbps H.264 / 3 Mbps H.265 floor; 240 Mbps ceiling). `Automatic` prefers hardware encoding and falls back to software with a notice; `Hardware encoding` requires a real hardware encoder (Windows tries GPU textures, then CPU frames submitted to hardware); `Software encoding` skips hardware probing (Linux supports automatic/software H.264 only; macOS software HEVC requires host support). No ffmpeg installation is needed.
 
 ## PD analysis workspace
 
@@ -194,29 +174,27 @@ The five video reading cards use separate name, summary and main-reading areas. 
 
 ### Choose the recording mode
 
-`Follow recording` is on by default. The recording button behaves differently in each mode:
+`Follow recording` is enabled by default, changing the recording button's scope:
 
 | Mode | Recording button and capture | Clearing |
 | --- | --- | --- |
-| Follow recording on | `Start recording` / `Pause recording` controls Monitor and PD. New PD messages are not retained while Monitor is paused. The paused PD button says `Start recording` even when Monitor already has data | Clearing either view clears both Monitor and PD, as stated in the confirmation |
-| Follow recording off | `Pause recording` / `Continue recording` pauses/resumes list refresh only. A connected device continues buffering messages, which appear on resume; Monitor recording is unaffected | Each view clears independently |
+| Follow recording on | `Start recording` / `Pause recording` controls both Monitor and PD; PD ignores new frames while Monitor is paused (shows `Start recording` when paused even if Monitor has data) | Clearing either clears both Monitor and PD |
+| Follow recording off | `Pause recording` / `Continue recording` only pauses/resumes list display while connected buffering continues without affecting Monitor | Each view clears independently |
 
-To pause a linked capture, use its recording button. To inspect a stationary list while continuing to buffer, turn off Follow recording and pause the list. Switching workspaces does not itself pause capture.
+To pause list updates while buffering in the background, disable `Follow recording` before pausing the list. Switching workspaces does not pause capture.
 
 ### List and details
 
 | Control | Purpose |
 | --- | --- |
-| `Import` / `Export` | Load/save PD JSON. Export includes the whole capture regardless of filters. Import replaces the current PD capture, with confirmation when data exists |
-| `Clear` | Confirm to clear; observe the linkage above |
-| Message-type filter | Filter by message type name |
-| `Hide GoodCRC` | Hide link acknowledgments; on by default. Uncheck to see GoodCRC |
-| `Auto scroll` | Follow new messages to the bottom; on by default |
-| Layout icon | Save stacked/side-by-side preference; side-by-side applies only at a window width of at least 1400px. Drag the list/detail divider to adjust their proportions |
+| `Import` / `Export` | Load/save PD capture JSON (exports full capture regardless of filters; confirms before replacing) |
+| `Clear` | Clear after confirmation (follows link behavior above) |
+| Message-type filter | Filter visible rows by message type name |
+| `Hide GoodCRC` | Hide link-layer acknowledgements (on by default) |
+| `Auto scroll` | Scroll to new messages automatically (on by default) |
+| Layout icon | Persist stacked/side-by-side layout (side-by-side requires ≥ 1400 px width); drag divider to resize |
 
-Columns are `#`, `Elapsed`, `SOP`, `Msg`, `ID`, `Direction`, `Obj`, `Rev`, `V/I` and `Summary`. `V/I` is a nearby meter reading, not a guaranteed synchronized measurement. Select a row to see raw data, header fields and the applicable PDO/RDO or other decoded tables. Messages without data objects do not have PDO tables. Filters and hiding affect the view only.
-
-Start recording before reconnecting the charger/tested connection to capture a new handshake. Merely opening PD analysis does not repeat a negotiation that already finished.
+Columns show `#`, `Elapsed`, `SOP`, `Msg`, `ID`, `Direction`, `Obj`, `Rev`, `V/I` (nearby meter sample), and `Summary`. Select any row to inspect raw bytes, header fields, and decoded PDO/RDO trees. To capture a new charger handshake, start recording before reconnecting the tested link.
 
 ## POWER-Z protocol control
 
@@ -224,22 +202,21 @@ Start recording before reconnecting the charger/tested connection to capture a n
 
 [View dark mode](../screenshots/en/dark-trigger.png)
 
-This tab is always visible. Without a connection, or with WITRN, it displays guidance and disables control actions. Connect a POWER-Z KM003C/KM002C supporting protocol control to enable them.
-
-The workspace opens on the `Trigger` tab by default. The top `PD type`, `Cable emulation` and `Sink` settings, along with live V/I/P readings, are shared by `Detection` and `Trigger`; scan results and trigger requests live on their respective tabs.
+Always visible in the title bar, this tab enables controls only when a supported POWER-Z KM003C/KM002C is connected. It opens on `Trigger`; top `PD type`, `Cable emulation`, `Sink` settings, and live V/I/P readings (shared with Monitor) apply to both `Detection` and `Trigger`.
 
 ### Read PDOs and request a voltage
 
-1. Choose the PD type, cable emulation and Sink parameters at the top, then click `Open` to open PDM.
-2. Click `Read PDOs` for charger capabilities, or `Auto detect` / `Full scan` to detect supported protocols.
-3. Click a PDO row to fill the request. Check the position, voltage in mV and current in mA for the selected protocol, then click `Trigger`. Selecting a PDO row alone does not send the request.
-4. Inspect the response log. Click `Apply` after changing PDM parameters. `Reset` exits the current protocol and restores default 5 V; `Close` closes the PDM session.
+1. Choose `PD type`, `Cable emulation`, and `Sink`, then click `Open` to start PDM (top status separates UI selection from confirmed device settings and displays detected firmware versions; reopen PDM after disconnection or stream rebuilds).
+2. Click `Read PDOs` to fetch charger capabilities, or run `Auto detect` / `Full scan`.
+3. Click a PDO row to populate the request form, verify position, voltage (mV), and current (mA), and click `Trigger` (selecting a row does not transmit):
+   - Known fixed PD PDOs keep voltage read-only and omit `volt`; UFCS preserves `NUM` positions; PPS/AVS and unknown positions allow manual entry.
+4. Check the log for confirmation; use `Apply` after editing PDM parameters, `Reset` to return to 5 V, and `Close` to end PDM.
 
-Other commands are disabled while a command runs; `Cancel` and an activity indicator appear in the command bar. Wait for the backend to finish before sending another command. Command history stays docked on the right side of the workspace, with an independently scrolling list. Entries are grouped by command and include time, parameters, duration, status, progress and reply. Filter by command, status or text; copy one command or all history, export text, or fill a form from an earlier command. Copying and filling never replay a command. History is kept for the current session only and retains at most the newest 64 KB. The advanced area has PD/UFCS and custom commands. Custom commands can run without PDM; other protocol operations require it. Reopen PDM after disconnection or rebuilding the meter acquisition connection. Live readings share the Monitor device connection.
+**Command history and advanced commands:**
 
-Progress retains each serial command, reply, recovery and retry step, and is reconciled with the final transcript when the command ends. Content received before cancellation or an error is retained too. Expanded history entries stay expanded across progress updates, completion and workspace changes. At the history limit, the oldest completed commands are removed first; an oversized entry loses its oldest whole lines, with a truncation notice in the view, copied text and export.
-
-Repeated acknowledgements, ready messages and connection states are retained in arrival order, including voltage changes, disconnection and reconnection. PDO retries retain status information from both attempts while displaying one selected capability table. Detection determines the final result from the ordered states in the complete reply.
+- While a command runs, other commands lock and `Cancel` appears; only one command runs at a time.
+- The docked right-hand history groups entries by command with timestamps, parameters, duration, status, live progress, and replies (filterable, copyable, exportable, and refillable without replaying). History is session-only up to 64 KB (evicting oldest completed entries first and trimming oversized lines explicitly), preserving repeated states in arrival order.
+- Advanced commands provide PD/UFCS and custom commands (custom commands can run without PDM and re-verify protocol state afterward; `pd data` accepts hex bytes with standard separators and rejects invalid characters).
 
 ### Protocol detection
 
@@ -251,27 +228,12 @@ Repeated acknowledgements, ready messages and connection states are retained in 
 
 [Dark theme](../screenshots/en/dark-protocol-report.png)
 
-After detection ends, select **Export image report** on the Detection tab to save a 16:9 PNG at 1920×1080, 2560×1440 or 3840×2160 in the light or dark theme. The first export uses the current theme; subsequent exports remember their own options, independently of monitoring reports. The image includes the meter, detection time and completion status, every protocol result and voltage, PD version, and the complete independently read PDO voltage/current/power parameters, preserving each SPR AVS band. `*` marks reference power calculated as maximum voltage × current, not measured or guaranteed sustained output; reported PDP/power is shown directly. `†` marks AVS reference current at maximum voltage; missing values show `—`. Partial, cancelled and timed-out detections remain exportable with explicit warnings, including unconfirmed reset. Opening the dialog freezes this detection, so later scans, PDO reads or disconnection cannot change the report. Failed saves do not replace existing files with incomplete images.
+> **Warning:** Detection switches protocols and runs 5 V load checks—disconnect any downstream load first.
 
-PD ignores status and embedded PDOs from `entry list` / `entry list+`. After all other scans and probes, detection resets, enters PD and runs `pd pdo`; support is determined by valid PDOs from that read, even if the list reported PD as unsupported. Cancellation stops this final check too.
-
-Detection progress and the final status appear beside the heading. Disconnect the downstream load first; hover over the detection buttons for scan and reset details. The matrix groups PD, standard and vendor protocols, with each name and status on the same line followed by reported voltage steps or ranges. PD spans a full row for fixed voltages and PPS/AVS ranges. An individual 5 V check only marks 5 V as verified, without inferring higher voltages. Supported protocols with no voltage data show “Voltage not reported”. Click “Evidence” at the bottom of a card for that protocol's source, reason and original reply; PD shows only its independent PDO read, never the entire scan log. “Use for trigger” sits beside the evidence control and only fills the form.
-
-`Auto detect` runs the standard list scan and individually probes standard protocols without conclusive results. `Full scan` always sends `entry list+` first, including on PDM 1.0, to check VOOC/SVOOC and MTK PE. Without a completion marker it falls back to the standard scan, then probes missing results. Explicit negative results are not retried. Older PDM firmware that provides no extended results leaves those checks marked “Not checked”. Budgets including fallback and probes are about 4 and 7 minutes, plus a small allowance for opening/recovering CDC.
-
-Results distinguish supported, not supported, not checked and unconfirmed, with expandable device replies and scan/probe provenance. PD version uses a complete `Get_Revision` response after PD entry and independent discovery of valid PDOs when available, showing both the PD revision and specification version. If that response is unavailable, the result falls back to an explicit PD 3.0/3.1/3.2 label from a completed meter scan, then to the lowest version proven by the PDOs: a PPS APDO indicates at least PD 3.0, an EPR PDO at least PD 3.1, and an SPR AVS PDO at least PD 3.2. Ordinary fixed PDOs alone do not distinguish a version. Meter-scan version and the independent PDO read under the current cable-emulation settings remain separate evidence. The version query uses the current PD session without an extra 5 V request or a change to PDM `type / em / sink`. A failed version query does not change PD support, PDOs or the overall scan result. VOOC/SVOOC and MTK PE 1.0/2.0 are separate. Empty MTK fields remain unconfirmed, without inferring support from the other version; QC4/QC5 or brand certification is not inferred from PD/PPS wattage. A new scan clears the previous results and PDOs. Cancellation or interruption retains this run's observations with an incomplete status.
-
-The displayed version is checked against the independently read, structured PDOs for that PD result. A lower or missing summary cannot override the PD 3.2 minimum proven by SPR AVS. A lower `Get_Revision` response is retained with an evidence-conflict notice.
-
-Detection changes the negotiated protocol but does not rewrite confirmed PDM settings; QC/FCP/AFC/SFCP probes include 5 V verification. Disconnect the downstream load first. Completion and cancellation immediately attempt reset and measured 5 V verification within 15 seconds. Click `Use for trigger` on a supported row with an implemented trigger to switch to the `Trigger` tab and fill the form. It does not run the command. Read/select PDOs and check the parameters before triggering. A rejected, empty or unconfirmed action reply does not count as success; entry acknowledgement alone cannot confirm a trigger, and acknowledgement is not a measurement of the requested voltage.
-
-Opening PDM applies a frozen copy of the selected settings. Reopening or recovering CDC replays the last successful configuration. The status distinguishes selected settings from confirmed device settings and shows a recognized meter firmware version; the PDM version is separate in scan diagnostics. Failed applications or raw configuration changes never promote old selections to confirmed settings.
-
-A known fixed PD PDO makes voltage read-only and omits `volt` from the request. UFCS capabilities retain their original `NUM` positions and fill a UFCS request. PPS/AVS and unknown positions keep manual input; no new protocol voltage or step limits are imposed.
-
-5 V probes use fresh samples from the existing acquisition connection. After at least 500 ms from acknowledgement, five successive samples are checked by median, with tolerance max(200 mV, 3% of target). Transitional readings keep waiting for fresh samples, up to 12 seconds and within the scan budget. Missing samples or a voltage mismatch remain unconfirmed, never “5 V verified”. Cancellation keeps controls busy until reset handling ends.
-
-Advanced `pd data` accepts contiguous hex, `0x` byte tokens and whitespace/comma/colon/hyphen separators. Invalid characters are rejected rather than discarded. Standard framing checks SOP, the two-byte header and object length without CRC. Unverified extended formats show a notice and preserve the supplied bytes. Raw commands invalidate cached protocol state before the next typed request.
+- **Scan modes and result matrix**: `Auto detect` (~4 min budget) runs standard scanning plus individual probes for inconclusive standard protocols; `Full scan` (~7 min budget) tries `entry list+` first for VOOC/SVOOC and MTK PE (falling back to standard scan if needed; older PDM marks unsupported extensions “Not checked”). Results separate Supported, Not supported, Not checked, and Unconfirmed across PD, Standard, and Vendor groups, keeping VOOC/SVOOC and MTK PE 1.0/2.0 distinct without cross-inference or wattage guesses. Expand “Evidence” for raw replies; `Use for trigger` only switches to `Trigger` and fills the form.
+- **Independent PD discovery and version rules**: Detection ignores scan-embedded PD status and runs `reset → entry pd → pd pdo` after all other probes (unless cancelled). PD revision prefers a complete `Get_Revision` response, then an explicit meter-scan PD 3.0/3.1/3.2 label, then the minimum implied by PDOs (PPS ≥ 3.0, EPR ≥ 3.1, SPR AVS ≥ 3.2; ordinary fixed PDOs cannot distinguish versions). A lower `Get_Revision` cannot override SPR AVS's PD 3.2 floor and triggers an explicit conflict notice.
+- **5 V verification and reset**: Single-protocol 5 V probes take the median of five fresh samples ≥ 500 ms after acknowledgement within `max(200 mV, 3%)` (up to 12 s). Completion and cancellation immediately attempt reset and 5 V verification within 15 s, warning if recovery is unconfirmed.
+- **Export image report**: Click **Export image report** to save a 16:9 PNG (1920×1080 / 2560×1440 / 3840×2160; light/dark theme saved independently from monitoring reports). Opening the dialog freezes the scan snapshot, showing all protocol states, PD version, and complete PDOs with SPR AVS bands (`*` marks Vmax × I reference power, `†` marks AVS current at max voltage, `—` marks missing values; partial/cancelled runs remain exportable with warnings).
 
 ## Settings
 
@@ -279,9 +241,7 @@ Advanced `pd data` accepts contiguous hex, `0x` byte tokens and whitespace/comma
 
 [View dark mode](../screenshots/en/dark-settings.png)
 
-Open the title-bar gear; on macOS use ⌘, or the application's Settings… menu. This is one scrolling page in the order `Appearance & language`, `Charts & recording`, `Keyboard shortcuts`, `Recovery & reset`, `About`. About is at the bottom.
-
-The directory stays on the left in wide windows and moves to a horizontal top bar below 980px. Click to jump, or use Tab and Enter; scrolling updates the highlight. Reduced-motion settings disable smooth jumps. Leaving and returning restores your position for this session. Settings normally save when changed, without a separate Save button.
+Open via the title-bar gear (`⌘,` or Settings… on macOS). Wide windows pin navigation to the left; windows under 980 px place it horizontally on top. Changes save immediately without a Save button.
 
 ### Appearance & language
 
@@ -289,21 +249,21 @@ The directory stays on the left in wide windows and moves to a horizontal top ba
 | --- | --- |
 | `Theme` | `Follow system` (default), `Light`, `Dark` |
 | `Language` | `Follow system` (default), 简体中文, 繁體中文, English, 日本語 |
-| `Custom background` | Choose a local PNG, JPG, or WebP image (up to 25 MB) to persist as the backdrop, or click `Clear` to reset; no built-in default wallpaper |
-| `Background image transparency` | 0–100%, default 0%; adjusts transparency of the custom background image |
-| `UI scale` | 50–200%, default 100%; applied when the slider is released. Reduce it if the window is crowded |
+| `Custom background` | Select a local PNG, JPG, or WebP image (≤ 25 MB) to persist as backdrop, or `Clear` to reset (no bundled wallpaper) |
+| `Background image transparency` | 0–100%, default 0% |
+| `UI scale` | 50–200%, default 100%, applied on release; lower if controls feel crowded |
 
-Language changes apply immediately and retain recording/data. Unsupported system languages fall back to English. The detected language shown beside Follow system does not change with manual UI language selection. See [Development](DEVELOPMENT.md#language-selection) for detection and Linux launch examples.
+Language switches take effect immediately without losing recordings or connections; see [Language selection](DEVELOPMENT.md#language-selection) for locale rules and Linux launch examples.
 
 ### Charts & recording
 
 | Setting | Meaning and default |
 | --- | --- |
-| `Chart headroom` | `Automatic` uses peaks of enabled channels across the full recording; `Custom` allows 0–100% |
-| `Adjust line thickness on zoom` | On by default; automatically scales curve stroke width with chart zoom level |
-| `Record current direction` | Off by default. New recordings/imports preserve the current sign when enabled. Existing data is unchanged; export keeps recorded values |
-| `Mark immediately` | Off by default. Enable to add markers without first entering a label |
-| `Recording limit` | 64–8192 MB, default 512 MB. The budget covers all data in the current chart, including existing/imported data. Reaching it pauses recording; it does not automatically create multiple files |
+| `Chart headroom` | `Automatic` scales to peaks across visible channels; `Custom` accepts 0–100% |
+| `Adjust line thickness on zoom` | On by default; automatically scales line width with zoom level |
+| `Record current direction` | Off by default; preserves signed current for new recordings/imports while integrating magnitudes |
+| `Mark immediately` | Off by default; skips the label prompt when adding markers |
+| `Recording limit` | 64–8192 MB, default 512 MB; covers all current chart data (including existing/imported) and pauses when reached |
 
 ### Keyboard shortcuts
 
@@ -314,33 +274,25 @@ Language changes apply immediately and retain recording/data. Unsupported system
 | Import | `Ctrl+O` | Monitor CSV; PD JSON |
 | Export | `Ctrl+S` | Monitor CSV; PD JSON |
 | Joint CSV/PD export | `Ctrl+Shift+S` | Monitor |
-| Clear | Unassigned | Monitor and PD; confirmation and follow linkage still apply |
+| Clear | Unassigned | Monitor, PD (confirmation and follow linkage apply) |
 
-On macOS use Command instead of Ctrl. Click a binding button and press the new combination; Escape cancels. `Unassign` removes a binding, `Default` restores one, and `Restore shortcuts` restores all. Conflicts, modifier-only input and reserved close/quit bindings are rejected. Recording, import, export and similar shortcuts are inactive while editing text, using dropdowns/flyouts/dialogs or recording a new binding.
+macOS maps `Ctrl` to `Command`. Click any binding to rebind (Escape cancels), unassign, or reset individual/all shortcuts; shortcuts pause while typing or inside menus, flyouts, and dialogs.
 
 ### Recovery & reset
 
-`Keep temporary recovery files` is on by default. It saves to the app cache about once per second while recording for crash recovery. Unfinished recordings appear here with `Recover` / `Delete`. Recovery returns to Monitor, where you can continue or export. It replaces current Monitor data after confirmation when data exists.
+`Keep temporary recovery files` (on by default) writes once per second to app cache while recording. Unfinished sessions appear here with `Recover` / `Delete` (recovering replaces Monitor data after confirmation and excludes separate PD JSON). Clean clear, import, or exit removes temporary files after synchronization.
 
-Normal clear, import or exit removes temporary files after successful synchronization; failed synchronization keeps them and reports an error. These files are not long-term archives and do not contain a separate PD JSON capture; export the required files individually.
-
-`Reset all settings` restores preferences and shortcuts after confirmation. This is a different action from Monitor's data-clearing `Reset`. If saving settings fails, follow the error message; visible default values do not confirm persistence.
+`Reset all settings` restores preferences and shortcuts only, unlike Monitor's data-clearing `Reset`.
 
 ### About
 
-The bottom application card shows the icon, name, description, version, application license and `Copyright (C) 2026 KHWLGH` (own contributions only; other authors retain their rights). Protocol libraries use LGPL-3.0-or-later; `usbpd-parser` and `witrn-hid` retain the original Python implementation's `Copyright (c) 2025 JohnScotttt`. The `Open-source licenses`, `GitHub` and `Check for updates` buttons wrap in narrower layouts. `GitHub` opens the project homepage in the system browser.
-
-Only `Check for updates` requests stable GitHub releases. Its button is disabled during the check and results stay for the session. Startup, opening Settings and switching workspaces do not check automatically. Equal/older published versions report up to date, with a separate status for no stable release. Failures allow retrying. A newer release provides `Download on GitHub` to open its release page; there is no automatic download or installation.
-
-Click `Open-source licenses` to open a separate reading dialog for GPLv3, LGPLv3 and component legal materials; copyright and attribution remain on About. The first click loads the full texts from the application, with retry on failure. Choose a document at the top and read it with larger text, generous line spacing and independent scrolling. Select text and right-click to copy, or use the system copy shortcut. Click the upper-right cross or press Escape to return to the opening control; reopening retains the selected document and reading position. Reading licenses needs no network connection. For source-repository scope and full texts, see [`COPYRIGHT`](../../COPYRIGHT), [`LICENSE`](../../LICENSE) and [`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0). The software comes without warranty and may be modified and redistributed under the applicable license conditions.
-
-The third-party card shows major component names, versions, purposes and licenses. Expand All runtime components for the alphabetically sorted offline list of direct/indirect runtime dependencies across four desktop release targets. Workspace packages and development/build-only dependencies are excluded. Each component links to its legal materials and retains its original copyrights and licenses.
+Shows application info, `Copyright (C) 2026 KHWLGH` (own contributions), LGPL-3.0-or-later protocol crate notices (`usbpd-parser` and `witrn-hid` retain `Copyright (c) 2025 JohnScotttt`), `Open-source licenses` (offline viewer with text copying and position memory), `GitHub`, and `Check for updates` (requests stable GitHub releases only on click; never downloads or installs automatically). The third-party card lists major dependencies and expands `All runtime components` offline with per-component license links. Full source scope lives in [`COPYRIGHT`](../../COPYRIGHT), [`LICENSE`](../../LICENSE), and [`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0).
 
 ## File formats
 
 ### CSV
 
-Monitor reads/writes CSV. Before the column header are point count, duration, sample interval and date, optionally followed by software/device/sampling provenance. This single-point example enables temperature and markers:
+Monitor reads and writes CSV with summary metadata rows before column headers, optionally followed by software/device/sampling provenance (this single-point example enables temperature and markers):
 
 ```csv
 SUM,1
@@ -355,36 +307,34 @@ Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),
 ="00:00:00.250",5,0.5,2.5,25,0.6,0.1,1.6,0.3,0.25,1792209600250,1,250,Start,
 ```
 
-- `Include temperature` controls `Temp(°C)`, `Include markers` controls `Marker`, and `Include device information` controls only the `Device` provenance line. They do not change acquisition or chart data.
-- `="HH:MM:SS.mmm"` preserves display time as spreadsheet text, with a day prefix beyond 24 hours. `RelativeTime(s)` is precise relative seconds; `Timestamp(ms)` is an absolute timestamp.
-- `RecordingSegment` distinguishes recording segments around pauses; `SampleInterval(ms)` stores per-point intervals. Optional `CurrentMagnitude(A)` preserves current magnitude before opposite directions cancel, allowing consistent capacity recalculation.
-- Numeric precision is retained and missing values are blank. Enabling the temperature column does not guarantee valid temperature. Labels in `Marker` are restored on import.
-- Older CSV files without temperature, signal lines or added trailing columns remain importable. Columns are identified by header name; do not manually add empty columns. Missing provenance stays unknown rather than using the current meter.
+- `="HH:MM:SS.mmm"` preserves spreadsheet text formatting (adding day prefixes past 24 h); `RelativeTime(s)` and `Timestamp(ms)` store exact timing.
+- `RecordingSegment` separates pause segments, `SampleInterval(ms)` records per-point intervals, and optional `CurrentMagnitude(A)` preserves unsigned magnitudes for consistent capacity recalculation.
+- Imports match columns by header name, accepting older CSV layouts without temperature, signals, or trailing columns; missing provenance remains unknown.
 
 ### PD capture
 
-PD uses JSON separately from Monitor CSV. Current exports identify `app: "laPower"`, `kind: "pd-capture"`, `version: 2`; version 1 captures are still accepted. Import validates the format and replaces the current PD capture. Importing CSV does not load PD JSON; import joint-exported files separately in their respective workspaces.
+PD uses separate JSON (`app: "laPower"`, `kind: "pd-capture"`, `version: 2`, accepting version 1). Imports validate and replace the current PD log; jointly exported `.csv` and `.pd.json` files must be imported separately in their respective workspaces.
 
 ## Troubleshooting
 
 ### Device missing or connection fails
 
-Use the meter's data port and a data-capable cable, refresh, then select it. Close other meter software that might hold the device, retry or reconnect the USB cable. Linux needs HID/Bulk permissions; see [udev rules](DEVELOPMENT.md#udev-rules-required). See [Supported devices](../../README.md#-supported-devices).
+Use the meter's data port and a data-capable cable, close other meter utilities, refresh, and reconnect. Linux requires [udev rules](DEVELOPMENT.md#udev-rules-required); see [Supported devices](../../README.md#-supported-devices).
 
 ### Connected but the chart is empty
 
-Connecting enables live preview only; click `Start recording`. While paused, live values can change without increasing recorded points; click `Continue recording`. Incompatible or invalid meter reports can also prevent valid readings.
+Connecting starts live previews only—click `Start recording` (or `Continue recording` when paused). Incompatible firmware report layouts can also produce no valid samples.
 
 ### Temperature stays at `--`
 
-Select and connect a source using [Temperature service](#temperature-service). The default is external TCP; choose Device explicitly for meter temperature. Curve visibility and CSV options do not enable acquisition. Check the server/address/port or device support while waiting for data; some meter firmware may not provide valid temperature.
+Select a source and connect via [Temperature service](#temperature-service) (default is External TCP; pick `Device` for meter temperature). Chart/CSV toggles do not start acquisition; some meter firmware does not output valid temperature.
 
 ### No new PD messages
 
-Check connection and follow mode; linked capture requires Monitor recording. Reconnect the tested link for a new negotiation. In independent mode, click `Continue recording` if the list is paused to show buffered messages. Also check filters.
+Verify device connection and `Follow recording` (linked capture requires active Monitor recording), and replug the tested USB link to trigger a fresh handshake. In independent mode, click `Continue recording` if paused and check active filters.
 
 ### Long recordings on macOS
 
-Recording prevents automatic sleep, while the screen can turn off. Connecting alone or pausing does not prevent sleep. macOS 14+ is configured to disable WebView background throttling; keep the window visible for long recordings on macOS 12–13. Closing the lid or manually sleeping can still interrupt USB acquisition.
+Active recording prevents idle system sleep while allowing display sleep; connecting alone or pausing does not. macOS 14+ disables WebView background throttling; keep the window visible on macOS 12–13. Closing the lid or manual sleep can still interrupt USB acquisition.
 
-The old project name was WITRN-RS. laPower uses a separate settings directory; existing CSV and compatible PD captures can be imported directly.
+> Formerly WITRN-RS; laPower uses separate settings directories, and existing CSV and compatible PD captures remain directly importable.

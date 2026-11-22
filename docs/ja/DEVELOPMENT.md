@@ -9,6 +9,8 @@
 - [リリース手順](#リリース手順)
 - [品質チェック](#品質チェック)
 - [テストと回帰確認の範囲](#テストと回帰確認の範囲)
+- [言語の選択](#言語の選択)
+- [辞書の保守と翻訳チェック](#辞書の保守と翻訳チェック)
 - [ヘッドレステスト API](#ヘッドレステスト-api)
 - [開発用プレビュー](#開発用プレビュー)
 - [性能測定](#性能測定)
@@ -18,47 +20,17 @@
 - [外部温度サービス](#外部温度サービス)
 - [貢献方法](#貢献方法)
 
-## 言語の選択
-
-「設定 → 外観と言語 → 言語」で、システムに従う、简体中文、繁體中文、English、日本語を選択できます。変更は即座に反映・保存され、接続、記録、データ、グラフ範囲、フィルター、選択中のメッセージを保持します。設定をリセットすると自動選択に戻ります。
-
-Linux では LC_ALL → LC_MESSAGES → LANG の順で最初の空でない値を使用し、Windows／macOS ではネイティブのシステム locale を取得します。取得できない場合は WebView の優先言語を使い、最終的に英語へフォールバックします。地域よりも文字体系を優先し、Hans は簡体字、Hant は繁体字を選びます。それ以外では CN／SG と地域なしの zh は簡体字、TW／HK／MO は繁体字、ja は日本語、それ以外（C／POSIX を含む）は英語になります。大文字小文字、アンダースコア、文字コード・修飾子の接尾辞を正規化します。手動選択は自動検出より優先されます。
-
-```bash
-LANG=en_US.UTF-8 ./laPower.AppImage
-LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
-env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
-```
-
-## 辞書の保守と翻訳チェック
-
-`src/i18n.js` は `t(key, params)`、locale 解析、言語変更の購読を提供します。4 辞書をオフラインで同梱し、英語を基準と欠落時のフォールバックに使います。`src/i18n-messages.js` の 4 列は英語、簡体字、繁体字、日本語の順です。意味に基づくキーと共通の補間パラメーター名を使い、件数のあるメッセージには必要に応じて単数形を追加します。利用者向け文書は簡体字版を内容の基準にし、翻訳は人が校正します。
-
-静的 HTML は英語のフォールバックと `data-i18n`／`data-i18n-title`／`data-i18n-placeholder`／`data-i18n-aria-label`／`data-i18n-alt` を使います。アイコンや入力欄を含む要素は文字の span だけを指定します。動的表示は `t`、継続表示する通知・ログは遅延文字列関数を使います。切り替えではラベル・メニュー・選択欄・グラフだけを更新し、再接続やデータの再構築をしません。
-
-アプリのバックエンドエラーは `{code, params, detail?}` を使い、非同期イベントは既存フィールドに `description` を追加します。フロントエンドで code を翻訳し、生の診断情報を保持します。プラグインの文字列エラーにも対応します。ファイルダイアログのタイトル・フィルターは翻訳し、ネイティブボタンは OS に従います。PD 標準名、デコードフィールド、生の応答、単位、CSV／PD のデータ形式は互換性を保持します。
-
-```bash
-node --test test/i18n.test.js test/settings-persistence.test.js
-node tools/showcase/verify-i18n.mjs
-npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
-```
-
-4 言語、両テーマ、900×600／1280×800、接続・記録／PDM 状態、PD 選択・フィルター、CSV／PD 往復、エラー、ファイル選択、アクセシビリティラベルを確認します。Linux AppImage の LANG／LC_* 別起動は Linux 実機で行います。ブラウザーの模擬動作はネイティブ・ハードウェア検証の代わりにはなりません。
-
-模擬デバイスとブラウザーのチェックは、Linux AppImage、macOS GUI、ネイティブファイルダイアログ、実機計器の検証を代替しません。対応する環境でシステム言語、言語設定の保存、記録／PDM、ダイアログ、CSV／PD の往復を必要に応じて確認します。過去の検証結果は現在のビルドの保証ではありません。
-
 ## 必要な環境
 
 | 項目 | 要件 | 補足 |
 | --- | --- | --- |
 | Rust | 1.85+ | ワークスペースの `rust-version` |
-| Tauri CLI | 2.12.1 | npm で固定した `@tauri-apps/cli` を `npx --no-install tauri` で実行 |
-| Windows | 10 / 11 | 現在の開発・検証環境 |
+| Tauri CLI | 2.12.1 | npm で固定した `@tauri-apps/cli`（`npx --no-install tauri` で実行） |
+| Windows | 10 / 11 | 主な開発・検証環境 |
 | macOS | 12+ | 最低デプロイ対象。CI は macOS 26、旧 OS 互換性は実機確認が必要 |
 | Node.js | 24 | CI、lint／typecheck／test、フロントエンド生成 |
 
-npm を使用し `package-lock.json` を管理し、CI は `npm ci` を使います。フロントエンドは標準 ES Modules で、`frontendDist` は生成した `out/` を参照します。Node は Rust コンパイルには参加しませんが、`cargo build`、`cargo test`、`cargo check`、`cargo clippy` より先に `npm run build` が必要です。`src/` 変更後は `out/` を再生成してから Rust バイナリを再リンクします。
+npm を使用して `package-lock.json` を管理します（CI は `npm ci`）。フロントエンドは標準 ES Modules で、`frontendDist` は生成された `out/` を参照します。Node は Rust コンパイルには参加しませんが、`cargo build`、`cargo test`、`cargo check`、`cargo clippy` より先に `npm run build` が必要です。`src/` 変更後は `out/` を再生成してから Rust バイナリを再リンクしてください。
 
 ## ビルドと実行
 
@@ -69,172 +41,138 @@ npm ci
 npm run dev
 ```
 
-日常開発では次のショートカットを使用できます。従来のコマンドも引き続き利用でき、npm はプロジェクトで固定した Tauri CLI を使います。
-
 | コマンド | 用途 |
 | --- | --- |
-| `npm run dev` | 開発用フロントエンドを自動生成し、ネイティブアプリを起動 |
-| `npm run dev:web` | 模擬デバイスのブラウザープレビューを起動。ポート変更は `-- --port 4174` を追加 |
-| `npm run build` | Cargo が埋め込む開発用フロントエンドのみ生成 |
-| `npm run build:app` | リリース用フロントエンドを自動生成し、ローカルのインストーラーをビルド |
+| `npm run dev` | 開発用フロントエンドを自動生成してネイティブアプリを起動 |
+| `npm run dev:web` | 模擬デバイスのブラウザープレビューを起動（`-- --port 4174` でポート変更可） |
+| `npm run build` | Cargo 埋め込み用の開発用フロントエンド `out/` を生成 |
+| `npm run build:app` | 圧縮済みフロントエンドを自動生成しローカルインストーラーをビルド |
 
-`dev` の `beforeDevCommand` がフロントエンドを生成するため、起動前の `npm run build` は不要です。埋め込み資源を使う従来の方式を維持し、フロントエンドのホットリロードは提供しません。変更後は `dev` を再起動するか、フロントエンドを再生成して Rust バイナリを再リンクします。
-
-ローカルで target を指定しなければ配布物は `target/release/bundle/`、CI は明示指定して `target/<target>/release/bundle/` に生成します。Tauri CLI が `beforeBuildCommand` で圧縮済みフロントエンドを生成するため、パッケージ化前の手動 `npm run build:dist` は不要です。Cargo を直接実行する場合は先に `out/` が必要です。
+`beforeDevCommand` と `beforeBuildCommand` がそれぞれフロントエンドを生成するため、事前の手動 `npm run build` / `npm run build:dist` は不要です（Cargo を直接実行する場合は先に `out/` が必要）。開発ビルドにホットリロードはなく、`src/` 変更後は `dev` を再起動するか再リンクします。配布物はローカルでは `target/release/bundle/`、CI では `target/<target>/release/bundle/` に出力されます。
 
 ### Windows のビルドスクリプトがウイルス対策ソフトにブロックされる場合
 
-Cargo が libc の `build-script-build` を実行する前にアクセス拒否（`os error 5`）や共有違反（`os error 32`）を報告し、ウイルス対策ソフトが同じパスをブロックしている場合、対象はコンパイル時に動くプログラムです。アプリの実行時プログラムではありません。ローカルの Windows/MSVC と Kaspersky の環境では、libc 0.2.189 のビルドスクリプトが最適化レベル 2 でブロックされ、レベル 0 で正常に実行できることを確認しました。
+Cargo が `libc` の `build-script-build` を実行する前に `os error 5` / `os error 32` が発生しウイルス対策ソフトが同パスを遮断する場合、対象はビルド時プログラムでありアプリの実行時バイナリではありません。ローカルの Windows/MSVC + Kaspersky 環境で `libc 0.2.189` が最適化レベル 2 で遮断され、レベル 0 で通ることを確認しています。
 
-ルートの `Cargo.toml` では libc だけに `[profile.dev.package.libc] opt-level = 0` を設定しています。他の依存関係はレベル 2、release 設定は従来どおりです。test が継承する dev profile にも適用され、libc の開発用ライブラリも最適化なしになります。`profile.dev.build-override` の追加だけでは既存の `package."*"` 設定を上書きできません。設定更新後は元のビルドコマンドを再実行してください。Cargo が関連成果物を再生成するため、`target/` 全体の削除は不要です。
-
-この互換性調整は確認済みのコンパイラー構成を対象としており、他のバージョンやファイルでの誤検知を防ぐ保証はありません。引き続きブロックされる場合は、検知名、パス、ファイルのハッシュを保存し、調査やメーカーへの報告に使ってください。`os error 5` だけでは誤検知とは判断できません。
+ルートの `Cargo.toml` では `[profile.dev.package.libc] opt-level = 0` を設定しています（dev／test に適用され、release や他依存関係は変更せず；`profile.dev.build-override` では既存の `package."*"` を上書き不可）。設定更新後は `target/` 全削除なしでビルドを再実行できます。引き続き遮断される場合は検知名・パス・ハッシュを保存してください。
 
 ### クリーンアップの段階
 
-各段階は前の段階を含み、削除の完了を待って終了します。既定では Rust のコンパイルキャッシュ、依存関係、インストーラーを保持します。
+各段階は前の段階を含んで削除完了まで待機し、既定では Rust キャッシュ・依存関係・インストーラーを保持します：
 
 | コマンド | 削除範囲 |
 | --- | --- |
 | `npm run clean` | `out/`、`output/`、`bench/results/`、ルートと `src/` の `.playwright-cli/`、`src-tauri/gen/schemas/` |
-| `npm run clean:incremental` | さらに `target/` と `src-tauri/target/` の `debug/release` 増分キャッシュ。クロスコンパイル対象も含む |
+| `npm run clean:incremental` | さらに `target/` と `src-tauri/target/` の `debug/release` 増分キャッシュ（クロスコンパイル含む） |
 | `npm run clean:build` | さらに `target/`、`src-tauri/target/` 全体と `dist/` |
-| `npm run clean:all` | さらに `node_modules/`。開発再開前に `npm ci` を実行 |
+| `npm run clean:all` | さらに `node_modules/`（再開前に `npm ci` が必要） |
 
-どの段階でも削除せず対象を確認できます。
+削除せずに確認：
 
 ```bash
 npm run clean:build -- --dry-run
 ```
 
-Node.js と Git が必要です。スクリプトの位置からリポジトリを特定し、削除前に全対象と Git の追跡状態を確認します。対象または親階層にシンボリックリンク／junction があれば中止します。同時に処理するディレクトリは最大 4 個で、各結果と合計時間を表示します。使用中ファイルは回数を制限して再試行し、失敗が残れば非ゼロで終了します。関連する開発・ビルド・プレビューのプロセスは先に終了してください。コマンドから強制終了は行いません。
-
-`output/` の検証画像と `bench/results/` の生の結果・ローカル比較用スナップショットも削除されます。追跡済みの文書画像、`bench/baselines/`、ソース、ロックファイル、リポジトリ外のキャッシュ、アプリの復元データは保持します。独自の `CARGO_TARGET_DIR` が対象パス外にある場合は個別に管理してください。削除後の `dev` はフロントエンドを再生成します。Cargo を直接使う場合は先に `npm run build` が必要です。
+クリーナーは実行前に全対象と Git 追跡状態を確認し、シンボリックリンク／junction があれば中止します。最大 4 ディレクトリを並列削除し、使用中エラーを回数制限で再試行します。関連プロセスを先に終了してください；追跡済み画像、`bench/baselines/`、ソース、ロックファイル、リポジトリ外キャッシュ（独自 `CARGO_TARGET_DIR` 含む）は保持します。
 
 ### 実行時コンポーネント一覧
 
-「このアプリについて」は同梱の `src/third-party-components.json` 一覧を使い、ライセンス閲覧時に全文カタログ `src/legal-notices.json` を読み込みます。Cargo の実行時依存関係、同梱資源、ライセンス入力を変更したら `npm run components:generate` を実行し、生成された両ファイルと必要な資料をコミットして `npm run components:check` で確認します。生成カタログを手動編集しないでください。ロック済み・オフラインの Cargo metadata/tree で Windows x64、Linux x64、macOS Intel・Apple Silicon の normal 依存関係を保守的に統合し、workspace、開発・ビルド専用、手続きマクロのパッケージを除外します。厳密なリリース用コンパイル単位グラフではありません。同梱資源のバージョンはその表記を使い、不明なら同梱扱いとします。
+「このアプリについて」は同梱の `src/third-party-components.json` と、必要時に読み込む `src/legal-notices.json` を参照します。Cargo 実行時依存関係・同梱資産・ライセンス入力を変更したら `npm run components:generate` を実行し、生成物と必要資料をコミットして `npm run components:check` で照合してください（生成ファイルの手動編集は禁止）。
 
-資料はルートの [`COPYRIGHT`](../../COPYRIGHT)、[`LICENSE`](../../LICENSE)、[`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0)、ローカル Cargo キャッシュの実ファイル、`licenses/materials.json` に登録した保存済み補足資料から取得します。補足資料には固定バージョン、出典、revision、上流パス、SHA-256 を記録し、本文の正規化は CRLF から LF への変換だけです。既定では、資料不足、内容の変化、カタログ検証エラーは生成・確認を失敗させます。上流資料の不足やライセンス分岐の選択に関する例外は、明示的な審査、固定バージョン、理由と証拠の記録がある場合のみ認めます。例外はカタログとともにオフラインで表示され、生成・確認時にも報告されますが、欠けた上流本文の復元を意味しません。キャッシュや補足資料の準備には別途通信が必要な場合がありますが、生成・確認中に随時ダウンロードしません。通常のフロントエンドビルドは生成済み資料の検証・コピーのみで、Cargo やネット接続は不要です。CI の `validate` も引き続き照合します。
+スクリプトはオフライン・`--locked` の Cargo metadata/tree で 4 デスクトップ対象の normal 依存を保守的に統合します（workspace・開発/ビルド専用・手続きマクロを除外；キャッシュ不足時は事前に `cargo fetch --locked` が必要）。ライセンス本文は [`COPYRIGHT`](../../COPYRIGHT)、[`LICENSE`](../../LICENSE)、[`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0)、ローカル Cargo キャッシュ、`licenses/materials.json` の補足資料（バージョン・revision・上流パス・SHA-256 を記録；審査済み固定版例外のみ欠落を許容）から収集します。通常のフロントエンドビルドは生成済みファイルの検証・コピーのみで Cargo や通信を行いません。
 
-アプリ、スクリプト、ツール、テスト、ベンチマーク、温度サンプル、ワークフロー、プロジェクト文書・設定の自作の貢献は GPL-3.0-only、`crates/` 内のライブラリ、テスト、サンプル、自作の文書・設定は LGPL-3.0-or-later です。素材と生成物の具体的範囲は [`COPYRIGHT`](../../COPYRIGHT) を参照してください。上流と他の著作者の表示を保持し、Git の著作者情報から譲渡を推定せず、第三者の素材を KHWLGH の創作物と表示しないでください。固定表示 `Copyright (C) 2026 KHWLGH` は自身の貢献のみを対象とし、GNU ライセンス全文は原文を保持します。
-
-リリース Tag の ZIP／tar.gz は本リポジトリのソースアーカイブで、ローカルの依存キャッシュやシステム SDK は含みません。構築時は `cargo fetch --locked` で固定された Cargo 依存ソース、`npm ci` で固定された npm ビルドツールを取得します。`Cargo.lock` と `package-lock.json` が各バージョンと利用可能な整合性検証情報を定めます。[`src/third-party-components.json`](../../src/third-party-components.json) の一覧も依存元の特定に使えます。現行のツールチェーン、プラットフォーム SDK／システム要件、構築コマンドは本ガイドの環境・各プラットフォームの節を参照してください。Tag アーカイブだけに全依存ソースが含まれるという意味ではありません。
+リリース Tag のソースアーカイブにはローカルキャッシュや SDK が含まれないため、アーカイブからビルドする際は `cargo fetch --locked` と `npm ci` で依存ソースを取得してください。自作貢献の著作権表示は `Copyright (C) 2026 KHWLGH` に固定され、Git 著作者情報から譲渡を推定しません（範囲詳細は [`COPYRIGHT`](../../COPYRIGHT) を参照）。
 
 ## リリース手順
 
-開発中は `changelog/unreleased/zh-CN.md` だけを編集します。リリース前に開発アシスタントで重複をまとめ、利用者向けの簡体字中国語の説明を整理し、`en.md` を生成して両言語を手動で校正します。変更履歴は英語と簡体字中国語のみです。文や項目の厳密な一対一対応は要求せず、翻訳 API は使いません。
+開発中は `changelog/unreleased/zh-CN.md` のみを編集します。リリース前に重複を統合し利用者向け簡体字中国語を整理したうえで `en.md` を作成・手動校正します（文単位の厳密一致は不要、翻訳 API 不使用）。
 
 ```bash
-npm run release:prepare -- 0.2.6 --date 2026-11-14 --dry-run
-npm run release:prepare -- 0.2.6 --date 2026-11-14
+npm run release:prepare -- 0.3.0 --date 2026-11-22 --dry-run
+npm run release:prepare -- 0.3.0 --date 2026-11-22
 npm run release:notes
 npm run showcase:capture
 ```
 
-例のバージョンと日付を実際の値に置き換えます。準備コマンドは両言語のファイルと空でない本文を確認し、既存のバージョンディレクトリは上書きしません。`changelog/<version>/` へ保存し、製品バージョンとルートの索引を更新して `dist/release-notes.md` を生成します。完了後にだけ草稿を空にします。`--dry-run` は計画とプレビューを表示し、ファイルを書きません。失敗時は草稿を保持します。エラーと `git diff` を確認して修正し、部分的に生成されたファイルがあれば手動で整理してから再試行します。
-
-Release は英語を展開し、簡体字中国語を折りたたみます。両言語にインストール案内を含め、プレビューと公開で同じ描画処理を使います。`GITHUB_REPOSITORY` を優先し、ローカルで未設定なら `origin` から取得します。コミット、タグ作成・push、Release 公開は行いません。プレビューと品質チェックを確認後、コミットして新しいタグを push します。
+例のバージョンと日付を置換してください。`release:prepare` は両言語草稿が非空で既存バージョンディレクトリがないことを確認し、`changelog/<version>/` へ保存、バージョン同期、ルート `CHANGELOG.md` 更新、`dist/release-notes.md` 生成を行い、完了時のみ草稿を空にします（`--dry-run` は書き込みなし；失敗時は草稿を保持）。Release は英語を展開し簡体字中国語を折りたたんで両言語のインストール手順を含めます。コマンドはコミット・タグ作成・公開を行いません。
 
 ### リリース前の文書用スクリーンショット更新
 
-リリース準備では毎回スクリーンショットを更新します。製品バージョンの同期と変更履歴の保存 → 撮影と画像確認 → 品質チェック → リリース変更のコミット → バージョンタグの push → GitHub Actions によるインストーラーのビルド・検証・公開、の順に進めます。正式リリースではローカルでのインストーラーの事前ビルドは不要です。`release:prepare` はバージョンと文章を扱い、撮影には上記の独立したコマンドを使います。そのバージョンの履歴を保存済みなら、再保存せず `npm run showcase:capture` を再実行します。
+リリースごとに次の順で実施します：**バージョン同期と履歴保存 → スクリーンショット撮影・確認 → 品質チェック → コミット → バージョンタグ push → GitHub Actions ビルド・公開**（ローカル事前ビルド不要；履歴保存済みなら `npm run showcase:capture` のみ再実行）。
 
-初回は `npx playwright install chromium` を実行します。Linux でブラウザーのシステム依存が不足する場合は `npx playwright install --with-deps chromium` を使います。簡体字中国語・繁体字中国語・英語・日本語 × ライト・ダーク × モニター・PD 分析・プロトコル制御・設定の全 32 枚を `docs/screenshots/<language>/` に生成し、タイトルバー全体を残します。現在のバージョン、共通の 120 秒の仮想データ、既定の画面サイズを使い、一部だけの撮影でリリース用の一式を代用しません。
+初回は `npx playwright install chromium`（Linux で不足時は `--with-deps`）を実行します。既定で **72 枚**（メイン画面 40 枚 + レポート 32 枚）を `docs/screenshots/<language>/` に生成します：
 
-プロトコル検出のメイン画面 8 枚と、16:9 画像・縦長画像・動画フレーム・プロトコル検出レポートの表示例 32 枚を追加します。既定で全 72 枚（メイン画面 40 枚とレポート 32 枚）となり、基本 32 枚も毎回すべて更新します。
+- **必須の基本 32 枚**：4 言語 × ライト／ダーク × モニター・PD 分析・プロトコル制御・設定（完全タイトルバー・120 秒共通仮想データ・最新マニフェスト版）。
+- **追加 40 枚**：プロトコル検出画面 8 枚 + レポート出力例 32 枚（16:9 PNG・縦長 PNG・動画フレーム・プロトコル検出レポート）。
 
-全画像で言語、テーマ、文字切れ、グラフ、選択メッセージ、プロトコル状態、設定の目次を確認し、空白、重なり、はみ出しがないことを確認します。バージョンは現在のマニフェストと一致させます。4 言語の README の画像バージョン、説明、参照も更新し、全 72 枚の画像と文書を一緒にコミットします。撮影や確認に失敗した場合、修正して再生成するまでリリース準備は完了しません。オプションとデータの詳細は[開発用プレビュー](#開発用プレビュー)を参照してください。
+全画像で文字切れ・テーマ・グラフ・プロトコル状態・設定目次・バージョン一致を目視確認し、4 言語 README の記述・参照を更新して一括コミットしてください。
 
 ### 文書の保守範囲
 
-README、使用ガイド、開発とビルドは英語・簡体字中国語・繁体字中国語・日本語で保守します。アーキテクチャ、性能、プロトコル crate の README、変更履歴は英語と簡体字中国語のみです。外部温度サービスは本ガイドに統合します。主要文書は同言語へリンクし、副次文書は繁体字ページから簡体字、日本語ページから英語へリンクして言語を明記します。翻訳ハッシュ、項目対応チェック、文書専用 CI は追加しません。
+README・使用ガイド・開発ガイドは 4 言語（英・簡・繁・日）、アーキテクチャ・性能・crate README・変更履歴は英／簡体字の 2 言語で保守します（0.2.2 以前は簡体字のみ）。主要文書は同言語へリンクし、副次文書は繁体字から簡体字、日本語から英語へリンクして言語を明記します。翻訳ハッシュや文書専用 CI は設けません。
 
 ### 変更履歴へのリンク
 
-各バージョンの本文は `changelog/<version>/` に保存し、ルートの `CHANGELOG.md` はバージョン索引として元の見出しアンカーを維持します。全履歴は索引へ、特定バージョンは対応する言語ファイルへ直接リンクします。0.2.2 以前は `zh-CN.md` のみで、英語の仮ページは作りません。相対リンクは文書のディレクトリを基準にし、中国語なら `../../docs/USAGE.md`、英語なら `../../docs/en/USAGE.md` を使います。GitHub Release では該当バージョンのタグへ固定します。
+各バージョンの本文は `changelog/<version>/` に置き、ルート `CHANGELOG.md` はアンカーを維持した索引とします。ノート内の相対リンクはファイル位置基準（例：`../../docs/en/USAGE.md`）で記述し、GitHub Release では該当タグへ固定されます。
 
 ### バージョンだけを設定する
 
-リリースノートを保存せずバージョンだけを同期する場合、既存コマンドを使えます：
+変更履歴をアーカイブせずバージョンのみ同期する場合：
 
 ```bash
-npm run version:set -- 0.2.4
+npm run version:set -- 0.3.0
 ```
 
-`0.2.4` を対象バージョンに置き換えます。先頭ゼロのない `X.Y.Z` を受け付け、全ファイル検証後に次の箇所を同期します。同じバージョンを再設定しても再書き込みせず、コミット・タグ作成、依存関係更新、変更履歴編集はしません。
-
-| ファイル | フィールド |
-| --- | --- |
-| `package.json` | `version` |
-| `package-lock.json` | 最上位とルートパッケージの `version` |
-| `Cargo.toml` | `[workspace.package] version` |
-| `Cargo.lock` | 全ワークスペースメンバーの `version` |
-| `src-tauri/tauri.conf.json` | `version` |
-
-Rust メンバーは `version.workspace = true` で継承します。「このアプリについて」は Tauri、開発用プレビューは `package.json` から取得します。実行ファイルとインストーラーへ反映するには再ビルドします。
-
-`test/version-sync.test.js` はマニフェスト・ロックの整合、セマンティックバージョン、workspace 継承、共通更新コマンド、macOS private API 設定を検証します。
+先頭ゼロなしの `X.Y.Z` を検証し、`package.json`、`package-lock.json`、`Cargo.toml`（`[workspace.package] version`）、`Cargo.lock`、`src-tauri/tauri.conf.json` を同期します（Rust メンバーは `version.workspace = true` で継承；同バージョン再設定では変更・コミット・タグ作成を行いません）。`test/version-sync.test.js` が整合性を検証します。
 
 ### 手動ビルドと初回検証
 
-workflow を既定ブランチへ反映した後、GitHub の **Actions → CI → Run workflow** でブランチ・タグを選びます。既存品質チェックの後に 4 対象をパッケージ化します。バージョンタグを選んでも Release は作成・公開しません。
+GitHub **Actions → CI → Run workflow** からブランチ／タグを選択すると品質チェック後に 4 対象をビルドできます（タグ指定でも Release 公開は行いません）：
 
 | 対象 | Runner | Rust target | パッケージ |
 | --- | --- | --- | --- |
-| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE、ポータブル ZIP |
+| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE（`_setup`）、ポータブル ZIP |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | DEB、RPM、AppImage |
 | macOS Intel | `macos-26-intel` | `x86_64-apple-darwin` | DMG |
 | macOS Apple Silicon | `macos-26` | `aarch64-apple-darwin` | DMG |
 
-成功した対象ごとに `packages-*` アーティファクトを 14 日間保持します。全対象成功後の `release-packages` は 8 個の配布パッケージと `SHA256SUMS` を含み、展開先で `sha256sum -c SHA256SUMS` を実行して確認できます。名前にはバージョン・OS・アーキテクチャ、NSIS EXE には `_setup` も含まれます。Windows ポータブル ZIP のファイル名は `laPower_<バージョン>_windows-x64_portable.zip` です。展開後に `laPower.exe` を実行してください。Microsoft Edge WebView2 Runtime が必要で、アプリ設定は従来どおり通常のユーザーデータディレクトリに保存されます。
-
-タグ自動公開を初めて使う前に手動ビルドし、Windows インストール、両 Mac の起動、Linux インストールと udev 設定後の接続を確認します。macOS 12 は別途実機検証が必要です。CI は Mac のアーキテクチャ、ad-hoc 署名、最低 OS メタデータ、DMG 完全性を調べますが、GUI・計器接続は実行しません。
-
-macOS は明示的に `--bundles app,dmg` を使います。DMG のみでは Tauri が一時 `.app` を削除するため、APP も指定して後続検証用に残します。配布アーティファクトは DMG のみで、APP は追加公開しません。
+4 対象すべて成功すると `release-packages`（8 パッケージと `SHA256SUMS`、`sha256sum -c SHA256SUMS` で検証）を生成します。Windows ポータブル版（`laPower_<version>_windows-x64_portable.zip`）は WebView2 Runtime 環境下で `laPower.exe` を直接実行でき、標準ユーザーデータ領域を使用します。macOS は検証用に `.app` を残すため `--bundles app,dmg` を指定します（公開物は DMG のみ）。自動リリース運用前に Windows、両 Mac（macOS 12 含む）、udev 設定済み Linux で実機検証してください。
 
 ### バージョンタグによる自動公開
 
-初回検証後、バージョン・変更履歴を更新し、品質チェックとコミットを済ませ、マニフェストに一致するタグを push します。
+検証とリリース変更のコミット完了後、マニフェストと一致する `vX.Y.Z` タグを push します：
 
 ```bash
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-タグは `vX.Y.Z` とし、マニフェストと一致しなければパッケージ化前に失敗します。CI は Node.js 24、Rust stable、Tauri CLI 2.12.1、`tauri-apps/tauri-action@v1` を使います。npm は `npm ci`、Cargo は `--locked`、Rust キャッシュは対象別でルート `target/` を参照します。Linux は新しい glibc への依存を抑えるため Ubuntu 22.04 に固定します。
-
-全チェックと 4 対象のビルド成功後、8 個のパッケージを集めてチェックサムを生成します。公開 job は実行リポジトリの `GITHUB_TOKEN` で一時ドラフトを作成し、8 個とチェックサムをアップロードし、リモートの数・サイズ・SHA-256 を照合して自動公開します。手動 Publish や追加 PAT は不要です。この job だけ `contents: write` を持ち、組織ポリシーで許可が必要です。
-
-`scripts/release.mjs` はルートの長い履歴ではなく、現在のバージョンディレクトリから英語と簡体字中国語の Markdown を読みます。タグのパッケージ化前と公開前で同じ読み込み処理を使い、両ファイルと空でない本文だけを確認します。相対リンクはそのバージョンのタグへ固定し、GitHub の自動コミット／PR 要約は使いません。`npm run release:notes` は元の文書を変更せずローカルプレビューを再生成します。
-
-同じ ref の実行は直列化し、アップロード中の公開を中止しません。失敗時はドラフトを保持し、Actions の失敗 job 再実行で再利用・同名添付の置換を行います。別の添付があるドラフトは人が確認してから再実行します。同名 Release が公開済みなら自動上書きを拒否します。公開バイナリの変更には新しいバージョン・タグを使います。
-
-Windows に証明書署名はなく、macOS は Developer ID・公証なしの ad-hoc 署名、Linux は udev を自動設定しません。自動更新、Windows／Linux ARM64、Mac Universal はこの手順の対象外です。
+CI は Node.js 24、Rust stable、Tauri CLI 2.12.1、`tauri-apps/tauri-action@v1` を使用します（Linux は glibc 互換のため Ubuntu 22.04 固定）。全チェックとビルド成功後、`release` job が `GITHUB_TOKEN`（`contents: write` 必須）でドラフトを作成し、8 配布物と `SHA256SUMS` をアップロード・数／サイズ／SHA-256 検証して自動公開します。同一 ref は直列実行され、失敗時はドラフトを残して再実行で置換可能です（公開済み同名 Release は上書き拒否）。Windows 署名なし、macOS は ad-hoc 署名、Linux は udev 自動設定なしです。
 
 ## 品質チェック
 
-変更範囲に合う入口を 1 つ選びます。
+変更範囲に応じた入口を実行します（最初の失敗で停止）：
 
 | コマンド | 使用場面 |
 | --- | --- |
-| `npm run check` | 日常のフロントエンドチェック |
-| `npm run check:rust` | Rust チェック。先に `out/` を自動生成 |
-| `npm run check:all` | 納品前の全コアチェック。両グループとコンポーネント一覧の照合を含む |
+| `npm run check` | 日常のフロントエンドチェック（`npm test`、`typecheck`、`lint` を実行、`out/` 未生成） |
+| `npm run check:rust` | Rust チェック（先に `out/` を生成し `cargo fmt`、workspace Clippy、テストを実行） |
+| `npm run check:all` | 納品前フルチェック（上記 2 群と `components:check`、フロント生成は 1 回） |
 
-`check` は `npm test`、`typecheck`、`lint` を順に実行し、フロントエンドの生成や Cargo の実行は行いません。`check:rust` はフロントエンドを 1 回生成してから Rust の形式確認、workspace Clippy、テストを実行します。`check:all` は両グループと `components:check` を順に実行し、フロントエンド生成は 1 回だけです。すべての入口は最初の失敗で停止します。個別コマンドも使用できます。一覧の照合には Cargo が必要で、キャッシュがなければ通信することがあります。既存の CI チェック構成は変更しません。
-
-`npm test` は Node 標準ランナーで `test/*.test.js` のみを検出し、出力先の過去のソースを実行しません。新しいコアテストも同じ場所・命名に従い、個別実行は `node --test test/name.test.js` を使います。Biome は出力・依存・`.local-*` ローカルツールを除外し、一時的なファイル移動は不要です。純粋ロジック、データ処理、プロトコル・ファイル契約、セキュリティ、バージョン同期を確認します。主要ファイルは次のとおりです。
+`npm test` は `test/*.test.js` のみ実行し（個別実行：`node --test test/name.test.js`）、Biome は出力先・依存関係・`.local-*` を除外します。純粋ロジック・データ処理・プロトコル／ファイル契約・セキュリティ・バージョン同期をカバーします：
 
 ```text
-chart-buckets  chart-columns  chart-extrema  chart-window
-csv-codec     csv-import     device-stream  ingest
-measurement   pd-capture-file  pd-model      range-stats
-recording     recording-spool  security-csp  settings-persistence
-version-sync  bench-gate
+bench-gate        chart-binding     chart-buckets    chart-columns     chart-cooperative
+chart-cursor      chart-extrema     chart-feedback   chart-fill        chart-pacing
+chart-window      clean             csv-codec        csv-import        device-stream
+export-workflows  frame-scheduler   i18n             ingest            km003c-model
+macos-menu        marker-ui         markers          measurement       pd-capture-file
+pd-model          provenance        range-stats      recording         recording-spool
+release           security-csp      settings-persistence shortcuts     tauri-config
+temp-disconnect   third-party-components version-sync video-export
 ```
 
-Rust workspace テスト、フォーマット、Clippy、プロトコル crate の feature 組み合わせを継続します。`usbpd-parser`／`witrn-hid` の feature 境界を変更したら、CI と同じ組み合わせを追加実行します。
+`usbpd-parser` や `witrn-hid` の feature 境界変更時は CI の非既定組み合わせも実行してください：
 
 ```bash
 for combo in \
@@ -250,15 +188,40 @@ done
 
 ## テストと回帰確認の範囲
 
-- 通常の機能追加・削除・名称変更、UI レイアウト・スタイル・文言・選択肢変更では、原則として回帰テストを追加しません。
-- データ損失・破損、プロトコル互換、クラッシュ・デッドロック、セキュリティ、リリースビルドの不変条件、確認済みの重大な過去の不具合に限って追加します。
-- 既存の主要テストを優先し、小機能ごとにテストファイル・設計資料・CI job を作りません。
-- ベンチマークと実機確認は必要時に手動で行い、毎回のブラウザー自動回帰にはしません。
-- CI の主要チェック集合を固定し、機能ごとの専用回帰 workflow を増やしません。
+- 通常の機能追加・削除・名称変更や UI レイアウト・スタイル・文言・選択肢の変更には原則回帰テストを追加しません。
+- データ損失／破損、プロトコル互換、クラッシュ／デッドロック、セキュリティ、リリース不変条件、確認済み重大不具合に限りテストを追加します。
+- 既存コアテストの拡張を優先し、小機能ごとにテストファイル・設計書・CI job を新設しません。
+- 性能ベンチマークと実機確認は手動で実施し、毎回のブラウザー自動回帰や専用 CI workflow は追加しません。
+
+## 言語の選択
+
+「設定 → 外観と言語 → 言語」でシステムに従う・简体中文・繁體中文・English・日本語を選択でき、接続・記録・データ・表示範囲・フィルター・選択メッセージを保持したまま即時反映・保存されます（設定リセットで自動モードへ復帰）。
+
+Linux は `LC_ALL → LC_MESSAGES → LANG` の順で最初の非空値を使用し、Windows／macOS は OS 標準ロケール（不可時は WebView 優先言語、最終フォールバックは英語）を用います。地域より文字体系 `Hans`/`Hant` を優先し、それ以外は `CN`/`SG`・無地域 `zh` → 簡体字、`TW`/`HK`/`MO` → 繁体字、`ja` → 日本語、その他（`C`/`POSIX` 含む）→ 英語になります（大文字小文字・`_`・符号化・修飾子を正規化；手動選択を優先）。
+
+```bash
+LANG=en_US.UTF-8 ./laPower.AppImage
+LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
+env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
+```
+
+## 辞書の保守と翻訳チェック
+
+`src/i18n.js` が `t(key, params)`・ロケール判定・変更購読を提供し、`src/i18n-messages.js` は英語（基準兼フォールバック）・簡体字・繁体字・日本語の 4 列を持ちます。意味のあるキー名と共通の補間パラメーターを使い、利用者向け文書は簡体字を基準に人が校正します。
+
+静的 HTML は英語フォールバックと `data-i18n*` 属性を使い（アイコン・入力欄を含む要素は文字 span のみ指定）、動的表示や継続通知には `t` または遅延文字列関数を使います。言語切替で再接続やデータ再構築を行いません。バックエンドエラーは `{code, params, detail?}` で返しフロントエンドが `code` を翻訳して生診断を保持します（文字列エラーも互換）。PD 名称・生応答・単位・CSV／PD 形式は変更しません。
+
+```bash
+node --test test/i18n.test.js test/settings-persistence.test.js
+node tools/showcase/verify-i18n.mjs
+npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
+```
+
+4 言語・両テーマ・900×600／1280×800・接続／記録／PDM 状態・PD 絞り込み・CSV／PD 往復・アクセシビリティラベルを確認します。模擬動作は Linux `LANG`/`LC_*` 実機、macOS GUI、ネイティブダイアログ、実機計器の代替になりません。
 
 ## ヘッドレステスト API
 
-`tools/showcase/headless.mjs` は、既存の Playwright・模擬サーバー・仮想装置を再利用する Node スクリプト向け API です。初回は `npx playwright install chromium` を実行します。テスト場面・ランナー・CI ジョブは追加せず、スクリーンショット、既存 UI チェック、ブラウザーベンチマークで共有します。リポジトリ直下のスクリプト例：
+`tools/showcase/headless.mjs` は Node スクリプト向けの Playwright ヘッドレスラッパーを提供し（初回は `npx playwright install chromium`）、独立ランナーや CI job は追加しません：
 
 ```js
 import { createHeadlessHarness } from './tools/showcase/headless.mjs';
@@ -274,94 +237,63 @@ console.log(await app.diagnostics());
 // app.page / app.context: ordinary Playwright APIs
 ```
 
-- `createHeadlessHarness({ channel, distribution, timeout })`：既定は Chromium・ソース・操作タイムアウト 15 秒。インストール済み `msedge`／`chrome` やビルド済み `out/` を指定でき、`url`、`browser`、`openApp`、`close` を返します。
-- `openApp({ language, theme, query, context, beforeLoad })`：ストレージ・仮想装置・時計・ダウンロードを分離し、接続操作とチャートの準備を待ちます。`context` は Playwright オプション、`query` は既存ブリッジのパラメーター、非同期 `beforeLoad(page)` はナビゲーション前のルート・イベント・初期化設定用です。
-- `connect(path)`、`record()`、`pause()` は実 UI を操作します。`freeze()`／`resume()` は仮想時計を制御します。既定は凍結で、`advance(ms)` は 0–300000 ミリ秒進めて消費と実 ACK を待ちます。自動時計は先に凍結してください。
-- `flush()` は消費境界のみ、`waitForCharts()` はメインチャートの表示処理と 2 フレーム、公開関数 `frames(page)` はフォントと 2 フレームのみを待ちます。ディスク永続化・物理画面への提示・全非同期処理の完了は保証しません。
-- `diagnostics()` は `source`、`stream`、`performance`、未処理例外 `errors`、`consoleErrors` を返し、完全な性能サンプリングは有効にしません。アサーション・画像・trace・エラー処理は呼び出し側が管理します。既存のプロトコル障害フックは `app.page.evaluate()` から `window.__SHOWCASE__` を呼び出せます。
-- `app.close()` はコンテキスト、`harness.close()` は全コンテキスト・ブラウザー・サーバーを閉じ、繰り返し呼び出せます。Node 24 の `await using` は正常・例外どちらのスコープ終了でも解放します。初期化失敗時も作成済み資源を解放し、エラーをスキップにせず呼び出し側へ伝えます。
-
-常にヘッドレスで起動し、デスクトップをアクティブにしません。仮想装置は実機へ接続せず、ネイティブ設定を読みません。既存の `verify-*.mjs` は影響範囲に応じて手動で選びます。チャート診断は `bench/chart-transitions.mjs` と `bench/chart-raster.mjs` を維持し、古い内部インデックス動作に依存する重複した履歴行列スクリプトは削除しました。コア `test/` はデータ・プロトコル・ビルド不変条件を維持します。別の全ワークフロー検証スイートやブラウザー CI は維持しません。プラットフォーム・ネイティブファイル・実機収集は別途検証します。
+- `createHeadlessHarness({ channel, distribution, timeout })`：既定は Chromium・ソース・15 秒タイムアウト（`msedge`／`chrome` や `out/` 指定可）。
+- `openApp({ language, theme, query, context, beforeLoad })`：分離したストレージ・仮想デバイス・凍結時計・ダウンロード環境を用意して待機します。
+- `connect(path)`・`record()`・`pause()` は実 UI を操作し、`freeze()`/`resume()`・`advance(ms)`（0–300000 ms）は仮想時刻と実 ACK を進め、`flush()` は消費境界、`waitForCharts()` は主グラフ処理と 2 フレームを待ちます。
+- `diagnostics()` は `source`・`stream`・`performance`・`errors`・`consoleErrors` を返し、`app.page.evaluate()` で `window.__SHOWCASE__` 障害フックを呼べます。`await using`（Node 24）で終了時に自動解放しエラーをそのまま伝播します。
 
 ## 開発用プレビュー
 
-長時間記録のメモリー比較は `npm run bench:memory` を使います。既定では `bench/results/memory-before/` 内の変更前 `state.js`、`csv-codec.js`、`csv-import-core.js`、`measurement.js` と現在のソースを比較し、`-- --baseline <ディレクトリ>` でも指定できます。100 万／500 万点の連続追加、エクスポートスナップショット保持中の追加、ストリーミング CSV インポート、繰り返しクリアを検証します。列ごとの SHA-256 が一致し、列バッファーを少なくとも 20% 削減する必要があります。`bench/results/memory.json` は固有の列バッファー、Node RSS のサンプルピーク、OS のピークを区別し、Tauri／WebView2 全体のプロセスツリーの測定ではありません。
-
-`tools/showcase/` は独立したブラウザー開発ツールです。仮想 WITRN K2／POWER-Z KM003C、決定的な測定曲線、PD メッセージ、制御結果を提供し、アプリの既存取り込み・描画処理を通します。タイトルバーは decorum と同じ構造の操作部とアプリ自身のアイコン・スタイルを使い、ウィンドウ動作を模擬します。実機には接続せず、`src/`、`out/`、インストーラーには含めません。必要時のブラウザー検証もこのサーバーを使います。
-
-初回準備：
+`tools/showcase/` は仮想 WITRN K2／POWER-Z KM003C、決定的な曲線、PD メッセージ、プロトコル制御結果を提供する独立ブラウザー開発ツールです（実機通信なし・`src/`/`out/`/インストーラーへ非同梱）。
 
 ```bash
 npm ci
 npx playwright install chromium
-```
-
-対話プレビューと全画像の生成：
-
-```bash
 npm run showcase:dev
 npm run showcase:capture
 ```
 
-既定の URL は `http://127.0.0.1:4173`、テーマはライトです。独立アプリ表示では `/app/?theme=dark`／`/app/?theme=system` を指定できます。タイトルバーで仮想デバイスの選択・接続・切断、記録ボタンで開始・一時停止を操作できます。外側の開発ツールには 120 秒のデータ投入、凍結、シミュレーション再開、10 秒進める、リセットがあります。データ投入は選択計器とデバイス温度を接続して記録を始めます。プロトコル制御は POWER-Z 接続後に PDM を開きます。ポートは `npm run showcase:dev -- --port 4174` で変更でき、ローカルのみ待ち受けます。
-
-レポート動画のネイティブ検証ではシステムの保存ダイアログを開きません。debug ビルドの `video_export_pick` は `LAPOWER_VIDEO_TARGET` を読み、値があればそのパスに対して直接チケットを発行します。この分岐は `debug_assertions` でのみコンパイルされ、release ビルドではパスはネイティブダイアログからのみ取得します。ローカル自動化専用で、設定・同梱 UI・CI には含まれません。
-
-メイン画面のキャプチャは Chromium、Windows スタイル、1280×800 CSS ビューポート、2 倍ピクセル密度、100% UI 倍率を使い、2560×1600 PNG を作成します。既定で POWER-Z、デバイス温度、共通の 120 秒データを使い、仮想時間を止めてからグラフ・詳細・フォント・操作部の描画完了を待ちます。`docs/screenshots/<language>/{dark,light}-{record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report}.png` に言語ごと 18 枚、基本 32 枚を含め合計 72 枚を出力します。
-
-メイン画面はタイトルバー全体を残し、レポートは書き出し設定ダイアログではなく実際の描画結果を掲載します。モニターレポートはアプリの captureReport と共通 scene／tiny-skia レンダラーを使用し、横長画像・動画フレームは 1920×1080、縦長画像は 1920×1340 で、12 個のマーカーを含みます。プロトコルレポートは実際の PNG 書き出しを使用します。モニターレポートの生成前にフロントエンドを自動ビルドし、cargo run --locked -p lapower --example showcase-reports を実行するため、Rust と対象プラットフォームのビルド環境が必要です。--page record,pd,trigger,detection,settings でメイン画面のみ撮影する場合は Rust コンパイル不要です。
-
-「このアプリについて」のバージョンは package.json から取得し、撮影時にバージョン、言語、画面のはみ出しを検証します。画像は言語別のサブディレクトリにのみ保存し、スクリーンショットのルートには重複コピーを作成しません。
-
-ページ・テーマ・出力先を限定する場合：
-
-```bash
-npm run showcase:capture -- --theme light --page pd,trigger --output output/showcase
-npm run showcase:capture -- --help
-```
-
-`--language` は zh-CN、zh-TW、en、ja（カンマ区切り、既定は全部）、`--theme` は `light,dark`（既定でこの順）、`--page` は `record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report` に対応します。出力先はリポジトリルートからの相対パス、または絶対パスです。`tools/showcase/scenario.js` でデバイス情報、乱数シード、充電曲線、ハンドシェイク時刻、PDO・検出結果を変更できます。`bridge.js` は Tauri コマンド・イベント、記録区間、ACK、メモリー設定、ファイルハンドルを実装し、未実装呼び出しは明示的に失敗します。CSV／PD はブラウザーダウンロードで保存し、CSV はファイル選択で読み込みます。PD は固定サンプルの生メッセージを含むファイルのみ読み込め、任意の実機デコードにはネイティブアプリを使います。
-
-`pd-fixtures.json` は既存 `witrn-hid` Rust パーサーで生成した生データとデコードツリーです。通常のブラウザープレビュー・メイン画面の撮影に Rust ビルドは不要ですが、レポートの描画には Rust が必要です。生サンプルを変えたら Rust 環境で `node tools/showcase/generate-pd.mjs` を実行します。一時ジェネレーターは無視対象の `output/`、コンパイル結果は `target/` に置きます。
-
-ブラウザーはメモリー設定・ファイルを使い、実アプリのデータ領域を読み書きしません。新識別子 `io.github.khwlgh.lapower` は起動測定ツールにも反映されています。旧 WITRN-RS 設定は自動移行しません。
+- **対話プレビュー**：`http://127.0.0.1:4173` で起動し（`-- --port 4174` や `/app/?theme=dark`・`/app/?theme=system` 指定可）、120 秒データ投入・凍結・再開・10 秒進行・リセットを行えます。
+- **スクリーンショット生成**：Chromium 1280×800 × 2× DPI で 2560×1600 の UI 画像（完全タイトルバー）と 1920×1080／1920×1340 レポート画像を出力します（モニターレポートは `cargo run --locked -p lapower --example showcase-reports` 経由、メイン画面のみなら `--page record,pd,trigger,detection,settings` で Rust 不要）。詳細は `npm run showcase:capture -- --help`。
+- **サンプルとデバッグ自動化**：`tools/showcase/scenario.js` で波形や PDO を調整し、生 PD 変更時は Rust 環境で `node tools/showcase/generate-pd.mjs` を実行して `pd-fixtures.json` を再生成します。debug ビルドの `video_export_pick` はローカル自動化用に `LAPOWER_VIDEO_TARGET` による保存先指定に対応します（release ビルドはネイティブダイアログのみ）。
+- **フォント検証**：`node tools/showcase/verify-appearance.mjs` で繁体字中国語ライト／ダークと 100% / 125% / 150% DPI の DOM・Canvas フォントを `output/appearance-verification/` に検証します。
 
 ## 性能測定
 
-`bench/` はアルゴリズム、ストレージ、起動、極値、配布構成のチェックを保持します。ブラウザー harness・長時間実行・実機検証はここから削除しています。
+`bench/` はアルゴリズム・ストレージ・メモリ・ズーム描画・起動・配布構成のベンチマークを保持します（詳細は [Performance benchmarks and limits](../en/PERFORMANCE.md)（英語））：
 
 | コマンド | 用途 |
 | --- | --- |
-| `node bench/core.mjs` | 列形式ストレージ、バケット、統計、電力量積分 |
-| `node bench/core.mjs --compare` | ベースライン比較。複数回の結果とホスト状態を考慮 |
-| `node bench/core.mjs --verify-baseline` | 正しさと基準構造の単回確認。ウォームアップ・計時なし |
-| `node bench/phase2.mjs` | 範囲統計と協調分割の変更前後比較 |
-| `node bench/phase3.mjs` | 分割ストレージ、統計、電力量計算の変更前後比較 |
-| `node bench/extrema.mjs` | スキャンと極値インデックスの比較 |
-| `node bench/startup.mjs` | ネイティブコールドスタートの各段階。必要時に手動 |
-| `node bench/packaging.mjs` | `out/` の配布ファイルと埋め込み集合 |
-| `cargo bench -p lapower` | Rust のデコード、エンコード、選択処理 |
-
-配布構成と基準構造は `validate` に統合し、フロントエンドビルドを再利用します。アルゴリズム・Rust の時間計測は必要時にローカルで行い、CI ごとの重複ビルド・計測を省きます。
+| `node bench/core.mjs` | 列ストレージ・バケット・範囲統計・電力量積分 |
+| `node bench/core.mjs --compare` | `bench/baselines/` ベースラインとの複数回比較 |
+| `node bench/core.mjs --verify-baseline` | 正確性とスキーマの単回検証（時間計測なし・CI 向け） |
+| `npm run bench:memory` | 100 万／500 万点追記とストリーミング CSV インポートのメモリ比較（既定基準 `bench/results/memory-before/`、`-- --baseline <dir>` 指定可、列 SHA-256 一致と列バッファー 20% 以上削減を検証し `bench/results/memory.json` へ出力） |
+| `node bench/chart-zoom.mjs` | ホイールズーム／移動フレーム時間と Canvas 2D パイプライン計測 |
+| `node bench/phase2.mjs` | 範囲統計・協調スライスの変更前後比較 |
+| `node bench/phase3.mjs` | 分割ストレージ・統計・積分の変更前後比較 |
+| `node bench/extrema.mjs` | 全件スキャンと極値インデックスの比較 |
+| `node bench/startup.mjs` | ネイティブコールドスタート各段階の計測（必要時手動） |
+| `node bench/packaging.mjs` | `out/` 配布ファイル集合と参照整合性の検証 |
+| `cargo bench -p lapower` | Rust プロトコルデコード・エンコード・選択パス計測 |
 
 ## CI チェック
 
-`.github/workflows/ci.yml` は push／PR ごとに固定の主要チェックを実行します。
+`.github/workflows/ci.yml` は push と PR ごとに固定チェックを実行します：
 
 | Job | 内容 |
 | --- | --- |
-| `validate` | Linux 依存関係、フロントエンドビルド、JS テスト、typecheck、lint、Rust fmt、Clippy、workspace test、配布構成・基準構造 |
-| `backend-other-platforms` | Windows workspace test、macOS workspace test |
-| `crate-features` | 非既定 feature 組み合わせの Clippy・test |
-| `package` | バージョンタグ push／手動のみ。先の 3 チェックに依存し、4 対象を並列化、1 対象の失敗で他を中止しません |
-| `package-summary` | 全対象成功後、8 パッケージを検証し `SHA256SUMS` を生成 |
-| `release` | バージョンタグ push のみ。添付をアップロード・照合して自動公開 |
+| `validate` | Linux 依存、フロント構築、JS テスト、typecheck、lint、Rust fmt、Clippy、workspace test、配布構成、基準構造 |
+| `backend-other-platforms` | Windows／macOS の workspace test |
+| `crate-features` | プロトコル crate の非既定 feature 組み合わせ Clippy・test |
+| `package` | バージョンタグ push／手動のみ。4 対象を並列パッケージ化（他対象を中断しない） |
+| `package-summary` | 全 4 対象成功後に 8 パッケージ検証と `SHA256SUMS` 生成 |
+| `release` | バージョンタグ push のみ。添付検証後に自動公開 |
 
-通常ブランチ push／PR はコアチェックのみで、パッケージ化・公開はしません。CI にはブラウザーを入れず、UI 行列・長時間収集・時間ベンチマークは実行しません。必要時にヘッドレス API と既存ツールを使用します。既存 **CI** の手動入口は引き続きパッケージを作成します。公開スクリプトの失敗・再実行・添付完全性・公開済み保護は `test/release.test.js` がオフラインで検証します。
+CI にブラウザーは導入せず UI 行列や長時間収集は実行しません。公開スクリプトの失敗・保護動作は `test/release.test.js` がオフライン検証します。
 
 ## Linux でのビルド
 
-Linux のビルド・実行は継続的な実機検証に接続していません。Debian／Ubuntu の依存関係：
+Debian／Ubuntu の依存パッケージと手順（Linux 実機は継続的 CI 検証対象外）：
 
 ```bash
 sudo apt-get update
@@ -373,11 +305,9 @@ npm run build
 npx --no-install tauri build
 ```
 
-WITRN HID にはディストリビューションに応じた `/dev/hidraw*` の udev ルールが必要です。
-
 ### udev ルール（必須）
 
-Debian／Ubuntu では `/etc/udev/rules.d/99-lapower.rules` を作成し、現在のデスクトップユーザーに WITRN HID と POWER-Z のアクセスを許可できます。
+Debian／Ubuntu で `/etc/udev/rules.d/99-lapower.rules` を作成し、アクティブなローカルセッションへ WITRN HID と POWER-Z Bulk／CDC シリアルアクセス権を付与します：
 
 ```udev
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0716", TAG+="uaccess"
@@ -386,11 +316,11 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="5fc9", ATTR{idProduct}=="0061", TAG+="uaccess
 SUBSYSTEM=="tty", ATTRS{idVendor}=="5fc9", TAG+="uaccess"
 ```
 
-`sudo udevadm control --reload-rules` を実行し、計器を挿し直して起動します。`uaccess` は systemd-logind のアクティブなローカルセッションに依存します。他ディストリビューションやデスクトップなし環境では、その環境のデバイスアクセス用グループルールを使用してください。POWER-Z 制御は CDC シリアルポートへのアクセスも必要です。
+`sudo udevadm control --reload-rules` を実行して計器を挿し直してください。非 systemd-logind 環境ではディストリビューションのデバイスグループ規則を使用してください。
 
 ## macOS でのビルド
 
-Xcode Command Line Tools、Rust stable、npm で固定した Tauri CLI が必要です。
+Xcode Command Line Tools、Rust stable、npm で固定した Tauri CLI が必要です：
 
 ```bash
 npm ci
@@ -398,81 +328,38 @@ npm run build
 npx --no-install tauri build
 ```
 
-macOS private API の Cargo feature と Tauri 設定を一致させます。プラットフォーム設定は `signingIdentity: "-"`、`minimumSystemVersion: "12.0"`、CI は `MACOSX_DEPLOYMENT_TARGET=12.0` で旧 OS 対象を保持し、`CI=true`、`TAURI_BUNDLER_DMG_IGNORE_CI=false` で Finder 装飾を省略します。Developer ID・Apple 公証はありません。初回起動は [README のインストール](../../README.ja.md#-ダウンロードとインストール)を参照してください。
-
-通常 macOS CI は workspace test、タグ・手動ビルドは DMG 生成・検証も行います。GUI・実機テストは実行しません。
-
-CI のネイティブビルド検証は GUI やハードウェアの検証完了を意味しません。出荷前に Intel／Apple Silicon Mac で起動、ウィンドウと設定、ファイルダイアログ、記録、実機接続を確認し、macOS 12 は別途検証します。旧 WITRN-RS の一度限りのビルド報告は Git 履歴に残し、現在の laPower 手順として使いません。
+macOS private API の Cargo feature と `tauri.macos.conf.json` を一致させてください。ビルドは `signingIdentity: "-"`（ad-hoc 署名）と `minimumSystemVersion: "12.0"` を用います（CI は `MACOSX_DEPLOYMENT_TARGET=12.0` と `TAURI_BUNDLER_DMG_IGNORE_CI=false` を設定）。初回起動手順は [README ダウンロードとインストール](../../README.ja.md#-ダウンロードとインストール)を参照し、出荷前に Intel／Apple Silicon Mac（macOS 12 含む）で GUI と実機接続を検証してください。
 
 ## 外部温度サービス
 
-温度は**計器内蔵センサー**と **TCP 接続の外部センサー**から取得できます。WITRN は HID レポート、POWER-Z は ADC スナップショットを使います。外部熱電対、赤外線モジュールなどの値を電圧・電流とともに記録・描画・エクスポートできます。
+laPower は**計器内蔵センサー**または **TCP 接続の外部温度センサー**に対応します（WITRN は HID、POWER-Z は ADC スナップショットを使用）。
 
 ### 取得元の選択
 
-`モニター` のコマンドバーで `温度サービス` 右側の下向き矢印をクリックし、設定フライアウトを開きます。
+`モニター` コマンドバーの `温度サービス` 右側矢印から設定します：
 
 | 項目 | 説明 | 既定 |
 | --- | --- | --- |
-| `取得元` | `デバイス` = 計器温度、`外部` = TCP サービス | `外部` |
-| `IP` | サーバーアドレス（外部のみ） | `127.0.0.1` |
-| `ポート` | サーバーポート（外部のみ） | `1573` |
+| `取得元` | `デバイス` = 計器センサー、`外部` = TCP サーバー | `外部` |
+| `IP` | サーバーアドレス（`外部` のみ） | `127.0.0.1` |
+| `ポート` | サーバーポート（`外部` のみ） | `1573` |
 
-接続・切断はフライアウトではなく、コマンドバーの `温度サービス` ボタンで操作します。**接続中は取得元を変更できません**。先に切断してください。
+接続／切断は本体ボタンから行い、**接続中は取得元を変更できません**。`デバイス` は計器切断時にフロントエンドで自動リセットされ、`外部` TCP は独立して維持されます。取得値はカード、4 番目の Y 軸、CSV `Temp(°C)` 列に反映されます。
 
-`デバイス` は外部プログラムなしで計器の温度フィールドを使います。一部モデルのみで検証しており、信頼できない値は欠損として扱い、`--` と表示します。
+### プロトコルと例
 
-`デバイス` の取得元は計器と同じライフサイクルです。切断・抜去で解除し、値を `--` に戻し、`温度サービス` をリセットして `取得元` を変更可能にします。バックエンドの `temp-disconnected` は TCP のみで、デバイス温度には閉じるセッションがないため、計器の接続状態変更をフロントエンドで処理します。記録済み温度曲線と温度データ有りのフラグは維持し、現在値だけを消去します。`外部` の TCP は HID と独立し、計器を抜いても切断しません。
+最小限のプレーンテキスト TCP プロトコル（laPower がクライアント接続、ハンドシェイク／ハートビートなし、1 行に摂氏十進数 1 個＋ `\n`、例：`25.125\n`）：
 
-接続後はカードに現在値と `平均`／`最低`／`最高`、グラフに第 4 の Y 軸として表示します。`CSV をエクスポート` の矢印 → `温度を含める` で `Temp(°C)` に保存できます。
+- **接続タイムアウト 5 秒**（IPv4 優先）。
+- **送信間隔自由**：250 ms 読み取りタイムアウトで切断せず待機を継続し、TCP 分割による部分行を保持、256 バイト超の行は次の改行まで破棄、サーバー EOF で切断通知します。
 
-### プロトコル
-
-意図的に最小限の形式にしており、どの言語でも数行でサーバーを作れます。
-
-- **転送：** TCP。サーバーが待ち受け、laPower がクライアントとして接続します。
-- **形式：** 1 行に純粋な十進数を 1 個、末尾は `\n`。単位は摂氏です。
-- **ハンドシェイク、ハートビート、フレームヘッダーはありません。**
-
-```
-25.125\n
-25.250\n
-24.875\n
-```
-
-#### 詳細な動作
-
-- **接続タイムアウトは 5 秒。** アドレスを完全に解決し、IPv4、IPv6 の順で試します。
-- **送信間隔は自由。** 250 ms の読み取りタイムアウトを繰り返し、タイムアウトで切断せず待機を続けます。**10 秒を超える間隔も可能**で、アイドル中も接続を維持します。
-- **部分行を保持。** タイムアウトで途中のデータが返っても、完全な行の処理後にバッファを消去するため、TCP 分割による不正値を防ぎます。
-- **256 バイトを超える行は破棄**し、改行のないストリームによるバッファ増大を防ぎます。
-- **サーバーが切断（EOF）**するとアプリへ通知し、接続状態を更新します。
-
-### サーバー例
-
-第三者ライブラリ不要の Python 例を 2 つ同梱しています。
-
-| ファイル | 用途 |
-| --- | --- |
-| [`temperature-example/network_server.py`](../../temperature-example/network_server.py) | 0–100 の乱数温度を 1 秒ごとに送信 |
-| [`temperature-example/network_client.py`](../../temperature-example/network_client.py) | サーバーを単独で確認するクライアント |
-
-サーバーの起動（コンソール出力は簡体字中国語）：
+依存ライブラリ不要の Python 例を [`temperature-example/network_server.py`](../../temperature-example/network_server.py) と [`temperature-example/network_client.py`](../../temperature-example/network_client.py) に同梱しています：
 
 ```bash
 python temperature-example/network_server.py
 ```
 
-```
-温度服务器启动，监听 127.0.0.1:1573
-等待客户端连接...
-```
-
-アプリで `取得元` を `外部` にし、既定の `127.0.0.1:1573` のまま `温度サービス` で接続します。
-
-#### 独自サーバーの実装
-
-例を実センサー読み取りへ置き換えます。中心となる処理は次だけです。
+独自サーバー最小例（別ホストからは `0.0.0.0` にバインド）：
 
 ```python
 import socket
@@ -488,23 +375,16 @@ while True:
     conn.sendall(f"{temperature}\n".encode())
 ```
 
-別マシンのサーバーは `0.0.0.0` にバインドし、アプリに実際の IP を入力してください。
-
 ### トラブルシューティング
 
-**接続タイムアウト** — IP・ポートを確認します。別マシンでは `127.0.0.1` ではなく `0.0.0.0` にバインドし、ファイアウォールで許可します。
-
-**接続済みだが温度が `--`** — 数値と改行だけを送ります。単位（`25.1°C`）、JSON、改行なしの区切りは無効です。LF、CRLF は両方使用できます。
-
-**値が飛ぶ・明らかに異常** — 改行なしで複数の値を同じ行に詰めていないか確認します。256 バイト超の行は全体を破棄します。
-
-**`取得元` を変更できない** — 接続中はロックします。温度サービスを先に切断してください。
+- **接続タイムアウト**：IP・ポート・別ホスト時の `0.0.0.0` バインド・ファイアウォールを確認。
+- **接続済みだが `--`**：単位や JSON を使わず数値＋改行（LF／CRLF）のみ送信。
+- **値の異常ジャンプ**：改行漏れで 256 バイトを超過・破棄されていないか確認。
+- **`取得元` を変更できない**：先に本体 `温度サービス` ボタンで切断。
 
 ## 貢献方法
 
-1. Fork してブランチを作成します。
-2. 変更後に上記の主要品質チェックを実行します。
-3. フロントエンドの `// @ts-check` を保ち、純粋ロジックは直接テストできるモジュールへ分離します。
-4. モデル・ファームウェア追加前に、実機サンプルで HID バイト構造と測定範囲を確認します。
-
-テスト追加は「テストと回帰確認の範囲」に従い、通常の UI・機能表面変更のために独立テスト・設計資料・CI job を追加しません。
+1. リポジトリを Fork してブランチを作成します。
+2. 変更後に主要な品質チェック（`npm run check:all`）を実行します。
+3. フロントエンドの `// @ts-check` を維持し、純粋なデータ処理を DOM／Tauri から分離します。
+4. 新機種・ファームウェア追加前に実機サンプルでバイト配置と範囲を確認し、[テストと回帰確認の範囲](#テストと回帰確認の範囲)に従ってください。

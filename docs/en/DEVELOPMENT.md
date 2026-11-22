@@ -9,6 +9,8 @@
 - [Release process](#release-process)
 - [Quality checks](#quality-checks)
 - [Testing and regression boundaries](#testing-and-regression-boundaries)
+- [Language selection](#language-selection)
+- [Dictionary maintenance and translation checks](#dictionary-maintenance-and-translation-checks)
 - [Headless testing API](#headless-testing-api)
 - [Development showcase](#development-showcase)
 - [Performance measurements](#performance-measurements)
@@ -18,47 +20,17 @@
 - [External temperature service](#external-temperature-service)
 - [Contributing](#contributing)
 
-## Language selection
-
-In **Settings → Appearance & language → Language**, choose Follow system, 简体中文, 繁體中文, English or 日本語. Changes take effect immediately and are saved, preserving the connection, recording, data, chart range, filters and selected message. Resetting settings restores automatic selection.
-
-Linux uses the first non-empty variable in LC_ALL → LC_MESSAGES → LANG order; Windows/macOS use the native system locale. If native detection is unavailable, the WebView preferred language is used, with English as the final fallback. Hans selects Simplified Chinese and Hant Traditional Chinese before considering regions; otherwise CN/SG and bare zh select Simplified Chinese, TW/HK/MO Traditional Chinese, and ja Japanese. All other locales, including C/POSIX, select English. Case, underscores, encoding and modifier suffixes are normalized. Manual selection overrides detection.
-
-```bash
-LANG=en_US.UTF-8 ./laPower.AppImage
-LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
-env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
-```
-
-## Dictionary maintenance and translation checks
-
-`src/i18n.js` provides `t(key, params)`, locale resolution and language-change subscriptions. Four dictionaries ship offline, with English as the reference and missing-key fallback. The four columns in `src/i18n-messages.js` are English, Simplified Chinese, Traditional Chinese and Japanese. Use semantic keys, keep interpolation parameter names consistent, and add singular forms for count messages where needed. User documentation uses the Simplified Chinese version as its content reference; translations are reviewed manually.
-
-Static HTML uses English fallback text and `data-i18n` / `data-i18n-title` / `data-i18n-placeholder` / `data-i18n-aria-label` / `data-i18n-alt`. For elements containing icons or inputs, mark only the text span. Generate dynamic content with `t`, using deferred text functions for persistent notifications and logs. Switching languages refreshes labels, menus, dropdowns and charts without reconnecting or rebuilding data.
-
-Backend application errors use `{code, params, detail?}`; asynchronous events retain existing fields and add `description`. The frontend translates codes, keeps raw diagnostics and accepts plugin string errors. File-dialog titles and filters are translated by the frontend; native buttons follow the OS. PD standard names, decoded fields, raw replies, units and CSV/PD data formats remain compatible.
-
-```bash
-node --test test/i18n.test.js test/settings-persistence.test.js
-node tools/showcase/verify-i18n.mjs
-npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
-```
-
-Check all four languages, both themes, 900×600/1280×800, connection and recording/PDM states, PD selection and filters, CSV/PD round trips, errors, file-dialog entry points and accessibility labels. AppImage startup with Linux LANG/LC_* must be checked on Linux; browser simulation does not replace native or hardware acceptance.
-
-Simulated-device/browser checks do not replace Linux AppImage, macOS GUI, native file-dialog or physical-meter acceptance. On the relevant machines, manually check system locale, saved language overrides, recording/PDM, dialogs and CSV/PD round trips as needed. Historical acceptance results are not a guarantee for the current build.
-
 ## Requirements
 
 | Component | Requirement | Notes |
 | --- | --- | --- |
 | Rust | 1.85+ | Workspace `rust-version` |
-| Tauri CLI | 2.12.1 | npm-locked `@tauri-apps/cli`, invoked with `npx --no-install tauri` |
-| Windows | 10 / 11 | Current development and verification platform |
-| macOS | 12+ | Minimum deployment target; CI uses macOS 26; older-system compatibility needs hardware verification |
-| Node.js | 24 | CI, lint/typecheck/test and frontend output |
+| Tauri CLI | 2.12.1 | npm-locked `@tauri-apps/cli`, invoked via `npx --no-install tauri` |
+| Windows | 10 / 11 | Primary development and verification platform |
+| macOS | 12+ | Minimum deployment target; CI runs on macOS 26 (older systems require hardware verification) |
+| Node.js | 24 | CI, lint/typecheck/test, and frontend output |
 
-The project uses npm and commits `package-lock.json`; CI uses `npm ci`. The frontend is plain ES Modules and `frontendDist` points to generated `out/`. Node is not part of Rust compilation, but `npm run build` must precede `cargo build`, `cargo test`, `cargo check` and `cargo clippy`. After changing `src/`, rebuild `out/` before relinking the Rust binary.
+The project uses npm with a committed `package-lock.json` (`npm ci` in CI). The frontend is plain ES Modules, and `frontendDist` points to generated `out/`. Although Node does not compile Rust, `npm run build` must run before `cargo build`, `cargo test`, `cargo check`, and `cargo clippy`; rebuild `out/` after changing `src/` before relinking the Rust binary.
 
 ## Build and run
 
@@ -69,172 +41,138 @@ npm ci
 npm run dev
 ```
 
-Use these shortcuts for daily work. Existing commands remain available; npm uses the project's locked Tauri CLI:
-
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start the native app and build the development frontend automatically |
-| `npm run dev:web` | Start the simulated-device browser preview; append `-- --port 4174` to change the port |
-| `npm run build` | Generate the development frontend for Cargo to embed |
-| `npm run build:app` | Build local installers and generate the release frontend automatically |
+| `npm run dev` | Generate the development frontend automatically and launch the native app |
+| `npm run dev:web` | Launch the simulated-device browser preview (pass `-- --port 4174` to override port) |
+| `npm run build` | Generate `out/` for Cargo embedding without bundling |
+| `npm run build:app` | Generate the minified release frontend and build local installers |
 
-The `beforeDevCommand` already builds the frontend, so a separate `npm run build` before `dev` is unnecessary. Development keeps embedded assets without frontend hot reload; after frontend changes, restart `dev`, or rebuild the frontend and relink the Rust binary.
-
-Without an explicit target, local release output is in `target/release/bundle/`; CI specifies targets and uses `target/<target>/release/bundle/`. Tauri CLI runs `beforeBuildCommand` automatically to generate the minified frontend, so a separate `npm run build:dist` is unnecessary before packaging. Direct Cargo checks still require `out/` first.
+`beforeDevCommand` and `beforeBuildCommand` run the appropriate frontend build automatically, so manual `npm run build` / `npm run build:dist` is unnecessary beforehand; direct Cargo commands still require `out/`. Development mode embeds assets without frontend hot reload—restart `dev` or relink after editing `src/`. Local release bundles go to `target/release/bundle/`, while CI places them under `target/<target>/release/bundle/`.
 
 ### Antivirus blocking Windows build scripts
 
-If Cargo reports access denied (`os error 5`) or a sharing violation (`os error 32`) before running libc's `build-script-build`, and the antivirus reports blocking the same path, the affected program runs during compilation. It is not the application runtime. On the local Windows/MSVC and Kaspersky setup, libc 0.2.189's build script was blocked at optimization level 2 and ran successfully at level 0.
+If Cargo fails before running libc's `build-script-build` with `os error 5` / `os error 32` and your antivirus flags that path, the affected executable runs only at compile time, not in the shipped application. On Windows/MSVC with Kaspersky, `libc 0.2.189`'s build script triggered a block at `opt-level = 2` and succeeded at `0`.
 
-The root `Cargo.toml` sets `[profile.dev.package.libc] opt-level = 0` specifically for libc. Other dependencies retain level 2 and release settings remain unchanged. This also applies to the dev profile inherited by test and leaves libc's development library unoptimized. A `profile.dev.build-override` alone cannot override the existing `package."*"` setting. Rerun the original build command after updating the configuration; Cargo rebuilds the affected artifacts without clearing the entire `target/` directory.
-
-This compatibility adjustment covers the verified compiler combination, without guaranteeing that other versions or files will avoid false positives. If blocking continues, keep the antivirus detection name, path and file hash for investigation and vendor feedback. `os error 5` alone does not establish a false positive.
+The root `Cargo.toml` sets `[profile.dev.package.libc] opt-level = 0` (covering both dev and test while leaving release and other dependencies unchanged; `profile.dev.build-override` cannot override `package."*"`). Rerun the build command directly without wiping `target/`. If still blocked, capture the detection name, path, and file hash for investigation.
 
 ### Cleanup levels
 
-Each level includes the previous one and waits for deletion to finish. The default preserves Rust compilation caches, dependencies and installers:
+Each level includes the previous one and waits for completion while preserving Rust caches, dependencies, and installers by default:
 
 | Command | Removes |
 | --- | --- |
-| `npm run clean` | `out/`, `output/`, `bench/results/`, `.playwright-cli/` at the root and under `src/`, and `src-tauri/gen/schemas/` |
-| `npm run clean:incremental` | Also removes `debug/release` incremental caches under `target/` and `src-tauri/target/`, including cross-compilation targets |
-| `npm run clean:build` | Also removes all of `target/`, `src-tauri/target/` and `dist/` |
-| `npm run clean:all` | Also removes `node_modules/`; run `npm ci` before resuming development |
+| `npm run clean` | `out/`, `output/`, `bench/results/`, `.playwright-cli/` (root and `src/`), and `src-tauri/gen/schemas/` |
+| `npm run clean:incremental` | Plus `debug/release` incremental caches in `target/` and `src-tauri/target/` (including cross-targets) |
+| `npm run clean:build` | Plus all of `target/`, `src-tauri/target/`, and `dist/` |
+| `npm run clean:all` | Plus `node_modules/` (run `npm ci` before resuming work) |
 
-Every level supports a preview without deletion:
+Preview targets without deleting:
 
 ```bash
 npm run clean:build -- --dry-run
 ```
 
-The cleaner requires Node.js and Git, locates the checkout from the script, and validates every target and its Git tracking status before deleting anything. A symlink or junction at a target or its ancestors prevents cleanup. It deletes at most four directories concurrently and reports individual results and total time; busy-file errors have bounded retries, and remaining failures return a nonzero exit code. Close relevant development, build and preview processes first; the command does not terminate them.
-
-Cleanup also removes verification screenshots in `output/` and raw results and local comparison snapshots in `bench/results/`. Tracked documentation screenshots, `bench/baselines/`, source, lockfiles, caches outside the checkout and application recovery data are preserved. Manage a custom `CARGO_TARGET_DIR` yourself if it is outside the listed paths. Starting `dev` rebuilds the frontend after cleanup; direct Cargo commands still require `npm run build` first.
+The cleaner validates every path and Git tracking status before deleting, refusing symlinks or junctions on targets or ancestors. It runs up to 4 directories in parallel, retries transient busy-file locks, and exits nonzero on remaining failures. Close running dev/build/preview processes first; tracked screenshots, `bench/baselines/`, sources, lockfiles, and external caches (including custom `CARGO_TARGET_DIR`) are left untouched.
 
 ### Runtime component list
 
-About uses the bundled `src/third-party-components.json` component list; its license reader loads the full-text `src/legal-notices.json` catalog on demand. After changing Cargo runtime dependencies, bundled resources or license inputs, run `npm run components:generate`, commit both generated files and any required materials, then run `npm run components:check`. Do not edit the generated catalogs manually. Locked, offline Cargo metadata/tree conservatively merges normal dependencies for Windows x64, Linux x64, macOS Intel and Apple Silicon, excluding workspace, development/build-only and procedural-macro packages; it is not an exact release compilation-unit graph. Bundled resource versions come from their declarations and are marked as bundled when unknown.
+About uses the bundled `src/third-party-components.json` catalog and loads full texts on demand from `src/legal-notices.json`. After changing Cargo runtime dependencies, bundled assets, or license inputs, run `npm run components:generate`, commit both generated files and any needed materials, then verify with `npm run components:check` (never edit generated catalogs by hand).
 
-Legal materials come from root [`COPYRIGHT`](../../COPYRIGHT), [`LICENSE`](../../LICENSE), [`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0), actual files in the local Cargo cache and stored supplements registered in `licenses/materials.json`. Supplements record fixed versions, sources, revisions, upstream paths and SHA-256; text normalization only converts CRLF to LF. By default, missing materials, changed content or invalid catalogs fail generation/checking. Exceptions for missing upstream materials or license-branch selection require explicit review, a fixed version, and recorded reasons and evidence; they appear offline with the catalog and are reported by generation/checking, without restoring any missing upstream text. Preparing dependency caches or supplements may require a separate network step; generation/checking does not download them on demand. Ordinary frontend builds only validate and copy generated materials, without Cargo or network access; CI's `validate` continues checking the catalogs.
+The generator runs offline `--locked` Cargo metadata/tree queries across all four desktop targets and merges normal dependencies conservatively (excluding workspace, dev/build-only, and proc-macro crates; run `cargo fetch --locked` beforehand if the local Cargo cache is empty). Full texts come from [`COPYRIGHT`](../../COPYRIGHT), [`LICENSE`](../../LICENSE), [`LICENSE.LGPL-3.0`](../../LICENSE.LGPL-3.0), the local Cargo cache, and stored supplements in `licenses/materials.json` (pinned by version, revision, upstream path, and SHA-256; only explicitly reviewed versioned exceptions bypass missing upstream texts). Normal frontend builds validate and copy generated files without Cargo or network access.
 
-Own contributions to the application, scripts, tools, tests, benchmarks, temperature examples, workflows and project documentation/configuration use GPL-3.0-only. Libraries, tests, examples and project-owned documentation/configuration under `crates/` use LGPL-3.0-or-later; see [`COPYRIGHT`](../../COPYRIGHT) for asset and generated-material scope. Keep upstream and other authors' notices, do not infer assignments from Git authorship, and do not label third-party material as KHWLGH's original work. The fixed project notice `Copyright (C) 2026 KHWLGH` applies only to KHWLGH's own contributions. Keep the GNU license texts verbatim.
-
-A release Tag's ZIP/tar.gz archives contain this repository's sources, without local dependency caches or system SDKs. To build from an archive, use `cargo fetch --locked` to obtain locked Cargo dependency sources and `npm ci` to obtain locked npm build tools; `Cargo.lock` and `package-lock.json` determine their versions and available integrity checks. Use the [`src/third-party-components.json`](../../src/third-party-components.json) component list to help locate dependency sources. Current toolchain, platform SDK/system requirements and build commands are documented in this guide's environment and platform sections; a Tag archive alone does not include all dependency sources.
+Release tag source archives exclude local dependency caches and SDKs; obtain locked sources via `cargo fetch --locked` and `npm ci` when building from an archive. Project copyright lines remain fixed to `Copyright (C) 2026 KHWLGH` for own contributions without inferring assignment from Git authorship; see [`COPYRIGHT`](../../COPYRIGHT) for exact scope.
 
 ## Release process
 
-During development, edit only `changelog/unreleased/zh-CN.md`. Before a release, ask the development assistant to merge duplicates and prepare user-facing Chinese notes, generate `en.md`, and review both languages manually. Notes are bilingual; sentence-by-sentence or item-by-item parity is not required. No translation API is used.
+During development, update `changelog/unreleased/zh-CN.md` only. Before releasing, consolidate user-facing Simplified Chinese notes and prepare/proofread `en.md` (item-by-item parity is not required; never use translation APIs).
 
 ```bash
-npm run release:prepare -- 0.2.6 --date 2026-11-14 --dry-run
-npm run release:prepare -- 0.2.6 --date 2026-11-14
+npm run release:prepare -- 0.3.0 --date 2026-11-22 --dry-run
+npm run release:prepare -- 0.3.0 --date 2026-11-22
 npm run release:notes
 npm run showcase:capture
 ```
 
-Replace the example version and date. Preparation requires both language files with non-empty bodies and refuses an existing version directory. It archives notes to `changelog/<version>/`, synchronizes product versions, updates the root index and writes `dist/release-notes.md`; drafts are cleared only on completion. `--dry-run` prints the plan and preview without writing. Failure preserves drafts: inspect the error and `git diff`, fix the problem and retry; manually reconcile any partially generated release files first.
-
-Release notes expand English and collapse Simplified Chinese, with installation instructions in both languages. Preview and publication use the same renderer. `GITHUB_REPOSITORY` takes precedence; locally, the repository is otherwise read from `origin`. Commands do not commit, create/push tags or publish a Release. Review the preview and run quality checks before committing and pushing a new tag.
+Replace the version and date with target values. `release:prepare` validates non-empty bilingual drafts and refuses existing version directories, then archives to `changelog/<version>/`, syncs versions, updates `CHANGELOG.md`, writes `dist/release-notes.md`, and clears the drafts only upon success (`--dry-run` previews without writing; failures leave drafts intact). Release notes expand English and collapse Simplified Chinese with platform install notes; commands never commit, tag, or publish automatically.
 
 ### Refresh documentation screenshots before release
 
-Every release preparation must refresh documentation screenshots in this order: synchronize product versions and archive notes → capture and review screenshots → run quality checks → commit all release changes → push the version tag → let GitHub Actions build, verify and publish the installers. Official releases do not require local installer prebuilds. `release:prepare` handles versions and notes; screenshots use the separate command above. If the version is already archived, rerun `npm run showcase:capture` without preparing the same version again.
+Follow this order before every release: **sync versions & archive notes → capture & inspect screenshots → run quality checks → commit changes → push version tag → let GitHub Actions build and publish** (no local installer prebuilds needed; rerun `npm run showcase:capture` directly if the version is already archived).
 
-Install Chromium once with `npx playwright install chromium`; on Linux, use `npx playwright install --with-deps chromium` if browser system libraries are missing. Capture the full matrix of Simplified Chinese, Traditional Chinese, English and Japanese × light and dark × monitor, PD analysis, protocol control and settings: 32 images under `docs/screenshots/<language>/`, retaining the full title bar. Use the current version, the same 120 seconds of simulated data and the established viewport; a partial capture does not replace the release set.
+Run `npx playwright install chromium` once (`--with-deps` on Linux if browser libraries are missing). Capture generates **72 PNGs** by default (40 main UI + 32 report samples) under `docs/screenshots/<language>/`:
 
-Capture also includes eight protocol-detection workspace images and 32 report samples: 16:9 images, long images, video frames and protocol detection reports. The default set has 72 images (40 main interface screenshots plus 32 report samples); all 32 base workspace images remain required.
+- **32 required base screenshots**: 4 languages × light/dark × Monitor, PD analysis, Protocol control, and Settings (full title bar, unified 120 s simulated data, current manifest version).
+- **40 additional samples**: 8 Protocol detection screenshots + 32 rendered report samples (16:9 PNG, long PNG, video frame, and protocol report).
 
-Review every image for language, theme, clipped text, charts, selected messages, protocol state and settings navigation, with no blank, obscured or overflowing content. Confirm the version matches the manifests. Update screenshot versions, descriptions and image references in all four READMEs, and commit all 72 images together with the documents. A failed capture or review leaves release preparation incomplete; fix the issue and regenerate. See [Development showcase](#development-showcase) for capture options and fixture details.
+Inspect every image for clipping, layout, language, theme, charts, protocol state, and version alignment, then update all four READMEs before committing the full set.
 
 ### Documentation maintenance
 
-README, User guide, and Development and build are maintained in English, Simplified Chinese, Traditional Chinese and Japanese. Architecture, performance, protocol-crate READMEs and changelogs are bilingual English/Simplified Chinese. The external temperature service is maintained here. Main documents link to their own language where possible; Traditional Chinese pages use Simplified Chinese secondary documents, and Japanese pages use English, labeling the language. Do not add translation hashes, item-parity checks or documentation-only CI.
+README, User guide, and Development and build are maintained in English, Simplified Chinese, Traditional Chinese, and Japanese. Architecture, Performance, protocol-crate READMEs, and changelogs are bilingual English/Simplified Chinese (v0.2.2 and earlier keep Simplified Chinese only). Main docs link to their own language where available; Traditional Chinese links secondary docs to Simplified Chinese, and Japanese links them to English with a language note. Do not add translation hashes or doc-only CI jobs.
 
 ### Changelog links
 
-All release bodies live in `changelog/<version>/`; root `CHANGELOG.md` is only a version index and retains the original version-heading anchors. Link full history to that index and a specific release directly to its language file. Version 0.2.2 and earlier have only `zh-CN.md`, without English placeholder pages. Resolve relative links from the note directory, for example `../../docs/USAGE.md` for Chinese or `../../docs/en/USAGE.md` for English. GitHub Release rendering pins them to the corresponding version tag.
+Release notes live in `changelog/<version>/`; `CHANGELOG.md` is an index preserving original heading anchors. Resolve relative links from the note file (e.g., `../../docs/en/USAGE.md`); GitHub Release rendering pins them to the release tag.
 
 ### Setting the version separately
 
-To synchronize versions without archiving release notes, the existing command remains available:
+To synchronize product versions without archiving notes:
 
 ```bash
-npm run version:set -- 0.2.4
+npm run version:set -- 0.3.0
 ```
 
-Replace `0.2.4` with the target version. The command accepts `X.Y.Z` without leading zeros, validates all files before writing, and synchronizes these locations. Repeating the same version does not rewrite files, create commits/tags, update dependencies or edit the changelog:
-
-| File | Field |
-| --- | --- |
-| `package.json` | `version` |
-| `package-lock.json` | Top-level and root package `version` |
-| `Cargo.toml` | `[workspace.package] version` |
-| `Cargo.lock` | Every workspace member package's `version` |
-| `src-tauri/tauri.conf.json` | `version` |
-
-Rust member crates inherit through `version.workspace = true`. About reads the version from Tauri; the showcase reads `package.json`. Rebuild after changing it so executables and installers use the new version.
-
-`test/version-sync.test.js` checks manifest/lock consistency, semantic versions, workspace inheritance, the shared update command and macOS private API configuration.
+Validates `X.Y.Z` without leading zeros and atomically updates `package.json`, `package-lock.json`, `Cargo.toml` (`[workspace.package] version`), `Cargo.lock`, and `src-tauri/tauri.conf.json` (Rust member crates inherit via `version.workspace = true`; repeating the current version is a no-op without creating commits or tags). `test/version-sync.test.js` verifies consistency.
 
 ### Manual builds and initial acceptance
 
-Once the workflow is on the default branch, select the branch/tag in GitHub **Actions → CI → Run workflow**. Manual runs perform the existing quality checks and package four targets. They do not create or publish a Release, even when a version tag is selected.
+Trigger **Actions → CI → Run workflow** on any branch or tag to run checks and package all four targets without creating or publishing a Release:
 
 | Platform | Runner | Rust target | Installers |
 | --- | --- | --- | --- |
-| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI, NSIS EXE, Portable ZIP |
+| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI, NSIS EXE (`_setup`), Portable ZIP |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | DEB, RPM, AppImage |
 | macOS Intel | `macos-26-intel` | `x86_64-apple-darwin` | DMG |
 | macOS Apple Silicon | `macos-26` | `aarch64-apple-darwin` | DMG |
 
-Each successful target provides a separate `packages-*` artifact retained for 14 days. If all four succeed, `release-packages` contains eight release packages and `SHA256SUMS`. Run `sha256sum -c SHA256SUMS` in the extracted directory. Package names include version and platform architecture; NSIS EXE also uses `_setup`. The Windows portable ZIP is named `laPower_<version>_windows-x64_portable.zip`; extract it and launch `laPower.exe`. It requires Microsoft Edge WebView2 Runtime and continues using the standard user data directory for application settings.
-
-Before enabling automatic tag releases, manually build and verify Windows installation, launch on both Mac architectures, Linux installation and device connection after udev setup. Check macOS 12 compatibility separately on hardware. CI verifies Mac architecture, ad-hoc signatures, minimum-system metadata and DMG integrity; it does not run the GUI or connect meters.
-
-macOS explicitly uses `--bundles app,dmg`. Tauri removes the temporary `.app` when building only a DMG; specifying APP also retains it for subsequent validation. Artifact collection still publishes only DMG.
+When all four targets pass, `release-packages` collects all eight packages and `SHA256SUMS` (`sha256sum -c SHA256SUMS`). The Windows portable archive (`laPower_<version>_windows-x64_portable.zip`) runs `laPower.exe` directly when WebView2 Runtime is installed and uses standard user data directories. macOS uses `--bundles app,dmg` so `.app` stays available for signature/metadata validation (only DMG is published). Verify Windows, both Mac architectures (including macOS 12), and Linux with udev rules on real hardware before enabling tag releases.
 
 ### Automatic release on a version tag
 
-After initial acceptance, update the version, organize the changelog, run checks, commit and push a tag matching the manifests, for example:
+After verification and committing release updates, push a tag matching the manifests (`vX.Y.Z`):
 
 ```bash
-git tag v0.2.4
-git push origin v0.2.4
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-Tags must be `vX.Y.Z` and match manifest versions, or packaging fails before it starts. CI uses Node.js 24, Rust stable, Tauri CLI 2.12.1 and `tauri-apps/tauri-action@v1`. npm uses `npm ci`, Cargo uses `--locked`, and per-target Rust caches point to the workspace root `target/`. Linux stays on Ubuntu 22.04 to limit dependence on newer glibc.
-
-Only after all quality checks and four builds succeed does CI collect eight release packages and generate checksums. The release job uses the running repository's `GITHUB_TOKEN` to create a temporary draft, upload packages/checksums, verify remote asset count, sizes and SHA-256, then publish the Release automatically. No manual Publish or additional PAT is needed. Only this job receives `contents: write`; organizational policy must permit it.
-
-`scripts/release.mjs` reads bilingual Markdown from the current version directory instead of parsing the root historical changelog. Tag runs before packaging and the publisher reuse the same reader, requiring only both files and non-empty bodies. Relative links point to that version tag, not the default branch; GitHub-generated commit/PR summaries are not used. `npm run release:notes` regenerates a local preview without changing source documents.
-
-Runs for the same ref are serialized without canceling an active upload. Upload/verification failure leaves a draft; rerun failed Actions jobs to reuse it and replace this release's same-name assets. If the draft contains other assets, inspect it before retrying. Already public Releases are never overwritten automatically. Changes to published binaries require a new version and tag.
-
-Windows currently lacks certificate signing; macOS uses ad-hoc signatures without Developer ID/notarization; Linux packages do not configure udev. This process does not enable an updater or build Windows/Linux ARM64 or Mac Universal packages.
+CI uses Node.js 24, Rust stable, Tauri CLI 2.12.1, and `tauri-apps/tauri-action@v1` (staying on Ubuntu 22.04 for broader glibc compatibility). Once checks and all four builds succeed, the `release` job uses `GITHUB_TOKEN` (`contents: write`) to create a draft Release, upload the eight packages and `SHA256SUMS`, verify counts/sizes/SHA-256 checksums, and publish automatically. Runs on the same ref serialize without cancelling active uploads; failed uploads retain the draft for rerun replacement, while already-public Releases are never overwritten. Windows installers are unsigned, macOS uses ad-hoc signing, and Linux packages do not configure udev permissions.
 
 ## Quality checks
 
-Choose one entry point for the scope of your changes:
+Pick the check matching your scope (all stop on first failure):
 
 | Command | When to use |
 | --- | --- |
-| `npm run check` | Daily frontend checks |
-| `npm run check:rust` | Rust checks, generating `out/` first |
-| `npm run check:all` | All core checks before delivery, including both groups and component-list verification |
+| `npm run check` | Daily frontend checks (`npm test`, `typecheck`, `lint` without building `out/`) |
+| `npm run check:rust` | Rust checks (builds `out/` once, then runs `cargo fmt`, workspace Clippy, and tests) |
+| `npm run check:all` | Full pre-delivery verification (both groups plus `components:check` with one frontend build) |
 
-`check` runs `npm test`, `typecheck` and `lint` in sequence without building the frontend or running Cargo. `check:rust` builds the frontend once, then runs Rust formatting, workspace Clippy and tests. `check:all` combines both groups with `components:check`, builds the frontend only once, and stops on the first failure. Individual commands remain available. Component-list verification needs Cargo and may fetch uncached dependencies. The existing CI check set is unchanged.
-
-`npm test` uses Node's built-in runner, discovering only `test/*.test.js` to avoid historical source copies in output directories. Place new core tests there with the same naming convention; run selected files with `node --test test/name.test.js`. Biome skips output, dependencies and `.local-*` machine-local tooling without moving files. Core coverage includes pure logic, data processing, protocol/file contracts, security boundaries and version synchronization. Major files include:
+`npm test` discovers `test/*.test.js` only (run individual files with `node --test test/name.test.js`); Biome skips output, dependencies, and `.local-*` directories. Core tests cover pure logic, data pipelines, protocol/file contracts, security boundaries, and release invariants:
 
 ```text
-chart-buckets  chart-columns  chart-extrema  chart-window
-csv-codec     csv-import     device-stream  ingest
-measurement   pd-capture-file  pd-model      range-stats
-recording     recording-spool  security-csp  settings-persistence
-version-sync  bench-gate
+bench-gate        chart-binding     chart-buckets    chart-columns     chart-cooperative
+chart-cursor      chart-extrema     chart-feedback   chart-fill        chart-pacing
+chart-window      clean             csv-codec        csv-import        device-stream
+export-workflows  frame-scheduler   i18n             ingest            km003c-model
+macos-menu        marker-ui         markers          measurement       pd-capture-file
+pd-model          provenance        range-stats      recording         recording-spool
+release           security-csp      settings-persistence shortcuts     tauri-config
+temp-disconnect   third-party-components version-sync video-export
 ```
 
-Rust workspace tests, formatting, Clippy and protocol-crate feature combinations remain in place. When changing `usbpd-parser` or `witrn-hid` feature gates, run the CI combinations:
+When touching feature gates in `usbpd-parser` or `witrn-hid`, also run the CI non-default feature matrix:
 
 ```bash
 for combo in \
@@ -250,15 +188,40 @@ done
 
 ## Testing and regression boundaries
 
-- Ordinary feature additions/removals/renames, UI layout, style, wording and option-list changes do not require new regression tests by default.
-- Add tests for data loss/corruption, protocol compatibility, crashes/deadlocks, security boundaries, release-build invariants or confirmed historical defects with high impact.
-- Extend existing core tests first; do not create a test file, design document or CI job for every small feature.
-- Run performance benchmarks and real-device checks manually as needed, rather than browser regression on every change.
-- Keep CI's core checks fixed; individual features should not add dedicated regression workflows.
+- Ordinary feature additions/removals/renames and UI layout, style, wording, or option changes do not require new regression tests.
+- Add tests only for data loss/corruption, protocol compatibility, crashes/deadlocks, security boundaries, release-build invariants, or confirmed high-impact regressions.
+- Extend existing core test files rather than creating new test files, design docs, or CI jobs per small feature.
+- Run performance benchmarks and real-device acceptance manually as needed rather than as automated browser CI regressions.
+
+## Language selection
+
+In **Settings → Appearance & language → Language**, select Follow system, 简体中文, 繁體中文, English, or 日本語. Changes apply immediately and persist while preserving connections, recordings, chart windows, filters, and selected messages (resetting settings restores automatic selection).
+
+Linux reads the first non-empty variable in `LC_ALL → LC_MESSAGES → LANG`; Windows/macOS query the native system locale, falling back to WebView preferred language and then English. Script tags `Hans` / `Hant` take precedence over region codes; otherwise `CN`/`SG` and bare `zh` map to Simplified Chinese, `TW`/`HK`/`MO` to Traditional Chinese, `ja` to Japanese, and everything else (including `C`/`POSIX`) to English (normalizing case, underscores, encodings, and modifiers; manual choice overrides auto-detection).
+
+```bash
+LANG=en_US.UTF-8 ./laPower.AppImage
+LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
+env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
+```
+
+## Dictionary maintenance and translation checks
+
+`src/i18n.js` supplies `t(key, params)`, locale resolution, and change subscriptions; `src/i18n-messages.js` stores columns in English (reference and missing-key fallback), Simplified Chinese, Traditional Chinese, and Japanese order. Use semantic keys and matching interpolation placeholders; user documentation uses Simplified Chinese as content reference with manual translation review.
+
+Static HTML keeps English fallback text and `data-i18n*` attributes (marking only inner text spans when icons or controls are present); dynamic text and persistent notifications use `t` or deferred callbacks. Language switches update labels and charts without reconnecting or rebuilding data. Backend errors return `{code, params, detail?}`, translated on the frontend while retaining raw diagnostics (and accepting plugin strings); PD names, raw replies, units, and CSV/PD formats stay unchanged.
+
+```bash
+node --test test/i18n.test.js test/settings-persistence.test.js
+node tools/showcase/verify-i18n.mjs
+npm run showcase:capture -- --language zh-CN,zh-TW,en,ja
+```
+
+Check all four languages, light/dark themes, 900×600 and 1280×800 layouts, connection/recording/PDM states, PD filtering, CSV/PD round trips, and accessibility labels. Browser simulation never replaces Linux `LANG`/`LC_*`, macOS GUI, native file dialog, or physical hardware verification.
 
 ## Headless testing API
 
-`tools/showcase/headless.mjs` exports a headless API for other Node scripts, reusing Playwright, the simulated server and device bridge. Install Chromium once with `npx playwright install chromium`. It adds no test scenarios, runner or CI jobs; capture, existing UI checks and browser benchmarks share it. Example for a script at the repository root:
+`tools/showcase/headless.mjs` provides a reusable Playwright headless wrapper for Node scripts (`npx playwright install chromium`), adding no test runners or CI jobs:
 
 ```js
 import { createHeadlessHarness } from './tools/showcase/headless.mjs';
@@ -274,94 +237,63 @@ console.log(await app.diagnostics());
 // app.page / app.context: ordinary Playwright APIs
 ```
 
-- `createHeadlessHarness({ channel, distribution, timeout })` defaults to Chromium, source files and a 15-second operation timeout. Select installed `msedge`/`chrome` or a built `out/`. Returns `url`, `browser`, `openApp` and `close`.
-- `openApp({ language, theme, query, context, beforeLoad })` isolates storage, virtual devices, clock and downloads, and waits for connection controls and charts. `context` accepts Playwright context options; `query` reuses bridge parameters; async `beforeLoad(page)` installs routes, listeners or init scripts before navigation.
-- `connect(path)`, `record()` and `pause()` operate actual UI controls. `freeze()`/`resume()` control the clock, frozen by default. `advance(ms)` advances 0–300000 virtual milliseconds and waits for consumption and real ACK; freeze an automatic clock first.
-- `flush()` waits only for the consumption boundary. `waitForCharts()` waits for main-chart display work and two frames; exported `frames(page)` waits only for fonts and two frames. None promises disk durability, physical presentation or completion of all asynchronous work.
-- `diagnostics()` returns `source`, `stream`, `performance`, uncaught `errors` and `consoleErrors` without enabling full performance sampling. The caller owns assertions, screenshots, traces and error handling; existing protocol fault hooks remain accessible through `app.page.evaluate()` and `window.__SHOWCASE__`.
-- `app.close()` closes its context; `harness.close()` closes all contexts, browser and server. Both are idempotent. Node 24 `await using` cleans up on normal or exceptional scope exit; failed initialization also cleans up created resources. Errors propagate to the caller rather than becoming skips.
-
-Launch is always headless and never activates desktop windows. Virtual devices do not connect hardware or read native settings. Choose existing `verify-*.mjs` tools manually by affected area. Chart diagnostics retain `bench/chart-transitions.mjs` and `bench/chart-raster.mjs`; the overlapping historical matrix script relying on old private index behavior has been removed. Core `test/` retains data, protocol and build invariants. There is no additional full-workflow acceptance suite or browser CI. Platform behavior, native filesystems and acquisition hardware require separate validation.
+- `createHeadlessHarness({ channel, distribution, timeout })`: defaults to Chromium, source files, and a `15 s` timeout; accepts `msedge`/`chrome` or built `out/`.
+- `openApp({ language, theme, query, context, beforeLoad })`: creates isolated storage, virtual devices, frozen clock, and download context, waiting for controls and charts to settle.
+- `connect(path)`, `record()`, and `pause()` drive actual UI buttons; `freeze()`/`resume()` and `advance(ms)` (0–300000 ms) advance virtual time with real consumption ACKs; `flush()` awaits consumption and `waitForCharts()` awaits main-chart work plus two frames.
+- `diagnostics()` returns `source`, `stream`, `performance`, uncaught `errors`, and `consoleErrors`; `app.page.evaluate()` can invoke `window.__SHOWCASE__` fault hooks. `await using` (Node 24) automatically cleans up on scope exit and propagates errors directly.
 
 ## Development showcase
 
-`npm run bench:memory` compares long-recording memory against pre-change snapshots of `state.js`, `csv-codec.js`, `csv-import-core.js` and `measurement.js` in `bench/results/memory-before/`, or a directory passed with `-- --baseline <directory>`. It covers continuous appends at one/five million points, appends with retained export snapshots, streaming CSV imports and repeated clears. Per-column SHA-256 must match; column buffers must save at least 20%. Results in `bench/results/memory.json` distinguish unique column buffers, sampled Node RSS peaks and OS peaks; they do not measure the complete Tauri/WebView2 process tree.
-
-`tools/showcase/` is a separate browser development tool with virtual WITRN K2 and POWER-Z KM003C devices, deterministic measurements, PD messages and protocol-control results. Data uses the app's existing ingestion/rendering logic. The full title bar uses decorum-style control structure and the app's icons/styles with virtual window behavior. It does not connect hardware or enter `src/`, `out/` or installers. The headless API reuses its server.
-
-Initial setup:
+`tools/showcase/` is a standalone browser development tool providing simulated WITRN K2 and POWER-Z KM003C devices, deterministic curves, PD traffic, and protocol-control outcomes (reusing app icons/styles and full title-bar layout; never touches hardware or enters `src/`, `out/`, or shipped installers).
 
 ```bash
 npm ci
 npx playwright install chromium
-```
-
-Interactive preview and all showcase images:
-
-```bash
 npm run showcase:dev
 npm run showcase:capture
 ```
 
-The preview listens on `http://127.0.0.1:4173` and defaults to light mode. Standalone app views accept `/app/?theme=dark` or `/app/?theme=system`. The title bar selects/connects/disconnects virtual devices, and recording controls start/pause. The outer development tool offers filling 120 seconds of data, freezing, resuming simulation, advancing 10 seconds and resetting the preview. Filling automatically connects the selected meter and device temperature source and starts recording. Protocol control requires connecting POWER-Z and opening PDM. Use `npm run showcase:dev -- --port 4174` to change the port; the server listens only locally.
-
-Native acceptance for the report video never opens the system save dialog: a debug build reads `LAPOWER_VIDEO_TARGET` inside `video_export_pick` and issues a ticket for that path directly. The branch is compiled only under `debug_assertions`, so a release build still takes its path from the native dialog, and it serves local automation only — not settings, the shipped interface or CI.
-
-Main interface capture uses Chromium, Windows window style, a 1280×800 CSS viewport, 2× pixel density and 100% UI scale, producing 2560×1600 PNGs. Defaults use POWER-Z, device temperature and the same 120 seconds of simulated data. Virtual time is frozen before waiting for actual charts, details, fonts and controls to finish rendering. Output is `docs/screenshots/<language>/{dark,light}-{record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report}.png`, 18 images per language and 72 total, including the 32 base workspace images.
-
-Main interface screenshots retain the full title bar. Report samples show rendered output rather than export settings dialogs. Monitor samples use the application's captureReport projection and shared scene/tiny-skia renderer: 1920×1080 landscape images and video frames, and 1920×1340 long images, with 12 sample markers. Protocol reports use the actual PNG export. Before rendering Monitor reports, capture builds the frontend and runs cargo run --locked -p lapower --example showcase-reports; Rust and the platform build environment are required. Use --page record,pd,trigger,detection,settings for main interface screenshots without Rust compilation.
-
-The About version comes from package.json; capture checks the version, language and viewport overflow. Images are written only to language subdirectories, without duplicate copies in the screenshot root.
-
-Capture selected pages/themes or choose another output directory:
-
-```bash
-npm run showcase:capture -- --theme light --page pd,trigger --output output/showcase
-npm run showcase:capture -- --help
-```
-
-`--language` accepts zh-CN, zh-TW, en, ja (comma-separated; all by default). `--theme` accepts `light,dark`, generated in that order by default. `--page` accepts `record,pd,trigger,detection,settings,report-image,report-long,report-video,protocol-report`. Output directories are relative to the repository root or absolute. Edit `tools/showcase/scenario.js` to change virtual device information, random seed, charging curves, handshake timing and PDO/protocol-detection results. `bridge.js` implements Tauri commands, events, recording segments, ACKs, in-memory settings and file handles; unimplemented calls fail explicitly. CSV/PD export uses browser downloads; CSV import uses a browser file picker. PD import supports only raw messages included in the frozen fixtures; arbitrary hardware messages still need the native app for decoding.
-
-`pd-fixtures.json` stores raw messages and trees generated by the existing `witrn-hid` Rust parser. Browser previews and main interface captures need no Rust compilation; rendering report samples requires Rust. After changing raw fixtures, regenerate with `node tools/showcase/generate-pd.mjs` in a Rust environment. The temporary generator goes in ignored `output/`, and build artifacts in `target/`.
-
-Browser settings and files are in memory and do not access real app data directories. The app uses `io.github.khwlgh.lapower`, also reflected in startup measurement tools. Former WITRN-RS settings are not migrated automatically.
+- **Interactive preview**: listens on `http://127.0.0.1:4173` (override port with `-- --port 4174`; standalone app views support `/app/?theme=dark` or `/app/?theme=system`), with outer toolbar controls to populate 120 s showcase data, freeze/resume simulation, step 10 s, and reset.
+- **Screenshot capture**: Chromium at 1280×800 CSS × 2× DPI outputs 2560×1600 UI screenshots (full title bar) plus 1920×1080 / 1920×1340 report renders (monitoring reports run `cargo run --locked -p lapower --example showcase-reports`; pass `--page record,pd,trigger,detection,settings` to skip Rust). Filter via `--language`, `--theme`, `--page`, `--output` (`npm run showcase:capture -- --help`).
+- **Fixtures and debug automation**: edit `tools/showcase/scenario.js` to adjust simulated curves or PDOs; run `node tools/showcase/generate-pd.mjs` in a Rust environment to rebuild `pd-fixtures.json` after changing raw PD frames. Debug builds allow `video_export_pick` to read `LAPOWER_VIDEO_TARGET` for local automation without opening the OS save dialog (release builds require native dialogs).
+- **Appearance and font verification**: run `node tools/showcase/verify-appearance.mjs` to verify Traditional Chinese light/dark themes and 100%/125%/150% DPI DOM/Canvas fonts under `output/appearance-verification/`.
 
 ## Performance measurements
 
-`bench/` retains algorithm, storage, startup, extrema and shipping-shape checks. Browser harnesses, long browser runs and hardware acceptance have been removed from it.
+`bench/` holds algorithm, storage, memory, zoom rendering, startup, and packaging benchmarks (see [Performance benchmarks and limits](PERFORMANCE.md)):
 
 | Command | Purpose |
 | --- | --- |
-| `node bench/core.mjs` | Column storage, buckets, statistics and energy integration |
-| `node bench/core.mjs --compare` | Algorithm baseline comparison; interpret across repeated runs and host conditions |
-| `node bench/core.mjs --verify-baseline` | One correctness/structure check, without warmup or timing |
-| `node bench/phase2.mjs` | Before/after range statistics and cooperative slicing |
-| `node bench/phase3.mjs` | Before/after chunked storage, statistics and energy |
-| `node bench/extrema.mjs` | Scan versus extrema-index algorithms |
-| `node bench/startup.mjs` | Native cold-start phases, manual as needed |
-| `node bench/packaging.mjs` | Shipping files and embedded set in `out/` |
-| `cargo bench -p lapower` | Rust protocol decoding, encoding and selection paths |
-
-Shipping-shape and baseline-structure checks run in `validate`, reusing its frontend build. Run algorithm and Rust timing benchmarks locally on demand, avoiding repeated CI builds and timings.
+| `node bench/core.mjs` | Column storage, bucketing, range statistics, and energy integration |
+| `node bench/core.mjs --compare` | Multi-round comparison against `bench/baselines/` |
+| `node bench/core.mjs --verify-baseline` | Single-pass correctness and baseline schema check (non-timed, CI-safe) |
+| `npm run bench:memory` | 1M / 5M-point append and streaming CSV import memory comparison (defaults to `bench/results/memory-before/`, supports `-- --baseline <dir>`, requires matching column SHA-256 and ≥ 20% column-buffer reduction; writes `bench/results/memory.json`) |
+| `node bench/chart-zoom.mjs` | Wheel-zoom/pan frame timing and Canvas 2D pipeline benchmark |
+| `node bench/phase2.mjs` | Before/after range statistics and cooperative slicing comparison |
+| `node bench/phase3.mjs` | Before/after chunked storage, statistics, and energy comparison |
+| `node bench/extrema.mjs` | Per-sample scan versus extrema-index comparison |
+| `node bench/startup.mjs` | Native cold-start phase probing (manual as needed) |
+| `node bench/packaging.mjs` | Verify `out/` shipping file set and resource references |
+| `cargo bench -p lapower` | Rust protocol decoding, encoding, and selection benchmarks |
 
 ## CI gates
 
-`.github/workflows/ci.yml` runs the fixed core checks on every push and PR:
+`.github/workflows/ci.yml` runs fixed core gates on every push and PR:
 
 | Job | Contents |
 | --- | --- |
-| `validate` | Linux dependencies, frontend build, JS tests, typecheck, lint, Rust fmt, Clippy and workspace tests, shipping shape and baseline structure |
-| `backend-other-platforms` | Windows workspace tests; macOS workspace test |
-| `crate-features` | Clippy/tests for non-default protocol-crate feature combinations |
-| `package` | Version-tag pushes/manual runs only; depends on the three checks above, packages four targets in parallel without canceling others on one failure |
-| `package-summary` | Verifies eight release packages and generates `SHA256SUMS` after all targets succeed |
-| `release` | Version-tag pushes only; uploads/verifies assets and publishes automatically |
+| `validate` | Linux deps, frontend build, JS tests, typecheck, lint, Rust fmt, Clippy, workspace tests, packaging shape, and baseline schema |
+| `backend-other-platforms` | Windows and macOS workspace tests |
+| `crate-features` | Clippy and tests for non-default protocol crate feature combinations |
+| `package` | Version-tag pushes and manual runs only; builds four targets in parallel without cancelling siblings on failure |
+| `package-summary` | Verifies all eight packages and generates `SHA256SUMS` once all four targets succeed |
+| `release` | Version-tag pushes only; uploads, verifies remote assets, and publishes the Release automatically |
 
-Ordinary branch pushes and PRs run core checks without packaging or release. CI installs no browser and runs no UI matrix, endurance capture or timing benchmark. Use the headless API and existing tools on demand; the existing manual **CI** entry still builds installers. `test/release.test.js` verifies failure, retries, asset integrity and public-release protection offline.
+CI installs no browser and runs no UI matrix or long captures; `test/release.test.js` covers release script error handling and verification offline.
 
 ## Building on Linux
 
-Linux builds/runtime are not continuously verified with hardware. Debian/Ubuntu dependencies:
+Debian/Ubuntu build dependencies and commands (Linux is not continuously verified on hardware):
 
 ```bash
 sudo apt-get update
@@ -373,11 +305,9 @@ npm run build
 npx --no-install tauri build
 ```
 
-For WITRN HID, configure the distribution's udev rules for `/dev/hidraw*`.
-
 ### udev rules (required)
 
-On Debian/Ubuntu, create `/etc/udev/rules.d/99-lapower.rules` to grant the active desktop user access to WITRN HID and POWER-Z interfaces:
+On Debian/Ubuntu, create `/etc/udev/rules.d/99-lapower.rules` to grant active local desktop sessions access to WITRN HID and POWER-Z Bulk/CDC interfaces:
 
 ```udev
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0716", TAG+="uaccess"
@@ -386,11 +316,11 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="5fc9", ATTR{idProduct}=="0061", TAG+="uaccess
 SUBSYSTEM=="tty", ATTRS{idVendor}=="5fc9", TAG+="uaccess"
 ```
 
-Run `sudo udevadm control --reload-rules`, unplug/reconnect the meter, then start the app. `uaccess` depends on an active local systemd-logind session. Other distributions/headless environments should use their device-access group rules. POWER-Z protocol control also requires its CDC serial port.
+Run `sudo udevadm control --reload-rules`, replug the meter, then launch the app. Non-`systemd-logind` or headless setups should use their distribution's device-access group rules.
 
 ## Building on macOS
 
-Install Xcode Command Line Tools, Rust stable and the npm-locked Tauri CLI:
+Requires Xcode Command Line Tools, stable Rust, and the npm-locked Tauri CLI:
 
 ```bash
 npm ci
@@ -398,81 +328,38 @@ npm run build
 npx --no-install tauri build
 ```
 
-The macOS private API Cargo feature and Tauri configuration must match. Platform configuration uses `signingIdentity: "-"` and `minimumSystemVersion: "12.0"`. CI sets `MACOSX_DEPLOYMENT_TARGET=12.0` to preserve the deployment target, plus `CI=true` and `TAURI_BUNDLER_DMG_IGNORE_CI=false` to skip Finder styling. There is no Developer ID signature or Apple notarization. See [README installation](../../README.md#-download-and-installation) for first launch.
-
-Ordinary macOS CI runs workspace tests; version-tag/manual builds also generate and verify DMGs, without GUI or hardware checks.
-
-Native build checks do not establish GUI or hardware acceptance. Before shipping, verify startup, windows/settings, file dialogs, recording and real-meter connections on Intel and Apple Silicon Macs; verify macOS 12 separately. One-off build reports for the former WITRN-RS product remain in Git history, not in current laPower instructions.
+Keep the macOS private API Cargo feature aligned with `tauri.macos.conf.json`. Builds use `signingIdentity: "-"` (ad-hoc) and `minimumSystemVersion: "12.0"` (CI exports `MACOSX_DEPLOYMENT_TARGET=12.0` and `TAURI_BUNDLER_DMG_IGNORE_CI=false`). See [README installation](../../README.md#-download-and-installation) for Gatekeeper instructions; GUI and meter connections still require real-machine verification on Intel and Apple Silicon Macs (including macOS 12).
 
 ## External temperature service
 
-laPower supports two temperature sources: **the meter's sensor** or **an external sensor over TCP**. WITRN temperature comes from HID reports; POWER-Z uses ADC snapshots. External sources let you record, chart and export thermocouple, infrared or other sensor readings alongside voltage/current.
+laPower supports **the meter's internal sensor** or **an external TCP temperature server** (WITRN reads HID reports; POWER-Z reads ADC snapshots).
 
 ### Selecting a source
 
-In the `Monitor` command bar, click the down arrow beside `Temperature service` to open configuration:
+Open the arrow beside `Temperature service` in the `Monitor` command bar:
 
 | Field | Description | Default |
 | --- | --- | --- |
-| `Source` | `Device` = meter sensor; `External` = TCP temperature service | `External` |
-| `IP` | Server address (external source only) | `127.0.0.1` |
-| `Port` | Server port (external source only) | `1573` |
+| `Source` | `Device` = meter sensor; `External` = TCP server | `External` |
+| `IP` | Server address (external only) | `127.0.0.1` |
+| `Port` | Server port (external only) | `1573` |
 
-Use the command-bar `Temperature service` toggle to connect/disconnect. Connection controls are not in the flyout. **Source selection is locked while connected**; disconnect before changing it.
+Connect/disconnect via the main `Temperature service` button; **source selection locks while connected**. `Device` resets automatically when the meter disconnects (cleared by the frontend on meter disconnect), whereas `External` TCP remains independent. Connected temperatures populate the reading card, fourth Y axis, and CSV `Temp(°C)` column.
 
-`Device` requires no external program and uses the meter's temperature field. This field is verified on only some models. The parser treats untrustworthy values as missing, displayed as `--`.
+### Protocol and examples
 
-A `Device` source follows the meter lifecycle: disconnecting/unplugging removes it, clears live readings to `--`, resets the `Temperature service` toggle and unlocks `Source`. The backend emits `temp-disconnected` only for TCP, since the device source has no separate session to close; the frontend handles its removal when meter connection state changes. Recorded temperature curves and the temperature-data flag remain intact. The `External` TCP session is independent of the HID stream and survives unplugging the meter.
+Minimal plain-text TCP protocol (laPower connects as client; no handshake or heartbeat; one Celsius decimal value per `\n`-terminated line, e.g., `25.125\n`):
 
-Once connected, the card shows the current temperature and `Average` / `Min` / `Max`; the chart uses its fourth Y axis. `Export CSV` arrow → `Include temperature` writes it to `Temp(°C)`.
+- **5-second connect timeout** (tries IPv4 before IPv6).
+- **Flexible interval**: 250 ms read-timeout loop waits indefinitely between values; preserves partial lines across TCP packets, discards lines over 256 bytes through the next newline, and disconnects on server EOF.
 
-### Protocol
-
-The protocol is deliberately minimal; a server takes only a few lines in any language.
-
-- **Transport:** TCP, with the server listening and laPower connecting as a client.
-- **Format:** one plain decimal number per line, ending in `\n`, in degrees Celsius.
-- **No handshake, heartbeat or frame header.**
-
-```
-25.125\n
-25.250\n
-24.875\n
-```
-
-#### Behavior details
-
-- **Five-second connection timeout.** Addresses are fully resolved; IPv4 is tried before IPv6.
-- **No fixed sending interval.** Reads use a 250 ms timeout loop; a timeout continues waiting instead of disconnecting. **Intervals over ten seconds are valid**, and the connection stays open while idle.
-- **Partial lines are retained.** A read timeout can return partial data. The buffer is cleared only after a complete line is processed, so TCP fragmentation does not produce invalid values.
-- **Lines exceeding 256 bytes are discarded** to prevent an unterminated stream from growing the buffer indefinitely.
-- **Server close/EOF** notifies the application and updates connection state.
-
-### Example servers
-
-The repository includes two Python examples with no third-party dependencies:
-
-| File | Purpose |
-| --- | --- |
-| [`temperature-example/network_server.py`](../../temperature-example/network_server.py) | Sends a random temperature between 0 and 100 once per second |
-| [`temperature-example/network_client.py`](../../temperature-example/network_client.py) | Standalone client for checking the server |
-
-Start the server (its console messages are in Simplified Chinese):
+Two dependency-free Python examples ship in [`temperature-example/network_server.py`](../../temperature-example/network_server.py) and [`temperature-example/network_client.py`](../../temperature-example/network_client.py):
 
 ```bash
 python temperature-example/network_server.py
 ```
 
-```
-温度服务器启动，监听 127.0.0.1:1573
-等待客户端连接...
-```
-
-In the app, select `Source` → `External`, keep the default `127.0.0.1:1573`, and connect with the command-bar `Temperature service` toggle.
-
-#### Implementing your own server
-
-Replace the sample generator with a real sensor read. The core is just:
+Minimal custom server (bind `0.0.0.0` for remote hosts):
 
 ```python
 import socket
@@ -488,23 +375,16 @@ while True:
     conn.sendall(f"{temperature}\n".encode())
 ```
 
-For a remote server, bind to `0.0.0.0` and enter the server's actual IP in the app.
-
 ### Troubleshooting
 
-**Connection timeout** — Check address/port. On another machine, bind the server to `0.0.0.0` rather than `127.0.0.1` and allow the port through its firewall.
-
-**Connected but temperature stays `--`** — Send only a number followed by a newline. Units (`25.1°C`), JSON wrappers or values without newline separation are invalid. Both LF and CRLF line endings work.
-
-**Jumping or clearly incorrect values** — Check for several numbers on one line without a newline. Lines over 256 bytes are discarded entirely.
-
-**Cannot change `Source`** — It is locked while the temperature service is connected. Disconnect first.
+- **Connection timeout**: check IP, port, `0.0.0.0` binding on remote hosts, and firewall rules.
+- **Connected but shows `--`**: send bare decimal numbers plus LF/CRLF only (no units or JSON wrappers).
+- **Erratic jumps**: verify every value ends with a newline so lines stay under 256 bytes.
+- **Locked `Source` radio**: disconnect via the `Temperature service` main button first.
 
 ## Contributing
 
 1. Fork the repository and create a branch.
-2. Run the core quality checks after completing changes.
-3. Keep frontend `// @ts-check`; extract pure logic into directly testable modules where practical.
-4. Verify HID byte layouts and ranges with hardware samples before adding a model or firmware.
-
-Follow the testing boundaries above; ordinary UI/surface-feature changes should not add standalone tests, design documents or CI jobs.
+2. Run core quality checks (`npm run check:all`) after making changes.
+3. Keep frontend `// @ts-check` enabled and decouple pure data logic from DOM/Tauri.
+4. Verify HID/Bulk byte layouts and ranges against hardware samples before adding devices or firmware, and follow [Testing and regression boundaries](#testing-and-regression-boundaries).

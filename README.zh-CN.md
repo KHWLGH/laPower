@@ -23,33 +23,21 @@
 
 </div>
 
-## 语言选择
-
-在「设置 → 外观与语言 → 语言」可选择跟随系统、简体中文、繁體中文、English、日本語。切换立即生效并保存偏好，保留连接、记录、数据、图表范围、筛选和选中报文；重置设置回到自动模式。
-
-Linux 按第一项非空的 LC_ALL → LC_MESSAGES → LANG 检测；Windows／macOS 使用原生系统 locale。原生不可用时采用 WebView 首选语言，最终回退英文。Hans 优先选择简中、Hant 优先选择繁中；否则 CN／SG 和无区域 zh 为简中，TW／HK／MO 为繁中，ja 为日文，其余含 C／POSIX 为英文。统一处理大小写、下划线、编码与修饰后缀；手动选择覆盖自动检测。
-
-```bash
-LANG=en_US.UTF-8 ./laPower.AppImage
-LC_ALL=ja_JP.UTF-8 ./laPower.AppImage
-env -u LC_ALL LC_MESSAGES=zh_TW.UTF-8 LANG=en_US.UTF-8 ./laPower.AppImage
-```
-
 ## 📖 项目简介
 
-laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM002C 的桌面上位机。它通过 USB HID 或厂商 Bulk 接口读取测量帧，在本地完成实时显示、长时间记录与 USB-PD 协议解码，这些功能可离线使用；仅手动检查更新会请求 GitHub，外部温度源通过 TCP 连接配置的服务器。
+laPower 是一款面向维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM002C 的桌面上位机。应用通过 USB HID 或厂商 Bulk 接口采集测量帧，并在本地离线完成实时显示、长时记录与 USB-PD 逐字段解码；仅手动检查更新会请求 GitHub，外部温度源通过 TCP 连接用户配置的服务器。
 
-技术上基于 **Tauri v2**：后端是 **Rust**（设备通信、USB-PD 解析、后台线程生命周期），前端源码是**原生 JavaScript ES Modules**，发布构建通过 esbuild 合并脚本和样式，图表用 uPlot。所有运行时前端依赖都已 vendor 进仓库，运行时不从 CDN 加载任何资源。
+技术上基于 **Tauri v2**：后端使用 **Rust** 负责设备通信、USB-PD 解析与后台线程生命周期管理；前端采用**原生 JavaScript ES Modules** 与 uPlot 图表，发布时通过 esbuild 打包合并。所有运行时前端依赖均已内置于仓库，不从外部 CDN 加载资源。
 
-除了常规的电压 / 电流 / 功率 / 温度，laPower 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把仪表捕获到的 **USB-PD 报文逐字段解码**：你可以直接看到充电器广播了哪些 PDO、设备请求了哪一档 PPS 电压、以及协商在第几毫秒完成。
+除常规的电压、电流、功率与温度外，laPower 还会记录 **D+ / D− / CC1 / CC2 四条信号线电压**，并把捕获到的 **USB-PD 报文逐字段展开**：可直观查看充电器广播的 PDO、设备请求的 PPS 电压以及协商完成的毫秒时刻。
 
-> **平台说明：** 版本 Tag 通过 GitHub Actions 自动打包 Windows x64、Linux x64、macOS Intel / Apple Silicon，并在检查通过后发布 Release；下载以对应版本的实际附件为准。项目主要在 Windows 上开发与验证，macOS / Linux 的 GUI、设备连接和 macOS 12 兼容性仍需实机验收。构建与发布方式见 [开发与构建](docs/DEVELOPMENT.md#发布流程)。
+> **平台说明：** 版本 Tag 会触发 GitHub Actions 自动打包 Windows x64、Linux x64、macOS Intel / Apple Silicon 并发布 Release（实际产物以各版本附件为准）。开发与主要验证基于 Windows；macOS / Linux 的 GUI、设备连接及 macOS 12 兼容性仍需实机验收。详见 [开发与构建](docs/DEVELOPMENT.md#发布流程)。
 
-> **提示：** 本软件大部分使用 Claude Code、Grok Build、Codex 等 VibeCoding 工具制作，可能存在未知问题。欢迎通过 [Issues](https://github.com/KHWLGH/laPower/issues) 反馈。
+> **提示：** 本软件大部分借助 Claude Code、Grok Build、Codex 等 AI 编程工具完成，可能仍存在未知问题，欢迎通过 [Issues](https://github.com/KHWLGH/laPower/issues) 反馈。
 
 ## 📸 界面预览
 
-以下展示图为 Windows 上的 **0.3.0** 版本，使用独立开发工具生成的模拟设备与数据，保留软件完整标题栏，浅色主题优先展示。软件默认跟随系统，开发展示工具默认浅色。每次发布前更新整套截图，重新生成方法见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
+以下截图基于 Windows 平台 **0.3.0** 版本，使用虚拟设备与模拟数据生成（保留完整标题栏，软件默认跟随系统主题）。重新生成整套截图见 [开发展示工具](docs/DEVELOPMENT.md#开发展示工具)。
 
 | 浅色主题 | 深色主题 |
 | :---: | :---: |
@@ -61,7 +49,7 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 ### 报告样式
 
-主界面覆盖四语与浅深主题，共 40 张；下方展示实际生成的 32 张报告样式。报告使用相同的 120 秒模拟记录，横图和视频保留前 8 个打点，长图保留全部 12 个打点，视频示例取中间帧。
+以下展示同一 120 秒模拟记录实际渲染的导出报告效果；16:9 横图与视频保留前 8 个打点，长图保留全部 12 个打点（视频取中间帧）。
 
 | 浅色主题 | 深色主题 |
 | :---: | :---: |
@@ -74,46 +62,43 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 
 ### 实时监控
 
-- 电压 / 电流 / 功率 / 温度读数卡，每项附最小值、最大值与平均值。
-- **累计能量 (Wh) 与累计容量 (mAh)** 由软件对采样点积分得出。睡眠、时钟回拨或 NTP 前跳造成的时间跳变（超过采样间隔的 8 倍，且至少 2 秒）只按一个采样周期推进，不会污染积分结果。
-- **信号线电压** D+ / D− / CC1 / CC2，可叠加到图表上，也随 CSV 一起导出；实际分辨率取决于设备，WITRN 的 CC1 / CC2 为 0.1 V。
-- 可选**记录电流方向**：开启后保留电流符号（正向为正、反向为负，K2 原生支持 ±10 A），侧栏用箭头指示方向。
-- **自动暂停**：当电压 / 电流 / 功率低于阈值并持续指定秒数后自动暂停记录，适合无人值守的充放电测试。
-- **POWER-Z 高速采样**：KM003C/KM002C 支持认证后的 AdcQueue 1000 次/秒采样；认证失败会自动回退到 100 次/秒。
-- **临时恢复与上限**：记录按秒写入应用缓存中的临时文件，仅用于崩溃恢复；正常退出自动清理，单次记录默认上限 512 MB，达到上限自动暂停。显式导出才生成长期 CSV。
+- 电压、电流、功率与温度读数卡均附带最小值、最大值与平均值。
+- **累计能量 (Wh) 与累计容量 (mAh)** 由软件基于采样点积分计算，并自动过滤休眠或系统时间跳变（超过 8 倍采样间隔且至少 2 秒）带来的异常时间增量。
+- **信号线电压** D+ / D− / CC1 / CC2 可叠加绘图并随 CSV 导出（分辨率取决于仪表，WITRN 的 CC1 / CC2 为 0.1 V）。
+- 可选**记录电流方向**，开启后保留正负符号（正向为正、反向为负，K2 原生支持 ±10 A），侧栏同步显示方向箭头。
+- **自动暂停**：电压、电流或功率持续低于阈值达设定秒数后自动暂停，适用于无人值守充放电测试。
+- **POWER-Z 高速采样**：KM003C / KM002C 支持经认证的 AdcQueue 1000 次/秒采样；认证失败自动回退至 100 次/秒。
+- **崩溃恢复与容量上限**：记录按秒写入应用缓存临时文件（正常退出自动清理），单次记录默认上限 512 MB 并在达限时自动暂停；长期保存请显式导出 CSV。
 
 ### USB-PD 协议分析
 
-- 解码 SOP / SOP′ 的控制报文、数据报文、扩展报文，以及 Hard Reset / Cable Reset。
-- 报文列表带角色方向徽章（`SRC → SNK`、`SRC|SNK → Plug`）和 **PDO / RDO 速览**，例如
-  `Fixed: 5.0V 9.0V 12.0V 15.0V 20.0V SPR AVS: 9-15V@3.0A PPS: 5.0-21.0V` 或 `Position:7 PPS:8.0V,3.45A`。
-- 详情面板把当前帧**逐字拆开**：原始 Data Object 十六进制 → 报文头字段表（Extended / Objects / Msg ID / Power Role / Spec Rev / Data Role / Msg Type）→ 每个 PDO 的完整位域表。
-- 可过滤消息类型、隐藏 GoodCRC（链路层确认帧，通常占报文总量一半以上）。
-- **跟随记录**模式让 PD 抓包与主监控完全联动：只在记录时采集、开始/暂停同步、清空互相联动。
-- 报文日志可增长，配合虚拟列表在数十万条量级仍可流畅滚动。
+- 解码 SOP / SOP′ 控制报文、数据报文、扩展报文及 Hard Reset / Cable Reset。
+- 报文列表提供角色方向徽章（`SRC → SNK`、`SRC|SNK → Plug`）与 **PDO / RDO 速览**，如 `Fixed: 5.0V 9.0V 12.0V 15.0V 20.0V SPR AVS: 9-15V@3.0A PPS: 5.0-21.0V` 或 `Position:7 PPS:8.0V,3.45A`。
+- 详情面板**逐字展开帧结构**：原始 Data Object 十六进制 → 报文头字段 → 各 PDO 完整位域表。
+- 支持按消息类型筛选并一键隐藏 GoodCRC 链路确认帧（通常占总报文半数以上）。
+- **跟随记录**模式让 PD 抓包与主监控联动启停及清空；配合虚拟列表可在数十万条报文规模下保持流畅滚动。
 
 ### 高性能图表
 
-- uPlot 绘制 + WebView2 Canvas 2D / `OffscreenCanvas` 增量像素桶渲染管线（支持脏矩形局部重绘、零分配采样扫描与直通路径缓存），**8 条曲线 / 4 条 Y 轴**（电流 A、电压 V、功率 W、温度 °C，四轴严格共线），另有两级密集子网格与整数/规整 Y 轴刻度提升读数精度。
-- 密集数据自动切换为增量 min/max 像素桶渲染，**百万点仍可拖动**；回看按画布实际像素分辨率保留细节，慢帧不会把曲线降成宽桶，放大后恢复原始点。完整数据保留在列式存储中，悬停时二分回查原始采样点。主图与底部时间线导航器均支持滚轮横向缩放与拖动平移，放大后平移及重新开启实时跟随交互流畅，录制中也可使用。
-- 1000 次/秒采样时自动绘图约 10–20 帧/秒，拖动与缩放独立刷新；采集与保存完整保留所有样本。录制和停止后的回看复用历史极值索引，缩小或平移窗口时无需重新扫描完整历史。验证范围及性能边界见 [性能说明](docs/PERFORMANCE.md#测量与硬件边界)。
-- tooltip 显示已开启且有有效数值的通道（最多 8 个），图例展示已显示通道；可在 `显示` 面板中切换显隐，并逐通道调整阴影开关、填充不透明度（0 = 关闭填充，1–100 = 开启）、线条颜色、线宽与纵向偏移；这些外观微调仅改变显示投影，不修改原始采样值。
+- 基于 uPlot 与 Canvas 2D / `OffscreenCanvas` 增量像素桶渲染管线，支持 **8 条曲线与 4 条严格共线量化 Y 轴**（电流 A、电压 V、功率 W、温度 °C）及两级密集子网格。
+- 密集波形自动切换增量 min/max 像素桶与局部脏矩形重绘，**百万点仍可流畅拖动**；完整数据保留在分块列式存储中，回看保留画布像素级细节，放大还原原始点，悬停通过二分查找读取真实样本。
+- 主图与底部时间线导航器均支持滚轮横向缩放、拖动平移及录制中的实时跟随；1000 次/秒采样时自动绘图保持在 10–20 fps，缩放与交互独立刷新并复用历史极值索引（详见 [性能说明](docs/PERFORMANCE.md#测量与硬件边界)）。
+- 悬停 tooltip 显示当前启用的有效通道，可在 `显示` 面板独立调节各通道显隐、曲线阴影（默认开启且状态持久化）、填充不透明度（0–100%）、线条颜色、线宽及纵向偏移（仅改变显示投影）。
 
 ### 数据记录与互通
 
-- **图片与视频报告**：将整段记录导出为 PNG 或短视频，选择分辨率、主题、曲线与打点；图片支持 16:9 和保留全部打点的长图。
-- **POWER-Z 协议检测与报告**：逐项查看支持状态、电压与依据，独立读取 PD PDO 和版本；可将本轮检测导出为 1080p–4K PNG，支持的协议可填入触发表单。
-- **CSV 导出**分别勾选温度、设备信息和打点，可同时保存 CSV 与 PD JSON；**导入**按表头名匹配列，兼容旧文件。
-- **打点标注**：记录时点击 `打点` 或按 `M` 给当前时刻写标签（例如电量 50%），鼠标停在图上时按 `M` 标记光标下的点；图上显示竖线，CSV 的 `Marker` 列随文件导出导入。
-- **PD 捕获导出 / 导入**，使用带版本号的 JSON 信封，旧版本格式仍可读取。
-- 采样率 0.1 – 100 次/秒可选；POWER-Z 设备额外支持 1000 次/秒（后端接受 1 – 60000 ms，按设备限制）。
+- **图片与视频报告**：将整段记录导出为 16:9 / 长图无损 PNG 或 MP4/MOV 短视频（可选分辨率、主题、曲线及打点），无需安装 ffmpeg。
+- **POWER-Z 协议检测与报告**：查看各协议支持状态、电压档位与原始依据，独立读取 PD PDO 与版本，可导出 1080p–4K PNG 报告或一键填入触发表单。
+- **CSV 导出与导入**：支持分别勾选温度、设备信息与打点，支持同时导出 CSV 与 PD JSON；导入按列名匹配并兼容历史文件。
+- **打点标注**：按 `M` 或点击 `打点` 标记当前时刻（悬停图表时标记光标对应点），标签随 CSV 的 `Marker` 列保存与恢复。
+- **采样率与 PD 捕获**：支持 0.1–100 次/秒（POWER-Z 额外支持 1000 次/秒，后端按设备限制接收 1–60000 ms）；PD 捕获采用带版本号的 JSON 格式并兼容旧版导入。
 
 ### 界面
 
-- 多 Tab 工作区（监控 / PD 分析 / 协议控制 / 设置），设备连接常驻标题栏，任何页面都能快速连断；协议控制入口始终可见，连接支持的 POWER-Z 后启用操作。
-- **跟随系统 / 浅色 / 深色**三种主题，默认跟随系统，设计令牌对齐 Fluent UI webDark / webLight，并配以磨砂玻璃面板材质与主题/页面过渡动效；可在设置中选择自定义本地背景图片（PNG / JPEG / WebP，不内置默认壁纸，可随时清除）并调节背景透明度。
-- **界面缩放 50 – 200%**，系统缩放偏大导致窗口拥挤时可整体调低。
-- macOS 使用原生窗口按钮，支持全屏、平铺与最小化；Windows 保留 Win11 贴靠布局浮窗，Windows / Linux 使用右侧 Windows 风格窗口按钮。
+- 多 Tab 工作区（监控 / PD 分析 / 协议控制 / 设置），设备连接栏常驻标题栏便于随时连断；协议控制入口常驻，连接支持的 POWER-Z 后启用操作。
+- 支持**跟随系统 / 浅色 / 深色**主题，采用对齐 Fluent UI 的磨砂玻璃表面与过渡动效，并可选持久化**自定义本地背景图片**（PNG / JPEG / WebP，不内置壁纸）及透明度调节。
+- 支持**简体中文、繁體中文、English、日本語**四语实时切换（不中断连接、记录与图表状态），默认自动检测系统语言（规则见 [语言选择](docs/DEVELOPMENT.md#语言选择)）。
+- 支持 **50–200% 界面缩放**；macOS 采用原生窗口按钮，Windows 保留 Win11 贴靠布局支持，Windows / Linux 使用右侧窗口控制按钮。
 
 ## 📱 支持的设备
 
@@ -125,32 +110,24 @@ laPower 是一个连接维简 (WITRN) USB 电压电流表与 POWER-Z KM003C/KM00
 | POWER-Z KM003C | `0x5FC9` | `0x0063` |
 | POWER-Z KM002C | `0x5FC9` | `0x0061` |
 
-维简设备按厂商 VID `0x0716` 枚举，因此**不在上表中的型号或固件变体同样会出现在下拉框里**（显示为「未知 WITRN 设备 (0716:XXXX)」）。它们能否正常读数取决于固件是否使用相同的报告布局。POWER-Z 设备通过 `0x5FC9` 的 Vendor Bulk 接口单独枚举。
-
-同一物理设备存在多个 HID 接口时，后端优先选择厂商自定义 Usage Page。设备名会附带 USB 拓扑端口，如 `WITRN K2 (USB 4-4)`。
+维简设备按 VID `0x0716` 枚举，未列出的型号或固件变体也会显示在列表中（标注为「未知 WITRN 设备 (0716:XXXX)」），报告格式兼容即可读取；POWER-Z 通过 `0x5FC9` Vendor Bulk 接口枚举。同一设备存在多个 HID 接口时优先选用厂商自定义 Usage Page，设备名自动附带 USB 拓扑端口（如 `WITRN K2 (USB 4-4)`）。
 
 ## 📦 下载与安装
 
-项目原名 WITRN-RS。laPower 的应用标识为 `io.github.khwlgh.lapower`，使用独立的设置与缓存目录，不自动迁移旧应用设置；已有 CSV 和 PD 捕获文件仍可导入。
+本项目原名 WITRN-RS；laPower 使用独立应用标识 `io.github.khwlgh.lapower` 与配置/缓存目录，不自动迁移旧版设置，原有 CSV 与 PD 捕获文件仍可直接导入。
 
-**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下载 `.msi` 或 `.exe`（NSIS）安装包。若系统已装有 Microsoft Edge WebView2 Runtime，也可下载 `*_windows-x64_portable.zip`，解压后双击 `laPower.exe`。维简仪表使用系统 USB HID；POWER-Z 使用系统 HID / WinUSB，Windows 通常会自动绑定，无需额外安装驱动。
-
-Windows 安装包当前未做证书签名，首次运行可能显示 SmartScreen 提示。
-
-**macOS 12+** —— Intel Mac 下载带 `macos-x64` 的 `.dmg`，Apple Silicon（M1 及以后）下载带 `macos-arm64` 的 `.dmg`，打开后将 `laPower.app` 拖到 Applications。应用采用 ad-hoc 签名，没有 Developer ID 签名或 Apple 公证；首次启动如果被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中允许本次打开。macOS 12 是构建目标，旧系统兼容性仍需实机验证；构建步骤和验收边界见 [macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)。
-
-**Linux (x64)** —— 下载带 `linux-x64` 的 `.deb`、`.rpm` 或 `.AppImage`。Debian / Ubuntu 可用 `sudo apt install ./laPower_<版本>_linux-x64.deb`；Fedora 等使用 RPM 的发行版可用 `sudo dnf install ./laPower_<版本>_linux-x64.rpm`。AppImage 先执行 `chmod +x ./laPower_<版本>_linux-x64.AppImage`，再直接运行；可能需要安装发行版的 FUSE 2 运行库。安装包基于 Ubuntu 22.04 构建，不承诺适用于所有发行版。
-
-Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [udev 规则](docs/DEVELOPMENT.md#udev-规则必需)，否则可能无法扫描或打开设备。Release 中的 `SHA256SUMS` 可用于校验八个发布包。
+- **Windows 10 / 11 (x64)**：在 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下载 `.msi`、`.exe`（NSIS）安装包或免安装便携版 `*_windows-x64_portable.zip`（需系统已安装 Microsoft Edge WebView2 Runtime，解压运行 `laPower.exe`）。通常无需额外安装驱动；未签名安装包首次运行可能触发 SmartScreen 提示。
+- **macOS 12+**：Intel Mac 下载 `macos-x64` `.dmg`，Apple Silicon（M1 及以后）下载 `macos-arm64` `.dmg`，将 `laPower.app` 拖入 Applications。构建采用 ad-hoc 签名，首次被 Gatekeeper 拦截时请在「系统设置 → 隐私与安全性」中允许打开；旧系统兼容性与编译说明见 [macOS 自行编译](docs/DEVELOPMENT.md#macos-自行编译)。
+- **Linux (x64)**：下载 `linux-x64` `.deb`（`sudo apt install ./laPower_<版本>_linux-x64.deb`）、`.rpm`（`sudo dnf install ./laPower_<版本>_linux-x64.rpm`）或 `.AppImage`（`chmod +x` 后运行，可能需要 FUSE 2）。连接仪表前须先配置 [udev 规则](docs/DEVELOPMENT.md#udev-规则必需)。发布页 `SHA256SUMS` 可校验全部八个产物。
 
 ## 🚀 快速上手
 
-1. **连接设备** —— 插入仪表，点击标题栏设备下拉框旁的刷新按钮扫描，选中目标设备后点击 `连接`。
-2. **开始记录** —— 在「监控」Tab 点击 `开始记录`。读数卡与图表立即开始更新，累计能量与容量同步积分（暂停期间不计入）。
-3. **抓 PD 报文** —— 切到「PD 分析」Tab。默认开启 `跟随记录`，与主监控同步启停；**插拔充电器时的握手过程信息量最大**。
-4. **导出数据** —— 「监控」中的 `导出CSV` 主按钮按已保存选项直接导出；右侧箭头可勾选温度、设备信息、打点，并选择同时导出 CSV 与 PD 数据。PD 页仍可单独导出 JSON。记录快捷键为 `P`，打点为 `M`，可在设置中修改。
+1. **连接设备**：插入仪表后点击标题栏刷新图标，选择设备并点击 `连接`。
+2. **开始记录**：在「监控」Tab 点击 `开始记录`（快捷键 `P`），实时曲线与能量/容量积分同步开始（暂停不计入）。
+3. **抓 PD 报文**：切至「PD 分析」Tab（默认开启 `跟随记录` 与主监控同步）；插拔充电器即可捕获完整握手协商过程。
+4. **打点与导出**：按 `M` 或点击 `打点` 标注关键节点；通过 `导出CSV`（右侧箭头可配置温度、设备信息、打点及 CSV/PD 联合导出）或 `导出报告` 生成文件。
 
-完整的界面说明、每一项设置的含义与文件格式，见 [使用指南](docs/USAGE.md)。
+完整界面操作、全部设置项与文件格式详见 [使用指南](docs/USAGE.md)。
 
 ## 📚 文档
 
@@ -165,14 +142,16 @@ Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [ude
 ## 🙏 致谢与相关项目
 
 - 感谢 WITRN、POWER-Z 提供的 USB-PD 采集硬件支持。
-- 感谢[JohnScotttt](https://github.com/JohnScotttt)的WITRN HID实现。
+- 感谢 [JohnScotttt](https://github.com/JohnScotttt) 的 WITRN HID 与 USB-PD 解析上游实现（`witrnhid`、`usbpdparser`）。
 - 感谢 [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) 对 POWER-Z Bulk、认证与 AdcQueue 协议的公开研究。
 - 感谢 [c-power](https://github.com/bruno-ntmr/c-power) 项目，协议检测界面的信息组织与交互设计参考了该项目。
-- 感谢贡献者 [weixunkkkkk](https://github.com/weixunkkkkk)（#1）、[asdmoment](https://github.com/asdmoment)（#4–#9）、[xiaokangzaina](https://github.com/xiaokangzaina)（#11）及所有开源项目贡献者。
+- 感谢贡献者 [weixunkkkkk](https://github.com/weixunkkkkk)（#1）：新增 macOS Apple Silicon（ARM64）构建支持与 macOS 窗口配置。
+- 感谢贡献者 [asdmoment](https://github.com/asdmoment)（#4–#9）：实现 macOS 后台采集保活与防休眠、原生窗口控制与菜单栏设置入口、WITRN HID 积压报告排空与时间戳回推、降采样窗口均值聚合、记录打点标注及 CSV 数据来源元信息。
+- 感谢贡献者 [xiaokangzaina](https://github.com/xiaokangzaina)（#11）：实现磨砂玻璃界面与持久化自定义背景、主图与时间线滚轮缩放／拖拽平移及分通道显示微调、Canvas 2D 像素桶局部重绘优化、KM003C 轮询瞬时采样及 Windows 免安装便携包。
 
 ### 协议库
 
-工作区里的协议 crate 都是独立的 Rust 库（`publish = false`），不依赖 Tauri：
+工作区内的协议 crate 为独立 Rust 库（`publish = false`），不依赖 Tauri：
 
 - **`crates/witrn-hid`** —— WITRN HID 设备封装与测量帧解析。
 - **`crates/usbpd-parser`** —— USB-PD 报文解码与字段树。
@@ -182,18 +161,14 @@ Linux 安装包不会自动修改设备权限。连接仪表前必须配置 [ude
 
 Copyright (C) 2026 KHWLGH
 
-上述版权行仅覆盖 KHWLGH 的自有贡献；其他作者保留其权利，不因 Git 作者记录推定版权转让。集中声明与具体路径范围见 [`COPYRIGHT`](COPYRIGHT)。
+上述版权行仅覆盖 KHWLGH 的自有贡献；其他作者保留各自权利，不因 Git 提交记录推定版权转让。完整范围、生成物及上游声明见 [`COPYRIGHT`](COPYRIGHT)。
 
 | 自有贡献范围（排除第三方材料） | 许可证 |
 | --- | --- |
 | 应用 `src/`、`src-tauri/`；`scripts/`、`tools/`、`test/`、`bench/`、`temperature-example/`、`.github/`；项目文档与配置的自有部分 | [GPL-3.0-only](LICENSE) |
 | `crates/` 下所有库、测试、例子及其自有文档与配置 | [LGPL-3.0-or-later](LICENSE.LGPL-3.0) |
 
-自制应用图标及尺寸派生、截图的自有内容适用上述范围；生成材料保留输入的许可，第三方素材、许可文档与来源数据不因此成为本项目原创。`usbpd-parser` 与 `witrn-hid` 分别移植自 JohnScotttt 的 Python 包 usbpdparser 1.1.6 与 witrnhid 1.1.5，原始声明均为 `Copyright (c) 2025 JohnScotttt`、LGPL-3.0-or-later；来源及尚未解决的证据缺口见 [`COPYRIGHT`](COPYRIGHT)。
-
-本地全文：[`LICENSE`](LICENSE)（GPLv3）与 [`LICENSE.LGPL-3.0`](LICENSE.LGPL-3.0)（完整 LGPLv3 原文，需与 GPLv3 一起阅读）。库的“或更新版本”选项由范围声明授予。软件不提供担保，修改和再分发须遵守适用许可。
-
-在应用内 `设置 → 关于` 可离线阅读项目版权、GPL/LGPL 全文及第三方许可材料；`第三方组件` 保留主要组件和 `全部运行组件` 清单，并提供各组件的许可阅读入口。uPlot、Fluent System Icons、GitHub Octicons、Tauri 及其插件等保留各自的版权与许可。
+`usbpd-parser` 与 `witrn-hid` 分别移植自 JohnScotttt 的 Python 包 usbpdparser 1.1.6 与 witrnhid 1.1.5（均声明 `Copyright (c) 2025 JohnScotttt`、LGPL-3.0-or-later）。本地许可全文见 [`LICENSE`](LICENSE)（GPLv3）与 [`LICENSE.LGPL-3.0`](LICENSE.LGPL-3.0)（LGPLv3），软件不提供担保。可在应用内 `设置 → 关于` 离线查阅项目版权、GPL/LGPL 全文及全部第三方运行组件许可。
 
 ## 🔗 相关链接
 
