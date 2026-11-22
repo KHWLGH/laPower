@@ -182,12 +182,12 @@ Once the workflow is on the default branch, select the branch/tag in GitHub **Ac
 
 | Platform | Runner | Rust target | Installers |
 | --- | --- | --- | --- |
-| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI, NSIS EXE |
+| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI, NSIS EXE, Portable ZIP |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | DEB, RPM, AppImage |
 | macOS Intel | `macos-26-intel` | `x86_64-apple-darwin` | DMG |
 | macOS Apple Silicon | `macos-26` | `aarch64-apple-darwin` | DMG |
 
-Each successful target provides a separate `packages-*` artifact retained for 14 days. If all four succeed, `release-packages` contains seven installers and `SHA256SUMS`. Run `sha256sum -c SHA256SUMS` in the extracted directory. Package names include version and platform architecture; NSIS EXE also uses `_setup`.
+Each successful target provides a separate `packages-*` artifact retained for 14 days. If all four succeed, `release-packages` contains eight release packages and `SHA256SUMS`. Run `sha256sum -c SHA256SUMS` in the extracted directory. Package names include version and platform architecture; NSIS EXE also uses `_setup`. The Windows portable ZIP is named `laPower_<version>_windows-x64_portable.zip`; extract it and launch `laPower.exe`. It requires Microsoft Edge WebView2 Runtime and continues using the standard user data directory for application settings.
 
 Before enabling automatic tag releases, manually build and verify Windows installation, launch on both Mac architectures, Linux installation and device connection after udev setup. Check macOS 12 compatibility separately on hardware. CI verifies Mac architecture, ad-hoc signatures, minimum-system metadata and DMG integrity; it does not run the GUI or connect meters.
 
@@ -204,7 +204,7 @@ git push origin v0.2.4
 
 Tags must be `vX.Y.Z` and match manifest versions, or packaging fails before it starts. CI uses Node.js 24, Rust stable, Tauri CLI 2.12.1 and `tauri-apps/tauri-action@v1`. npm uses `npm ci`, Cargo uses `--locked`, and per-target Rust caches point to the workspace root `target/`. Linux stays on Ubuntu 22.04 to limit dependence on newer glibc.
 
-Only after all quality checks and four builds succeed does CI collect seven installers and generate checksums. The release job uses the running repository's `GITHUB_TOKEN` to create a temporary draft, upload packages/checksums, verify remote asset count, sizes and SHA-256, then publish the Release automatically. No manual Publish or additional PAT is needed. Only this job receives `contents: write`; organizational policy must permit it.
+Only after all quality checks and four builds succeed does CI collect eight release packages and generate checksums. The release job uses the running repository's `GITHUB_TOKEN` to create a temporary draft, upload packages/checksums, verify remote asset count, sizes and SHA-256, then publish the Release automatically. No manual Publish or additional PAT is needed. Only this job receives `contents: write`; organizational policy must permit it.
 
 `scripts/release.mjs` reads bilingual Markdown from the current version directory instead of parsing the root historical changelog. Tag runs before packaging and the publisher reuse the same reader, requiring only both files and non-empty bodies. Relative links point to that version tag, not the default branch; GitHub-generated commit/PR summaries are not used. `npm run release:notes` regenerates a local preview without changing source documents.
 
@@ -354,7 +354,7 @@ Shipping-shape and baseline-structure checks run in `validate`, reusing its fron
 | `backend-other-platforms` | Windows workspace tests; macOS workspace test |
 | `crate-features` | Clippy/tests for non-default protocol-crate feature combinations |
 | `package` | Version-tag pushes/manual runs only; depends on the three checks above, packages four targets in parallel without canceling others on one failure |
-| `package-summary` | Verifies seven installers and generates `SHA256SUMS` after all targets succeed |
+| `package-summary` | Verifies eight release packages and generates `SHA256SUMS` after all targets succeed |
 | `release` | Version-tag pushes only; uploads/verifies assets and publishes automatically |
 
 Ordinary branch pushes and PRs run core checks without packaging or release. CI installs no browser and runs no UI matrix, endurance capture or timing benchmark. Use the headless API and existing tools on demand; the existing manual **CI** entry still builds installers. `test/release.test.js` verifies failure, retries, asset integrity and public-release protection offline.

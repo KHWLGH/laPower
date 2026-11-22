@@ -1,0 +1,14 @@
+# 0.3.0 - 2026-11-22
+
+## Added
+
+- Integrated frosted-glass surface styling and UI transitions from upstream PR #11, plus custom background support under Settings → Appearance & language (`Custom background` and `Background image transparency`, 0–100%, default 0%). Local PNG, JPG, or WebP images up to 25 MB are saved locally and restored on startup, and `Clear` resets to the default backdrop; no built-in default wallpaper is bundled. Preserves Windows-style right-side window controls on Windows/Linux and native window controls on macOS, `--font-ui` / `--font-mono` typography, and Follow system / Light / Dark themes.
+- Enhanced chart navigation and per-channel styling: wheel zoom works on both the main chart and overview timeline navigator, zoomed views support drag-to-pan and smooth live-follow restoration, and `Adjust line thickness on zoom` (enabled by default) plus per-channel color, line width, and vertical offset controls (`0` resets) are persisted. Preserves clean quantized integer/round Y-axis ticks, signed/unsigned current recording semantics, and full column-store sample accuracy.
+- Added the Windows x64 portable ZIP release target (`*_windows-x64_portable.zip`) alongside MSI and NSIS installers, bringing releases to eight verified packages with `SHA256SUMS`.
+- Switched KM003C polled ADC sampling (`src-tauri/src/km003c_session.rs`) to instantaneous voltage/current fields (`vbus_instant_v()` and `ibus_instant_a()`, computing `power = voltage * current`) so firmware display averaging does not hide subsecond changes.
+- Credited community contributors `weixunkkkkk` (#1), `asdmoment` (#4–#9), and `xiaokangzaina` (#11) across all four localized README files.
+
+## Performance and maintenance
+
+- Optimized the WebView2 Canvas 2D / `OffscreenCanvas` incremental pixel-bucket rendering pipeline with 2D horizontal dirty-rectangle redraws (replacing full-canvas clears), cached channel column lookups, off-screen column skipping, zero-allocation hover/pan/zoom loops, packed RGBA writes, and a 3-point affine fast path for aligned series.
+- Added `bench/chart-zoom.mjs` microbenchmark and updated the [user guide](../../docs/en/USAGE.md), [development guide](../../docs/en/DEVELOPMENT.md), and [performance guide](../../docs/en/PERFORMANCE.md).

@@ -49,7 +49,7 @@ laPower 是一個連線維簡 (WITRN) USB 電壓電流表與 POWER-Z KM003C/KM00
 
 ## 📸 介面預覽
 
-以下展示圖為 Windows 上的 **0.2.13** 版本，使用獨立開發工具產生的模擬裝置與資料，保留軟體完整標題列，淺色主題優先展示。軟體預設跟隨系統，開發展示工具預設淺色。每次發佈前更新整套截圖，重新產生方法見 [開發展示工具](docs/zh-TW/DEVELOPMENT.md#開發展示工具)。
+以下展示圖為 Windows 上的 **0.3.0** 版本，使用獨立開發工具產生的模擬裝置與資料，保留軟體完整標題列，淺色主題優先展示。軟體預設跟隨系統，開發展示工具預設淺色。每次發佈前更新整套截圖，重新產生方法見 [開發展示工具](docs/zh-TW/DEVELOPMENT.md#開發展示工具)。
 
 | 淺色主題 | 深色主題 |
 | :---: | :---: |
@@ -94,10 +94,10 @@ laPower 是一個連線維簡 (WITRN) USB 電壓電流表與 POWER-Z KM003C/KM00
 
 ### 高效能圖表
 
-- uPlot 繪製，**8 條曲線 / 4 條 Y 軸**（電流 A、電壓 V、功率 W、溫度 °C，四軸嚴格共線），另有兩級密集子網格提升讀數精度。
-- 密集資料自動切換為增量 min/max 像素桶渲染，**百萬點仍可拖動**；回看按畫布實際像素解析度保留細節，慢影格不會把曲線降成寬桶，放大後恢復原始點。完整資料保留在列式存儲中，懸停時二分回查原始取樣點。主圖支援滾輪橫向縮放，錄製中也可使用。
+- uPlot 繪製，**8 條曲線 / 4 條 Y 軸**（電流 A、電壓 V、功率 W、溫度 °C，量化後的整齊刻度在四軸上嚴格共線），另有兩級密集子網格提升讀數精度。
+- 密集資料自動切換為增量 min/max 像素桶渲染，**百萬點仍可拖動**；Canvas 2D / `OffscreenCanvas` 管線採用有界像素列光柵化、可複用幾何緩衝與仿射投影快速路徑，回看依畫布實際像素解析度保留細節，慢影格不會把曲線降成寬桶，放大後恢復原始點。完整資料保留在列式存儲中，懸停時二分回查原始取樣點。主圖與底部時間線總覽皆支援滾輪橫向縮放（錄製跟隨時保持跟隨），放大後可按住主圖左右拖曳平移。
 - 1000 次/秒取樣時自動繪圖約 10–20 影格/秒，拖動與縮放獨立更新；擷取與儲存完整保留所有樣本。錄製和停止後的回看共用歷史極值索引，縮小或平移視窗時無需重新掃描完整歷史。驗證範圍及效能邊界見 [效能說明](docs/PERFORMANCE.md#测量与硬件边界)（簡體中文）。
-- tooltip 顯示已開啟且有有效數值的通道（最多 8 個），圖例顯示可見通道，顯隱在 `顯示` 面板中切換，底部時間線導航器支援範圍選取與拖動平移。
+- tooltip 顯示已開啟且有有效數值的通道（最多 8 個），圖例顯示可見通道；在 `顯示` 面板可調整通道顯隱、顏色、線條粗細（自動／手動）、填色不透明度及上下錯開（`上下錯開`），底部時間線導航器支援範圍選取與拖動平移。
 - 「顯示 → 曲線陰影」總開關預設開啟並儲存選擇；各通道不透明度獨立保留（0 = 關閉填充，1–100 = 開啟），記錄、暫停及縮放不會自動改變陰影。
 
 ### 資料記錄與互通
@@ -112,9 +112,10 @@ laPower 是一個連線維簡 (WITRN) USB 電壓電流表與 POWER-Z KM003C/KM00
 ### 介面
 
 - 多 Tab 工作區（監控 / PD 分析 / 協定控制 / 設定），裝置連線常駐標題列，任何頁面都能快速連線或中斷連線；協定控制入口始終可見，連接支援的 POWER-Z 後啟用操作。
-- **跟隨系統 / 淺色 / 深色**三種主題，預設跟隨系統，設計令牌對齊 Fluent UI webDark / webLight。
+- **跟隨系統 / 淺色 / 深色**三種主題搭配毛玻璃視覺效果，預設跟隨系統，設計令牌對齊 Fluent UI webDark / webLight。
+- 可選持久化**自訂背景圖片**（本機 PNG / JPEG / WebP，不內建預設桌布），支援背景透明度調整。
 - **介面縮放 50 – 200%**，系統縮放偏大導致視窗擁擠時可整體調低。
-- macOS 使用原生視窗按鈕，支援全螢幕、平鋪與最小化；Windows 保留 Win11 貼齊版面配置浮窗，Windows / Linux 可切換 Windows 與 macOS 按鈕外觀。
+- macOS 使用原生視窗按鈕，支援全螢幕、平鋪與最小化；Windows 保留 Win11 貼齊版面配置浮窗，Windows / Linux 使用右側 Windows 風格視窗按鈕。
 
 ## 📱 支援的裝置
 
@@ -134,7 +135,7 @@ laPower 是一個連線維簡 (WITRN) USB 電壓電流表與 POWER-Z KM003C/KM00
 
 專案原名 WITRN-RS。laPower 的應用標識為 `io.github.khwlgh.lapower`，使用獨立的設定與快取目錄，不自動遷移舊應用設定；已有 CSV 和 PD 擷取檔案仍可匯入。
 
-**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下載 `.msi` 或 `.exe`（NSIS）安裝包，安裝後即可運行。維簡儀表使用系統 USB HID；POWER-Z 使用系統 HID / WinUSB，Windows 通常會自動綁定，無需額外安裝驅動。
+**Windows 10 / 11 (x64)** —— 到 [Releases](https://github.com/KHWLGH/laPower/releases/latest) 下載 `.msi` 或 `.exe`（NSIS）安裝包，安裝後即可運行。若系統已安裝 Microsoft Edge WebView2 Runtime，也可下載 `*_windows-x64_portable.zip`，解壓後直接執行 `laPower.exe`。維簡儀表使用系統 USB HID；POWER-Z 使用系統 HID / WinUSB，Windows 通常會自動綁定，無需額外安裝驅動。
 
 Windows 安裝包當前未做憑證簽章，首次運行可能顯示 SmartScreen 提示。
 
@@ -142,7 +143,7 @@ Windows 安裝包當前未做憑證簽章，首次運行可能顯示 SmartScreen
 
 **Linux (x64)** —— 下載帶 `linux-x64` 的 `.deb`、`.rpm` 或 `.AppImage`。Debian / Ubuntu 可用 `sudo apt install ./laPower_<版本>_linux-x64.deb`；Fedora 等使用 RPM 的發行版可用 `sudo dnf install ./laPower_<版本>_linux-x64.rpm`。AppImage 先執行 `chmod +x ./laPower_<版本>_linux-x64.AppImage`，再直接運行；可能需要安裝發行版的 FUSE 2 運行庫。安裝包基於 Ubuntu 22.04 建置，不承諾適用於所有發行版。
 
-Linux 安裝包不會自動修改裝置權限。連線儀表前必須設定 [udev 規則](docs/zh-TW/DEVELOPMENT.md#udev-規則必需)，否則可能無法掃描或開啟裝置。Release 中的 `SHA256SUMS` 可用於校驗七個安裝包。
+Linux 安裝包不會自動修改裝置權限。連線儀表前必須設定 [udev 規則](docs/zh-TW/DEVELOPMENT.md#udev-規則必需)，否則可能無法掃描或開啟裝置。Release 中的 `SHA256SUMS` 可用於校驗八個發佈包。
 
 ## 🚀 快速上手
 
@@ -169,7 +170,7 @@ Linux 安裝包不會自動修改裝置權限。連線儀表前必須設定 [ude
 - 感謝[JohnScotttt](https://github.com/JohnScotttt)的WITRN HID實現。
 - 感謝 [km003c-protocol-research](https://github.com/okhsunrog/km003c-protocol-research) 對 POWER-Z Bulk、認證與 AdcQueue 協定的公開研究。
 - 感謝 [c-power](https://github.com/bruno-ntmr/c-power) 專案，協定偵測介面的資訊組織與互動設計參考了該專案。
-- 感謝所有開源專案貢獻者。
+- 感謝貢獻者 [weixunkkkkk](https://github.com/weixunkkkkk)（#1）、[asdmoment](https://github.com/asdmoment)（#4–#9）、[xiaokangzaina](https://github.com/xiaokangzaina)（#11）及所有開源專案貢獻者。
 
 ### 協定庫
 

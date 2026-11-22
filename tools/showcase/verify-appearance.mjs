@@ -35,9 +35,7 @@ try {
       const { page, context } = app;
       await page.locator('#btn-settings-tab').click();
       // Verify the initial language as well as switching back from another language.
-      const startupFont = await page
-        .locator('#ui-scale-hint span')
-        .evaluate((node) => getComputedStyle(node).fontFamily);
+      const startupFont = await page.locator('#ui-scale-hint').evaluate((node) => getComputedStyle(node).fontFamily);
       if (process.platform === 'win32') assert.ok(startupFont.indexOf('YaHei') < startupFont.indexOf('JhengHei'));
       await page.locator('#language-select').selectOption('en', { force: true });
       await page.locator('#language-select').selectOption('zh-TW', { force: true });
@@ -74,7 +72,7 @@ try {
         fonts.renderedFonts = {};
         for (const selector of [
           'label[for=ui-scale] span',
-          '#ui-scale-hint span',
+          '#ui-scale-hint',
           '[data-i18n="languageHint"]',
           '#language-select + .cs-button',
           '#status-sample-rate',
@@ -83,7 +81,7 @@ try {
           assertChineseFont(actual);
           fonts.renderedFonts[selector] = actual;
         }
-        const regular = fonts.renderedFonts['#ui-scale-hint span'];
+        const regular = fonts.renderedFonts['#ui-scale-hint'];
         assert.ok(regular.every((font) => !/Bold|Light/.test(font.postScriptName)));
         const mono = fonts.renderedFonts['#status-sample-rate'];
         assert.ok(mono.some((font) => /Cascadia|Consolas/.test(font.familyName) && font.glyphCount > 0));
@@ -113,7 +111,7 @@ try {
         assert.match(simplified, /Microsoft YaHei UI/);
         assert.doesNotMatch(simplified, /Microsoft JhengHei/);
         await page.locator('#btn-settings-tab').click();
-        assertChineseFont(await renderedFonts(client, '#ui-scale-hint span'));
+        assertChineseFont(await renderedFonts(client, '#ui-scale-hint'));
         await client.detach();
       }
       await page.screenshot({ path: resolve(output, `zh-CN-${theme}-${scale * 100}-settings.png`) });

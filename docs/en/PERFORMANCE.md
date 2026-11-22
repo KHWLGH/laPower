@@ -14,6 +14,7 @@ This document records repeatable algorithm, storage, startup and shipped-shape b
 | Long-recording memory | `npm run bench:memory` | Constant-block sharing, streaming CSV, append snapshots and buffer release |
 | Algorithm comparison | `node bench/extrema.mjs` | Per-sample scanning versus extrema indexes |
 | Startup | `node bench/startup.mjs` | Native startup phases and resource shape |
+| Interactive chart zoom | `node bench/chart-zoom.mjs` | Wheel-zoom/pan frame timing and Canvas 2D rendering pipeline |
 | Shipped shape | `node bench/packaging.mjs` | `out/` files, blocking resources and orphan assets |
 | Rust | `cargo bench -p lapower` | Protocol decoding, encoding and selection |
 
@@ -86,7 +87,7 @@ The Display → Curve shading switch controls all main-channel fills, defaults o
 
 Shading no longer uses slow-frame confirmation, suppression cooldowns or healthy recovery timers. It does not request confirmation redraws or hold interaction updates for fill feedback. Continuous input coalesces the latest window per rAF and release submits the final position immediately; static playback creates no recovery redraw loop.
 
-The plot and overview use WebGL 2 when hardware acceleration is available. Line segments follow sample positions, with bounded ordered extrema per channel in dense windows. The renderer antialiases strokes at device resolution during zoom and pan and uses the existing channel colors, widths, shading opacities, and paint order. Missing readings break the line. The plot draws one shared major grid, and the cursor reads original samples. If WebGL 2 is unavailable or its context is lost, Canvas 2D draws the waveform, using the bounded pixel-column renderer for dense views.
+Both main plot and overview draw waveforms via Canvas 2D (no GPUI or WebGL 2). In dense main-plot windows with `OffscreenCanvas` and opaque hex channel strokes, ordered per-channel extrema segments scan-convert by device-pixel column into a transposed bitmap, tracking 2D dirty-rectangle bounds for `putImageData` and `drawImage`, skipping off-screen/empty segments and full-height `clearRect`, reusing geometry/`Path2D`/RGBA/channel-tuple buffers, and applying a 3-point affine projection fast path; highly retraced or gesture-moving fills use analytic pixel-column area coverage in the same upload pass. Missing values break lines and cursors query original samples; non-`OffscreenCanvas` or translucent paths fall back directly to standard Canvas 2D paths.
 
 The extrema index reuses completed source prefixes. Shrinking the right edge or panning earlier only queries it; a shorter window is not source truncation. New samples build only the tail; clearing/replacing/mutating source data invalidates it. Indexed projections count work in at most 32-bucket queries per step, raw scans in at most 4096 points. A roughly 4 ms initial budget allows immediate submission; remaining work yields cooperatively. Cold history builds use at most 4096 points/step and about 1.5 ms/slice. Only complete projections publish; canceling stale windows retains valid history indexes.
 
@@ -139,6 +140,7 @@ node bench/phase2.mjs
 node bench/phase3.mjs
 node bench/extrema.mjs
 node bench/startup.mjs
+node bench/chart-zoom.mjs
 cargo bench -p lapower
 ```
 

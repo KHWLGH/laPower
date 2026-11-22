@@ -4,7 +4,7 @@
 
 # User guide
 
-This guide covers laPower **0.2.11**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
+This guide covers laPower **0.3.0**. Screenshots were taken on Windows with simulated devices and data; their enabled temperature, signal channels and sample rate are not first-run defaults. Dark mode uses the same controls.
 
 - [Getting started](#getting-started)
 - [Interface overview](#interface-overview)
@@ -100,7 +100,7 @@ Drag the panel's right divider to resize it; narrow windows limit the resulting 
 - Open `Display` to choose curves. Voltage, current, power and temperature are selected by default; D+/D- and CC1/CC2 are off. Selecting the temperature curve does not connect its source.
 - The Curve shading switch at the top of Display defaults on and saves your choice. Turning it off preserves each main channel’s opacity; turning it back on restores those values. Recording, pausing, dragging and zooming never change shading automatically. This switch affects the monitor chart only.
 - Each main channel has a fill opacity from 0–100%, default 15%. Zero removes fill, not the curve. The legend identifies visible channels; it does not toggle them.
-- By default, the voltage, current and power peaks align from top to bottom, with spacing limited by available headroom. Use the arrows in `Display` to adjust fill, line thickness and vertical offset. An offset of 0 restores the default position. These adjustments do not modify samples.
+- By default, Y axes start at zero (extending negative when negative values exist) with shared quantized grid steps and clean round ticks across all four axes. Use `Display` to customize channel colors, fill opacity, line width (auto or manual) and vertical offset (`Y offset`, `0` restores the default position) without modifying recorded samples or integrated totals.
 - Hover for enabled channels with valid values at that time. Scroll to zoom around the pointer, then drag the main plot horizontally to pan.
 - The wheel, main plot drag, and overview selection change the time range without refitting the vertical axes to the selection. During recording, new peaks affect the scale after the gesture ends.
 - Scroll over the main plot or the overview to zoom. If the plot is following the latest samples during recording, zoom changes the displayed duration without stopping follow. Zooming a historical window does not jump to live data.
@@ -289,6 +289,8 @@ The directory stays on the left in wide windows and moves to a horizontal top ba
 | --- | --- |
 | `Theme` | `Follow system` (default), `Light`, `Dark` |
 | `Language` | `Follow system` (default), 简体中文, 繁體中文, English, 日本語 |
+| `Custom background` | Choose a local PNG, JPG, or WebP image (up to 25 MB) to persist as the backdrop, or click `Clear` to reset; no built-in default wallpaper |
+| `Background image transparency` | 0–100%, default 0%; adjusts transparency of the custom background image |
 | `UI scale` | 50–200%, default 100%; applied when the slider is released. Reduce it if the window is crowded |
 
 Language changes apply immediately and retain recording/data. Unsupported system languages fall back to English. The detected language shown beside Follow system does not change with manual UI language selection. See [Development](DEVELOPMENT.md#language-selection) for detection and Linux launch examples.
@@ -298,6 +300,7 @@ Language changes apply immediately and retain recording/data. Unsupported system
 | Setting | Meaning and default |
 | --- | --- |
 | `Chart headroom` | `Automatic` uses peaks of enabled channels across the full recording; `Custom` allows 0–100% |
+| `Adjust line thickness on zoom` | On by default; automatically scales curve stroke width with chart zoom level |
 | `Record current direction` | Off by default. New recordings/imports preserve the current sign when enabled. Existing data is unchanged; export keeps recorded values |
 | `Mark immediately` | Off by default. Enable to add markers without first entering a label |
 | `Recording limit` | 64–8192 MB, default 512 MB. The budget covers all data in the current chart, including existing/imported data. Reaching it pauses recording; it does not automatically create multiple files |
@@ -344,7 +347,7 @@ SUM,1
 TotalTime,="00:00:00.250"
 SampTime(ms),250
 DateTime,2026-10-17 12:00:00
-Software,laPower 0.2.11
+Software,laPower 0.3.0
 Device,WITRN K2 (0716:5060)
 Points,mean
 

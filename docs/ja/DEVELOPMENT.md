@@ -182,12 +182,12 @@ workflow を既定ブランチへ反映した後、GitHub の **Actions → CI �
 
 | 対象 | Runner | Rust target | パッケージ |
 | --- | --- | --- | --- |
-| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE |
+| Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | MSI、NSIS EXE、ポータブル ZIP |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | DEB、RPM、AppImage |
 | macOS Intel | `macos-26-intel` | `x86_64-apple-darwin` | DMG |
 | macOS Apple Silicon | `macos-26` | `aarch64-apple-darwin` | DMG |
 
-成功した対象ごとに `packages-*` アーティファクトを 14 日間保持します。全対象成功後の `release-packages` は 7 個のインストーラーと `SHA256SUMS` を含み、展開先で `sha256sum -c SHA256SUMS` を実行して確認できます。名前にはバージョン・OS・アーキテクチャ、NSIS EXE には `_setup` も含まれます。
+成功した対象ごとに `packages-*` アーティファクトを 14 日間保持します。全対象成功後の `release-packages` は 8 個の配布パッケージと `SHA256SUMS` を含み、展開先で `sha256sum -c SHA256SUMS` を実行して確認できます。名前にはバージョン・OS・アーキテクチャ、NSIS EXE には `_setup` も含まれます。Windows ポータブル ZIP のファイル名は `laPower_<バージョン>_windows-x64_portable.zip` です。展開後に `laPower.exe` を実行してください。Microsoft Edge WebView2 Runtime が必要で、アプリ設定は従来どおり通常のユーザーデータディレクトリに保存されます。
 
 タグ自動公開を初めて使う前に手動ビルドし、Windows インストール、両 Mac の起動、Linux インストールと udev 設定後の接続を確認します。macOS 12 は別途実機検証が必要です。CI は Mac のアーキテクチャ、ad-hoc 署名、最低 OS メタデータ、DMG 完全性を調べますが、GUI・計器接続は実行しません。
 
@@ -204,7 +204,7 @@ git push origin v0.2.4
 
 タグは `vX.Y.Z` とし、マニフェストと一致しなければパッケージ化前に失敗します。CI は Node.js 24、Rust stable、Tauri CLI 2.12.1、`tauri-apps/tauri-action@v1` を使います。npm は `npm ci`、Cargo は `--locked`、Rust キャッシュは対象別でルート `target/` を参照します。Linux は新しい glibc への依存を抑えるため Ubuntu 22.04 に固定します。
 
-全チェックと 4 対象のビルド成功後、7 個のパッケージを集めてチェックサムを生成します。公開 job は実行リポジトリの `GITHUB_TOKEN` で一時ドラフトを作成し、7 個とチェックサムをアップロードし、リモートの数・サイズ・SHA-256 を照合して自動公開します。手動 Publish や追加 PAT は不要です。この job だけ `contents: write` を持ち、組織ポリシーで許可が必要です。
+全チェックと 4 対象のビルド成功後、8 個のパッケージを集めてチェックサムを生成します。公開 job は実行リポジトリの `GITHUB_TOKEN` で一時ドラフトを作成し、8 個とチェックサムをアップロードし、リモートの数・サイズ・SHA-256 を照合して自動公開します。手動 Publish や追加 PAT は不要です。この job だけ `contents: write` を持ち、組織ポリシーで許可が必要です。
 
 `scripts/release.mjs` はルートの長い履歴ではなく、現在のバージョンディレクトリから英語と簡体字中国語の Markdown を読みます。タグのパッケージ化前と公開前で同じ読み込み処理を使い、両ファイルと空でない本文だけを確認します。相対リンクはそのバージョンのタグへ固定し、GitHub の自動コミット／PR 要約は使いません。`npm run release:notes` は元の文書を変更せずローカルプレビューを再生成します。
 
@@ -354,7 +354,7 @@ npm run showcase:capture -- --help
 | `backend-other-platforms` | Windows workspace test、macOS workspace test |
 | `crate-features` | 非既定 feature 組み合わせの Clippy・test |
 | `package` | バージョンタグ push／手動のみ。先の 3 チェックに依存し、4 対象を並列化、1 対象の失敗で他を中止しません |
-| `package-summary` | 全対象成功後、7 パッケージを検証し `SHA256SUMS` を生成 |
+| `package-summary` | 全対象成功後、8 パッケージを検証し `SHA256SUMS` を生成 |
 | `release` | バージョンタグ push のみ。添付をアップロード・照合して自動公開 |
 
 通常ブランチ push／PR はコアチェックのみで、パッケージ化・公開はしません。CI にはブラウザーを入れず、UI 行列・長時間収集・時間ベンチマークは実行しません。必要時にヘッドレス API と既存ツールを使用します。既存 **CI** の手動入口は引き続きパッケージを作成します。公開スクリプトの失敗・再実行・添付完全性・公開済み保護は `test/release.test.js` がオフラインで検証します。
