@@ -47,6 +47,7 @@ function reportStyle(theme) {
     cautionBg: token('--status-caution-bg'),
     neutralBg: token('--status-info-bg'),
     ui: current.getPropertyValue('--font-ui').trim(),
+    mono: current.getPropertyValue('--font-mono').trim(),
     radius: Number.parseFloat(token('--radius-surface')),
   };
 }
@@ -107,11 +108,11 @@ export async function renderProtocolReport(snapshot, requested) {
 
   /** @param {string} value @param {number} x @param {number} y @param {number} width
    * @param {number} size @param {number} [lines] @param {string} [color]
-   * @param {boolean} [strong] @param {number} [min] */
-  function text(value, x, y, width, size, lines = 1, color = palette.ink, strong = false, min = size) {
+   * @param {boolean} [strong] @param {boolean} [mono] @param {number} [min] */
+  function text(value, x, y, width, size, lines = 1, color = palette.ink, strong = false, mono = false, min = size) {
     let rows = [];
     for (; size >= min; size--) {
-      ctx.font = `${strong ? 600 : 400} ${size}px ${palette.ui}`;
+      ctx.font = `${strong ? 600 : 400} ${size}px ${mono ? palette.mono : palette.ui}`;
       rows = wrap(value, width);
       if (rows.length <= lines) break;
     }
@@ -175,6 +176,7 @@ export async function renderProtocolReport(snapshot, requested) {
       1,
       good ? palette.success : warning ? palette.caution : palette.muted,
       false,
+      false,
       13,
     );
   }
@@ -183,10 +185,10 @@ export async function renderProtocolReport(snapshot, requested) {
   ctx.fillRect(0, 0, 1920, 1080);
   ctx.drawImage(icon, 48, 42, 48, 48);
   text('laPower', 110, 47, 175, 34, 1, palette.ink, true);
-  text(t('protocolReportTitle'), 300, 47, 1120, 34, 1, palette.ink, true, 26);
+  text(t('protocolReportTitle'), 300, 47, 1120, 34, 1, palette.ink, true, false, 26);
   badge(detectionSummary(report), 1480, 44, 392, report.completion === 'complete' ? 'supported' : 'failed', 22, true);
   const timestamp = new Date(metadata.startedAt).toLocaleString(getResolvedLanguage(), { hour12: false });
-  text(`${metadata.device}  ·  ${timestamp}`, 48, 116, 1190, 22, 1, palette.muted, false, 18);
+  text(`${metadata.device}  ·  ${timestamp}`, 48, 116, 1190, 22, 1, palette.muted, false, false, 18);
   text(
     `${t(metadata.full ? 'fullScan' : 'scan')}  ·  ${number(report.elapsed_ms / 1000)} s`,
     1270,
@@ -195,6 +197,7 @@ export async function renderProtocolReport(snapshot, requested) {
     22,
     1,
     palette.muted,
+    false,
     false,
     18,
   );
@@ -226,7 +229,7 @@ export async function renderProtocolReport(snapshot, requested) {
   let voltageSize = 18;
   for (; voltageSize >= 14; voltageSize--) {
     for (const row of rows) {
-      ctx.font = `400 ${voltageSize}px ${palette.ui}`;
+      ctx.font = `400 ${voltageSize}px ${row.hasVoltages ? palette.mono : palette.ui}`;
       row.lines = wrap(row.value, leftWidth - 417).length;
       row.height = Math.max(32, Math.ceil((row.lines - 1) * voltageSize * 1.35 + voltageSize + 14));
     }
@@ -251,7 +254,7 @@ export async function renderProtocolReport(snapshot, requested) {
     for (const result of group.results) {
       const row = rows.find((row) => row.result === result);
       if (!row) throw overflow();
-      text(result.label, protocolX, y + (row.height - 19) / 2, 195, 19, 1, palette.ink, true, 16);
+      text(result.label, protocolX, y + (row.height - 19) / 2, 195, 19, 1, palette.ink, true, false, 16);
       badge(detectionStateLabel(result), statusX, y + (row.height - 27) / 2, 142, result.state, 15);
       text(
         row.value,
@@ -261,6 +264,8 @@ export async function renderProtocolReport(snapshot, requested) {
         voltageSize,
         row.lines,
         row.hasVoltages ? palette.accent : palette.muted,
+        false,
+        row.hasVoltages,
       );
       divider(left + 22, y + row.height - 1, leftWidth - 44);
       y += row.height;
@@ -272,7 +277,7 @@ export async function renderProtocolReport(snapshot, requested) {
   text('USB Power Delivery', right + 22, top + 18, rightWidth - 250, 25, 1, palette.ink, true);
   if (pd) {
     badge(detectionStateLabel(pd), right + rightWidth - 200, top + 16, 178, pd.state, 18, true);
-    text(pdVersionLabel(pd), right + 22, top + 59, rightWidth - 44, 20, 2, palette.muted, false, 17);
+    text(pdVersionLabel(pd), right + 22, top + 59, rightWidth - 44, 20, 2, palette.muted, false, false, 17);
   } else text(t('protocolReportNoPdos'), right + 22, top + 59, rightWidth - 44, 20, 1, palette.muted);
 
   const pdos = report.pdos ?? [];
@@ -286,7 +291,7 @@ export async function renderProtocolReport(snapshot, requested) {
   const labels = ['#', t('protocolReportPdoType'), t('voltage'), t('current'), t('power')];
   let columnX = right + 22;
   labels.forEach((label, i) => {
-    text(label, columnX, tableTop + 61, columns[i] - 14, 17, 1, palette.muted, true, 14);
+    text(label, columnX, tableTop + 61, columns[i] - 14, 17, 1, palette.muted, true, false, 14);
     columnX += columns[i];
   });
   divider(right + 22, tableTop + 89, rightWidth - 44);
@@ -320,6 +325,7 @@ export async function renderProtocolReport(snapshot, requested) {
         1,
         j === 0 ? palette.muted : palette.ink,
         false,
+        j >= 2,
         15,
       );
       columnX += columns[j];
@@ -338,7 +344,7 @@ export async function renderProtocolReport(snapshot, requested) {
     card(right, infoY, rightWidth, infoHeight);
     text(t('protocolReportConditions'), right + 22, infoY + 18, rightWidth - 44, 21, 1, palette.ink, true);
     text(firmware, right + 22, infoY + 55, rightWidth - 44, 19, 1, palette.muted);
-    text(configuration, right + 22, infoY + 86, rightWidth - 44, 19, 1, palette.muted, false, 16);
+    text(configuration, right + 22, infoY + 86, rightWidth - 44, 19, 1, palette.muted, false, false, 16);
   }
   text(
     infoHeight >= 118 ? t('protocolReportPdoScope') : `${configuration}  ·  ${firmware}`,
@@ -349,14 +355,15 @@ export async function renderProtocolReport(snapshot, requested) {
     1,
     palette.muted,
     false,
+    false,
     16,
   );
   const warnings = [];
   if (report.completion !== 'complete') warnings.push(t('protocolReportIncomplete'));
   if (report.reset_verification && report.reset_verification.status !== 'verified')
     warnings.push(t('triggerResetUnconfirmed'));
-  if (warnings.length) text(warnings.join(' · '), 48, 947, 1824, 19, 1, palette.caution, false, 16);
-  text(t('protocolReportPowerNote'), 48, warnings.length ? 982 : 958, 1824, 17, 2, palette.muted, false, 15);
+  if (warnings.length) text(warnings.join(' · '), 48, 947, 1824, 19, 1, palette.caution, false, false, 16);
+  text(t('protocolReportPowerNote'), 48, warnings.length ? 982 : 958, 1824, 17, 2, palette.muted, false, false, 15);
 
   return new Promise((resolve, reject) =>
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error(t('protocolReportRenderFailed')))), 'image/png'),

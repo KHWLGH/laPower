@@ -43,7 +43,7 @@ function reference(snapshot) {
   }
   for (let i = snapshot.startIndex; i <= snapshot.endIndex; i++) {
     const v = snapshot.voltage.valueAt(i);
-    const c = Math.abs(snapshot.current.valueAt(i));
+    const c = snapshot.current.valueAt(i);
     const p = snapshot.power.valueAt(i);
     const t = snapshot.temp.valueAt(i);
     for (const [suffix, value] of [
@@ -321,9 +321,7 @@ test('magnitude-aware capacity matches across synchronous, cooperative and real 
     ]) {
       assert.equal(result.mah, sync.mah);
       assert.equal(result.wh, sync.wh);
-      assert.equal(result.minC, 1);
-      assert.equal(result.maxC, 1);
-      assert.equal(result.sumC, count - 13, 'current statistics use measured magnitude');
+      assert.equal(result.sumC, 0, 'current statistics remain directional net means');
     }
     cols.currentMagnitudes.setAt(4096, 2);
     assert.notEqual(rangeStatsRevision(cols), snapshot.revision, 'magnitude edits invalidate cached energy');

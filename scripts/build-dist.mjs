@@ -200,7 +200,7 @@ async function main() {
     bundle: true,
     minify,
     legalComments: 'eof',
-    loader: { '.svg': 'file', '.png': 'file', '.jpg': 'file', '.woff2': 'file', '.ttf': 'file' },
+    loader: { '.svg': 'file', '.png': 'file', '.woff2': 'file', '.ttf': 'file' },
     // Emitted asset names equal to their source names, so the mirrored originals are overwritten
     // in place instead of a second copy appearing alongside them. The overwrite is a byte-identical
     // no-op for the `file` loader; without this esbuild refuses to write onto its own input.

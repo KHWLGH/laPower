@@ -12,7 +12,7 @@ import { F64_CHUNK_SIZE } from './state.js';
 export const BUCKET_MIN = 64;
 export const DISPLAY_SERIES = 8;
 
-/** @typedef {ArrayLike<number>|import('./state.js').F64Snapshot|import('./current-display.js').CurrentDisplayColumn} NumericColumn */
+/** @typedef {ArrayLike<number>|import('./state.js').F64Col|import('./state.js').F64Snapshot} NumericColumn */
 
 /** @param {NumericColumn} column @param {number} index */
 export function columnValue(column, index) {
@@ -28,11 +28,6 @@ export function columnSpan(column, index, end) {
       base: (index >>> 12) * F64_CHUNK_SIZE,
       end: Math.min(end, ((index >>> 12) + 1) * F64_CHUNK_SIZE),
     };
-  }
-  if ('chunks' in column) {
-    const stop = Math.min(end, ((index >>> 12) + 1) * F64_CHUNK_SIZE);
-    const values = column.chunks(index, stop).next().value?.values ?? [];
-    return { values, base: index, end: stop };
   }
   return { values: column, base: 0, end };
 }
@@ -266,7 +261,7 @@ export class SeriesBuckets {
     let i = start;
     /** @type {DisplayBucket|null} */
     let bucket = null;
-    const values = new Array(this.channels);
+    const values = new Array(this.channels).fill(NaN);
     return (maxSamples = 4096, maxBuckets = Infinity) => {
       let remaining = Math.max(1, maxSamples),
         bucketsRemaining = Math.max(1, maxBuckets);
@@ -346,7 +341,7 @@ export class SeriesBuckets {
   appendThroughMode(xs, series, end, fixed) {
     this._xs = xs;
     this._series = series;
-    const values = new Array(this.channels);
+    const values = new Array(this.channels).fill(NaN);
     for (let i = this.srcEnd; i < end; ) {
       const xSpan = columnSpan(xs, i, end),
         spans = series.map((col) => (col ? columnSpan(col, i, end) : null));

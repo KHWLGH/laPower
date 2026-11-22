@@ -21,20 +21,12 @@ button {
   background-image: none;
 }
 
-/* 控件、诊断和代码文字继承应用字体。 */
+/* 原生表单控件也继承语言对应的字体；数值输入可由组件的等宽字体覆盖。 */
 button,
 input,
 select,
-textarea,
-code,
-kbd,
-pre,
-samp {
+textarea {
   font-family: inherit;
-}
-
-.uplot {
-  font-family: var(--font-ui);
 }
 
 /* Fluent 焦点环：仅键盘焦点显示（:focus-visible），2px 亮描边 + 1px 间隙 */

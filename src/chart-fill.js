@@ -7,7 +7,7 @@
 /** Rasterize the area between monotone ordered line segments and their baseline.
  * Each pixel receives its analytic coverage once, including baseline crossings.
  * Scratch storage is three row arrays, independent of the number of samples.
- * @param {{points:Float64Array,connect:Uint8Array,base:number,leftOffset:number,topOffset:number,scale?:number,width:number,height:number,pixels:Uint32Array,coverage:Float64Array,rgb:number,opacity:number,transposed?:boolean,opaque?:{spans:Uint32Array,offsets:Uint32Array},composite?:boolean}} options
+ * @param {{points:Float64Array,connect:Uint8Array,base:number,leftOffset:number,topOffset:number,scale?:number,width:number,height:number,pixels:Uint32Array,coverage:Float64Array,rgb:number,opacity:number,transposed?:boolean,opaque?:{spans:Uint32Array,offsets:Uint32Array},composite?:boolean,dirty?:{left:number,right:number}}} options
  */
 export function rasterOrderedFill({
   points,
@@ -25,6 +25,7 @@ export function rasterOrderedFill({
   transposed = false,
   opaque,
   composite = false,
+  dirty,
 }) {
   const stride = height + 1;
   const constant = coverage.subarray(0, stride),
@@ -76,6 +77,8 @@ export function rasterOrderedFill({
     } else for (let row = top; row < bottom; row++) paint(row * width + x, alpha);
     dirtyTop = Math.min(dirtyTop, top);
     dirtyBottom = Math.max(dirtyBottom, bottom);
+    dirtyLeft = Math.min(dirtyLeft, x);
+    dirtyRight = Math.max(dirtyRight, x + 1);
   };
   // A clipped linear segment integrates to the difference of two quadratic
   // ramps. At integer pixel rows each ramp is linear except its one edge row,
@@ -109,11 +112,26 @@ export function rasterOrderedFill({
     }
     primitive(base, -signed, false);
   };
-  let first = 1,
-    dirtyTop = height,
-    dirtyBottom = 0;
-  for (let x = 0; x < width; x++) {
+  let first = 1;
+  while (
+    first < connect.length &&
+    (!connect[first] ||
+      !Number.isFinite(points[(first - 1) * 2]) ||
+      !Number.isFinite(points[(first - 1) * 2 + 1]) ||
+      !Number.isFinite(points[first * 2]) ||
+      !Number.isFinite(points[first * 2 + 1]))
+  ) {
+    first++;
+  }
+  const xStart =
+    first < connect.length ? Math.max(0, Math.floor((points[(first - 1) * 2] - leftOffset) * scale)) : width;
+  let dirtyTop = height,
+    dirtyBottom = 0,
+    dirtyLeft = width,
+    dirtyRight = 0;
+  for (let x = xStart; x < width; x++) {
     while (first < connect.length && (points[first * 2] - leftOffset) * scale <= x) first++;
+    if (first >= connect.length) break;
     const spanStart = opaque?.offsets[x] ?? 0,
       spanEnd = opaque?.offsets[x + 1] ?? 0;
     if (spanEnd - spanStart === 2) {
@@ -216,10 +234,16 @@ export function rasterOrderedFill({
           paint(transposed ? x * height + row : row * width + x, alpha);
           dirtyTop = Math.min(dirtyTop, row);
           dirtyBottom = Math.max(dirtyBottom, row + 1);
+          dirtyLeft = Math.min(dirtyLeft, x);
+          dirtyRight = Math.max(dirtyRight, x + 1);
         }
       }
       y = next;
     }
+  }
+  if (dirty && dirtyBottom > dirtyTop && dirtyRight > dirtyLeft) {
+    dirty.left = Math.min(dirty.left, dirtyLeft);
+    dirty.right = Math.max(dirty.right, dirtyRight);
   }
   return { top: dirtyTop, bottom: dirtyBottom };
 }

@@ -89,7 +89,6 @@ function seed({ powerPeak = false } = {}) {
   state.isRecording = false;
   const cs = state.chartSeries;
   for (const col of [cs.x, cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2]) col.length = 0;
-  cs.currentMagnitudes.length = 0;
   for (let i = 0; i < SAMPLES; i++) {
     cs.x.push(i * 0.02);
     cs.voltage.push(5 + Math.sin(i / 97) * 0.4);
@@ -198,36 +197,6 @@ test('sparse windows bind only visible raw samples and neighbours in both states
   assert.equal(whileDragging[0][0], state.chartSeries.x.at(9_999));
   assert.equal(visible(whileDragging, sparse), 401);
   assert.deepEqual(whileDragging, u.data);
-});
-
-test('raw and indexed chart windows keep current magnitude spikes without changing the signed source', async () => {
-  seed();
-  const cs = state.chartSeries;
-  const start = 16_000;
-  const spike = start + 96;
-  cs.current.setAt(spike, -12);
-  const u = stubChart();
-  state.mainChart = u;
-  chart.syncChartSeries();
-
-  await commit(windowOf(start, start + 199));
-  assert.equal(u.data[2][spike - start + 1], 12);
-  let plottedCurrent;
-  const flatten = SeriesBuckets.prototype.flatten;
-  SeriesBuckets.prototype.flatten = function () {
-    const result = flatten.call(this);
-    if (result.channels.length === 8) plottedCurrent = result.channels[1];
-    return result;
-  };
-  try {
-    await commit(windowOf(0, SAMPLES - 1));
-    assert.ok(plottedCurrent);
-    assert.equal(plottedCurrent.y[plottedCurrent.indices.indexOf(spike)], 12);
-    assert.ok(plottedCurrent.y.every((value) => !Number.isFinite(value) || value >= 0));
-  } finally {
-    SeriesBuckets.prototype.flatten = flatten;
-  }
-  assert.equal(cs.current.valueAt(spike), -12);
 });
 
 test('review detail tracks the actual canvas resolution and matches a short recording of the same window', async () => {

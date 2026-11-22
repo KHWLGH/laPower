@@ -25,8 +25,8 @@
 
   <body>
     <div class="app-shell">
-      <div class="app-wallpaper" aria-hidden="true">
-        <img id="workspace-wallpaper" src="./assets/wallpapers/background-shark.jpg" alt="" />
+      <div class="app-wallpaper" aria-hidden="true" hidden>
+        <img id="workspace-wallpaper" alt="" />
       </div>
       <!-- 标题栏 = Tab 条 + 拖拽区 + 全局快速连接 + 设置 + 窗口控制 -->
       <header class="titlebar" id="titlebar">
@@ -679,11 +679,11 @@
                         <div class="settings-row-desc"><span data-i18n="customBackgroundHint">Choose a PNG, JPG or WebP image. It is saved on this device and restored when the app starts.</span></div>
                       </div>
                       <div class="settings-row-control background-control">
-                        <div class="background-preview" id="background-preview" role="img" aria-label="Default background" data-i18n-aria-label="defaultBackground">
-                          <img src="./assets/wallpapers/background-shark.jpg" alt="" />
+                        <div class="background-preview" id="background-preview" role="img" aria-label="No custom background" data-i18n-aria-label="defaultBackground">
+                          <img alt="" hidden />
                         </div>
                         <button type="button" class="btn" id="btn-background-choose"><span data-i18n="chooseBackground">Choose image</span></button>
-                        <button type="button" class="btn btn-subtle" id="btn-background-clear" disabled><span data-i18n="restoreBackground">Restore default</span></button>
+                        <button type="button" class="btn btn-subtle" id="btn-background-clear" disabled><span data-i18n="restoreBackground">Clear</span></button>
                       </div>
                     </div>
                     <div class="settings-row">

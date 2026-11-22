@@ -19,7 +19,7 @@ async function renderedFonts(client, selector) {
   return (await client.send('CSS.getPlatformFontsForNode', { nodeId })).fonts;
 }
 function assertChineseFont(fonts) {
-  assert.ok(fonts.some((font) => font.familyName === 'Microsoft YaHei' && font.glyphCount > 0));
+  assert.ok(fonts.some((font) => font.familyName === 'Microsoft YaHei UI' && font.glyphCount > 0));
   assert.ok(fonts.every((font) => !/JhengHei|MingLiU|SimSun/.test(font.postScriptName)));
 }
 const harness = await createHeadlessHarness();
@@ -36,7 +36,7 @@ try {
       await page.locator('#btn-settings-tab').click();
       // Verify the initial language as well as switching back from another language.
       const startupFont = await page
-        .locator('[data-i18n=languageHint]')
+        .locator('#ui-scale-hint span')
         .evaluate((node) => getComputedStyle(node).fontFamily);
       if (process.platform === 'win32') assert.ok(startupFont.indexOf('YaHei') < startupFont.indexOf('JhengHei'));
       await page.locator('#language-select').selectOption('en', { force: true });
@@ -48,6 +48,7 @@ try {
         return {
           os: document.documentElement.dataset.os,
           ui: getComputedStyle(document.documentElement).getPropertyValue('--font-ui'),
+          mono: getComputedStyle(document.documentElement).getPropertyValue('--font-mono'),
           button: getComputedStyle(document.querySelector('#language-select + .cs-button')).fontFamily,
           axes: state.mainChart.axes.map((axis) => ({ font: axis.font, labelFont: axis.labelFont })),
           systemLabel: document.querySelector('#language-select option[value=auto]').textContent,
@@ -58,8 +59,8 @@ try {
       assert.equal(fonts.overflow, false);
       let client;
       if (fonts.os === 'windows') {
-        for (const family of [fonts.ui, fonts.button]) {
-          assert.match(family, /^"?Microsoft YaHei(?:"|,)/);
+        for (const family of [fonts.ui, fonts.mono, fonts.button]) {
+          assert.match(family, /Microsoft YaHei UI/);
           assert.ok(family.indexOf('YaHei') < family.indexOf('JhengHei'));
         }
         for (const [index, axis] of fonts.axes.entries()) {
@@ -73,7 +74,8 @@ try {
         fonts.renderedFonts = {};
         for (const selector of [
           'label[for=ui-scale] span',
-          '[data-i18n=languageHint]',
+          '#ui-scale-hint span',
+          '[data-i18n="languageHint"]',
           '#language-select + .cs-button',
           '#status-sample-rate',
         ]) {
@@ -81,8 +83,10 @@ try {
           assertChineseFont(actual);
           fonts.renderedFonts[selector] = actual;
         }
-        const regular = fonts.renderedFonts['[data-i18n=languageHint]'];
+        const regular = fonts.renderedFonts['#ui-scale-hint span'];
         assert.ok(regular.every((font) => !/Bold|Light/.test(font.postScriptName)));
+        const mono = fonts.renderedFonts['#status-sample-rate'];
+        assert.ok(mono.some((font) => /Cascadia|Consolas/.test(font.familyName) && font.glyphCount > 0));
       }
       await page.screenshot({ path: resolve(output, `zh-TW-${theme}-${scale * 100}-settings.png`) });
       const languageButton = page.locator('#language-select + .cs-button');
@@ -106,10 +110,10 @@ try {
         return state.mainChart.axes[0].font[0];
       });
       if (fonts.os === 'windows') {
-        assert.match(simplified, /Microsoft YaHei(?:["']|,)/);
+        assert.match(simplified, /Microsoft YaHei UI/);
         assert.doesNotMatch(simplified, /Microsoft JhengHei/);
         await page.locator('#btn-settings-tab').click();
-        assertChineseFont(await renderedFonts(client, '[data-i18n=languageHint]'));
+        assertChineseFont(await renderedFonts(client, '#ui-scale-hint span'));
         await client.detach();
       }
       await page.screenshot({ path: resolve(output, `zh-CN-${theme}-${scale * 100}-settings.png`) });

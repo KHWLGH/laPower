@@ -38,6 +38,20 @@
 .app-shell {
   position: relative;
   isolation: isolate;
+  background:
+    radial-gradient(ellipse at 16% 8%, rgba(71, 158, 245, 0.16), transparent 52%),
+    radial-gradient(ellipse at 86% 88%, rgba(52, 216, 137, 0.09), transparent 50%),
+    linear-gradient(155deg, #242a3a 0%, #1c2230 55%, #181d29 100%);
+}
+
+:root[data-theme="light"] .app-shell {
+  background:
+    radial-gradient(ellipse at 16% 8%, rgba(98, 171, 245, 0.22), transparent 54%),
+    radial-gradient(ellipse at 86% 88%, rgba(0, 204, 106, 0.08), transparent 50%),
+    linear-gradient(155deg, #f3f6fc 0%, #e7edf8 55%, #dfe7f4 100%);
+}
+
+:root.has-custom-background .app-shell {
   background: var(--wallpaper-frame);
 }
 
@@ -54,6 +68,32 @@
   background-color: var(--wallpaper-base);
   filter: blur(14px);
   clip-path: inset(0);
+}
+
+:root.has-custom-background .app-wallpaper {
+  contain: strict;
+  transform: translateZ(0);
+}
+
+/* Restrict live chart/card invalidation to local subtrees instead of triggering full-shell reflow. */
+#main-chart,
+#navigator-chart,
+.realtime-panel {
+  contain: layout style;
+}
+
+.background-preview:not(.has-image) {
+  border-style: dashed;
+  background: var(--fill-recess);
+}
+
+.background-preview:not(.has-image)::before {
+  content: "";
+  width: 20px;
+  height: 14px;
+  border: 1.5px solid var(--text-tertiary);
+  border-radius: 3px;
+  opacity: 0.45;
 }
 
 .app-wallpaper img {
@@ -237,10 +277,6 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .app-shell::after {
-    animation: glass-ambient-light 18s ease-in-out infinite alternate;
-  }
-
   .tab:not(:disabled),
   .cmd-btn:not(:disabled) {
     transition:
@@ -303,15 +339,6 @@
       translate: 0 0;
     }
   }
-
-  @keyframes glass-ambient-light {
-    from {
-      opacity: 0.66;
-    }
-    to {
-      opacity: 1;
-    }
-  }
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -325,6 +352,10 @@
     --glass-control: var(--fill-control);
     --glass-control-hover: var(--fill-control-hover);
     --glass-sheen: none;
+  }
+
+  .app-shell {
+    background: var(--surface-content);
   }
 
   .app-wallpaper,

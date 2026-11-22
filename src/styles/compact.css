@@ -134,7 +134,7 @@
     --timeline-height: 64px;
     --chart-min-height: 240px;
     --monitor-gutter: 8px;
-    --rt-numeral: 700 20px / 1 var(--font-ui);
+    --rt-numeral: 700 20px / 1 var(--font-mono);
   }
 
   /* 读数栏最后一档收紧：600 窗高 + 温度卡时六张卡片仍需塞进 ≈484px */
@@ -169,7 +169,7 @@
   }
 
   .realtime-card.energy .realtime-value {
-    font: 700 16px / 18px var(--font-ui);
+    font: 700 16px / 18px var(--font-mono);
   }
 
   .realtime-metric + .realtime-metric {

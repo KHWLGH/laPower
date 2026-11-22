@@ -1,8 +1,8 @@
-// SPDX-FileCopyrightText: 2026 KHWLGH
 // SPDX-License-Identifier: GPL-3.0-only
-// For original project contributions; see COPYRIGHT.
+// Based on community contribution from PR #11; refined for laPower. See COPYRIGHT.
 //! User-selected window wallpaper, stored outside the install directory.
 
+use crate::app_error::AppError;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use std::fs;
@@ -17,17 +17,21 @@ const FILES: &[(&str, &str)] = &[
     ("webp", "image/webp"),
 ];
 
-fn directory(app: &AppHandle) -> Result<PathBuf, String> {
+fn backend_error(detail: impl ToString) -> AppError {
+    AppError::new("backendFailure", detail.to_string())
+}
+
+fn directory(app: &AppHandle) -> Result<PathBuf, AppError> {
     let path = app
         .path()
         .app_config_dir()
-        .map_err(|error| error.to_string())?
+        .map_err(backend_error)?
         .join("custom-background");
-    fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+    fs::create_dir_all(&path).map_err(backend_error)?;
     Ok(path)
 }
 
-fn data_url(path: &Path) -> Result<String, String> {
+fn data_url(path: &Path) -> Result<String, AppError> {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
@@ -36,19 +40,25 @@ fn data_url(path: &Path) -> Result<String, String> {
     let mime = FILES
         .iter()
         .find_map(|(candidate, mime)| (*candidate == extension).then_some(*mime))
-        .ok_or_else(|| "仅支持 PNG、JPG 和 WebP 图片".to_string())?;
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+        .ok_or_else(|| AppError::message("customBackgroundUnsupported", std::iter::empty()))?;
+    let metadata = fs::metadata(path).map_err(backend_error)?;
     if metadata.len() == 0 || metadata.len() > MAX_IMAGE_BYTES {
-        return Err("背景图片必须小于 25 MB".to_string());
+        return Err(AppError::message(
+            "customBackgroundTooLarge",
+            std::iter::empty(),
+        ));
     }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let bytes = fs::read(path).map_err(backend_error)?;
     if !valid_signature(&extension, &bytes) {
-        return Err("背景图片文件已损坏或格式无效".to_string());
+        return Err(AppError::message(
+            "customBackgroundInvalid",
+            std::iter::empty(),
+        ));
     }
     Ok(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
 }
 
-fn supported_extension(path: &Path) -> Result<&'static str, String> {
+fn supported_extension(path: &Path) -> Result<&'static str, AppError> {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
@@ -57,7 +67,7 @@ fn supported_extension(path: &Path) -> Result<&'static str, String> {
     FILES
         .iter()
         .find_map(|(candidate, _)| (*candidate == extension).then_some(*candidate))
-        .ok_or_else(|| "仅支持 PNG、JPG 和 WebP 图片".to_string())
+        .ok_or_else(|| AppError::message("customBackgroundUnsupported", std::iter::empty()))
 }
 
 fn valid_signature(extension: &str, bytes: &[u8]) -> bool {
@@ -69,7 +79,7 @@ fn valid_signature(extension: &str, bytes: &[u8]) -> bool {
     }
 }
 
-fn load_saved(app: &AppHandle) -> Result<Option<String>, String> {
+fn load_saved(app: &AppHandle) -> Result<Option<String>, AppError> {
     let folder = directory(app)?;
     for (extension, _) in FILES {
         let path = folder.join(format!("background.{extension}"));
@@ -82,72 +92,86 @@ fn load_saved(app: &AppHandle) -> Result<Option<String>, String> {
 
 /// Open a native image picker and persist the selected raster image in app config.
 #[tauri::command]
-pub(crate) async fn choose_custom_background(app: AppHandle) -> Result<Option<String>, String> {
-    let picked = crate::file_io::dialog_path(app.clone(), |builder| {
+pub(crate) async fn choose_custom_background(
+    app: AppHandle,
+    title: Option<String>,
+    filter_name: Option<String>,
+) -> Result<Option<String>, AppError> {
+    let picked = crate::file_io::dialog_path(app.clone(), move |builder| {
         builder
-            .set_title("Choose background image")
-            .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
+            .set_title(title.unwrap_or_else(|| "Choose background image".into()))
+            .add_filter(
+                filter_name.unwrap_or_else(|| "Images".into()),
+                &["png", "jpg", "jpeg", "webp"],
+            )
             .blocking_pick_file()
     })
-    .await?;
+    .await
+    .map_err(backend_error)?;
     let Some(source) = picked else {
         return Ok(None);
     };
 
     tauri::async_runtime::spawn_blocking(move || {
         let extension = supported_extension(&source)?;
-        let metadata = fs::metadata(&source).map_err(|error| error.to_string())?;
+        let metadata = fs::metadata(&source).map_err(backend_error)?;
         if metadata.len() == 0 || metadata.len() > MAX_IMAGE_BYTES {
-            return Err("背景图片必须小于 25 MB".to_string());
+            return Err(AppError::message(
+                "customBackgroundTooLarge",
+                std::iter::empty(),
+            ));
         }
-        let bytes = fs::read(&source).map_err(|error| error.to_string())?;
+        let bytes = fs::read(&source).map_err(backend_error)?;
         if !valid_signature(extension, &bytes) {
-            return Err("图片内容与文件格式不匹配".to_string());
+            return Err(AppError::message(
+                "customBackgroundInvalid",
+                std::iter::empty(),
+            ));
         }
 
         let folder = directory(&app)?;
         let destination = folder.join(format!("background.{extension}"));
         let temporary = folder.join(format!("background.{extension}.tmp"));
-        fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+        fs::write(&temporary, bytes).map_err(backend_error)?;
         if destination.exists() {
-            fs::remove_file(&destination).map_err(|error| error.to_string())?;
+            fs::remove_file(&destination).map_err(backend_error)?;
         }
-        fs::rename(&temporary, &destination).map_err(|error| error.to_string())?;
+        fs::rename(&temporary, &destination).map_err(backend_error)?;
         for (other_extension, _) in FILES {
             if *other_extension != extension {
                 let old = folder.join(format!("background.{other_extension}"));
                 if old.exists() {
-                    fs::remove_file(old).map_err(|error| error.to_string())?;
+                    fs::remove_file(old).map_err(backend_error)?;
                 }
             }
         }
         data_url(&destination).map(Some)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(backend_error)?
 }
 
-/// Restore the bundled wallpaper on startup when the user has not selected one.
+/// Load a user-selected custom background on startup if present.
 #[tauri::command]
-pub(crate) async fn load_custom_background(app: AppHandle) -> Result<Option<String>, String> {
+pub(crate) async fn load_custom_background(app: AppHandle) -> Result<Option<String>, AppError> {
     tauri::async_runtime::spawn_blocking(move || load_saved(&app))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(backend_error)?
 }
 
-/// Remove the saved image and restore the bundled wallpaper.
+/// Remove the saved custom background image and return to the default backdrop.
 #[tauri::command]
-pub(crate) async fn clear_custom_background(app: AppHandle) -> Result<(), String> {
+pub(crate) async fn clear_custom_background(app: AppHandle) -> Result<(), AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         let folder = directory(&app)?;
         for (extension, _) in FILES {
             let path = folder.join(format!("background.{extension}"));
-            if path.exists() {
-                fs::remove_file(path).map_err(|error| error.to_string())?;
+            if path.is_file() {
+                fs::remove_file(path).map_err(backend_error)?;
             }
         }
         Ok(())
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(backend_error)?
 }

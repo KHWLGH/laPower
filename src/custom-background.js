@@ -1,39 +1,51 @@
 // @ts-check
 /*!
- * SPDX-FileCopyrightText: 2026 KHWLGH
  * SPDX-License-Identifier: GPL-3.0-only
- * For original project contributions; see COPYRIGHT.
+ * Based on community contribution from PR #11; refined for laPower. See COPYRIGHT.
  */
 
 import { errorText, t } from './i18n.js';
 import { toast } from './ui/toast.js';
 
 const invoke = window.__TAURI__?.core?.invoke;
-const wallpaper = /** @type {HTMLImageElement} */ (document.getElementById('workspace-wallpaper'));
-const bundledImage = wallpaper.getAttribute('src') ?? '';
+const wallpaper = /** @type {HTMLImageElement|null} */ (document.getElementById('workspace-wallpaper'));
+const wallpaperContainer = wallpaper?.closest('.app-wallpaper');
 
 /** @param {string|null} dataUrl */
 function renderBackground(dataUrl) {
   const preview = document.getElementById('background-preview');
   const clearButton = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-background-clear'));
   if (dataUrl !== null && !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
-    throw new Error('背景图片数据格式无效');
+    throw new Error(t('customBackgroundInvalid'));
   }
-  // Large data URLs can exceed Chromium's CSS variable limit. Use the image loader directly.
-  const src = dataUrl ?? bundledImage;
-  wallpaper.src = src;
-  wallpaper.classList.toggle('is-custom', dataUrl !== null);
+  const hasCustom = dataUrl !== null;
+  document.documentElement.classList.toggle('has-custom-background', hasCustom);
+  if (wallpaperContainer instanceof HTMLElement) wallpaperContainer.hidden = !hasCustom;
+  if (wallpaper) {
+    // Large data URLs can exceed Chromium's CSS variable limit. Use the image element directly.
+    if (hasCustom) wallpaper.src = dataUrl;
+    else wallpaper.removeAttribute('src');
+    wallpaper.classList.toggle('is-custom', hasCustom);
+  }
+  preview?.classList.toggle('has-image', hasCustom);
   const thumbnail = preview?.querySelector('img');
-  if (thumbnail) thumbnail.src = src;
-  const label = dataUrl ? 'customBackgroundPreview' : 'defaultBackground';
+  if (thumbnail) {
+    if (hasCustom) thumbnail.src = dataUrl;
+    else thumbnail.removeAttribute('src');
+    thumbnail.hidden = !hasCustom;
+  }
+  const label = hasCustom ? 'customBackgroundPreview' : 'defaultBackground';
   preview?.setAttribute('data-i18n-aria-label', label);
   preview?.setAttribute('aria-label', t(label));
-  if (clearButton) clearButton.disabled = dataUrl === null;
+  if (clearButton) clearButton.disabled = !hasCustom;
 }
 
-/** Load the persisted image before the first workspace is displayed. */
+/** Load the persisted custom image before the first workspace is displayed. */
 export async function loadCustomBackground() {
-  if (!invoke) return;
+  if (!invoke) {
+    renderBackground(null);
+    return;
+  }
   const dataUrl = await invoke('load_custom_background');
   renderBackground(dataUrl ?? null);
 }
@@ -45,7 +57,10 @@ export function initCustomBackgroundControls() {
     const button = /** @type {HTMLButtonElement} */ (document.getElementById('btn-background-choose'));
     button.disabled = true;
     try {
-      const dataUrl = await invoke('choose_custom_background');
+      const dataUrl = await invoke('choose_custom_background', {
+        title: t('chooseBackgroundTitle'),
+        filterName: t('imageFilter'),
+      });
       if (!dataUrl) return;
       renderBackground(dataUrl);
       toast.success(() => t('customBackgroundSaved'));

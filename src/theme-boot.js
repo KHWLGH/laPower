@@ -6,7 +6,7 @@
 /**
  * 首屏引导：在样式表之前同步写入 <html data-theme> 与 <html data-os>。
  * data-theme 避免 LazyStore 异步读完之前闪错主题（键名须与 src/theme.js 的 THEME_STORAGE_KEY 一致）。
- * data-os 在首帧选择平台对应的窗口控件布局。
+ * data-os 让 tokens.css 在首帧就选对平台原生字体与窗口控件布局。
  */
 (() => {
   let pref = 'system';

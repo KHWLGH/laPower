@@ -191,7 +191,7 @@ select {
   border-radius: var(--radius-control);
   color: var(--text-primary);
   font-size: 12px;
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   width: 80px;
   height: 24px; /* Fixed height for alignment */
   transition: background var(--dur-fast) var(--ease-standard);
@@ -721,7 +721,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 .realtime-card.energy .realtime-value {
-  font: 700 18px / 20px var(--font-ui);
+  font: 700 18px / 20px var(--font-mono);
   text-align: left;
 }
 
@@ -738,12 +738,12 @@ input[type="number"]::-webkit-outer-spin-button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 #data-count {
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -785,7 +785,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 .signal-value {
   margin-left: auto;
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
@@ -863,7 +863,7 @@ input[type="number"]::-webkit-outer-spin-button {
   border: 1px solid var(--stroke-card);
   border-radius: var(--radius-surface);
   padding: 8px 12px;
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -999,6 +999,16 @@ input[type="number"]::-webkit-outer-spin-button {
 .cs-option[aria-disabled="true"] {
   color: var(--text-disabled);
   cursor: not-allowed;
+}
+/* Locale fonts and wrapping apply to every native platform style. */
+:root[lang="ja"] {
+  --font-ui:
+    "Segoe UI", -apple-system, BlinkMacSystemFont, "Yu Gothic UI", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+}
+:root[lang="zh-TW"] {
+  --font-ui:
+    "Segoe UI", -apple-system, BlinkMacSystemFont, "Microsoft JhengHei UI", "PingFang TC", "Noto Sans CJK TC",
+    sans-serif;
 }
 .settings-row-text {
   min-width: 0;

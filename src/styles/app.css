@@ -678,6 +678,14 @@ html[data-ui-scale-css] .app-shell {
   font-variant-numeric: tabular-nums;
 }
 
+.status-metrics .status-item > :last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .status-metrics .status-remaining.is-warning {
   color: var(--status-caution);
 }
@@ -751,6 +759,7 @@ html[data-ui-scale-css] .app-shell {
 
 .display-number-wrap output {
   justify-self: center;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -863,7 +872,7 @@ html[data-ui-scale-css] .flyout-panel {
 
 .marker-time {
   font: var(--type-caption);
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
 }
@@ -1580,7 +1589,7 @@ html[data-ui-scale-css] .about-legal-dialog {
 
 .scale-value {
   min-width: 3.5em;
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-secondary);
   text-align: right;
@@ -1711,7 +1720,7 @@ html[data-ui-scale-css] .about-legal-dialog {
 }
 
 .settings-kv-value {
-  font-family: var(--font-ui);
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-primary);
   user-select: text;
