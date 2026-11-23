@@ -438,12 +438,14 @@
           </div>
           <div class="trigger-body" id="km-trigger-body">
             <div class="trigger-controls">
-          <div class="trigger-config-status" id="km-pdm-config-status" role="status"></div>
-              <div class="trigger-banner" id="km-banner"><span data-i18n="powerControlHint">Connect a POWER-Z device; open PDM before sending protocol commands except custom commands.</span></div>
-              <div class="trigger-workspace-tabs" role="tablist" aria-label="Protocol workspace" data-i18n-aria-label="protocolWorkspace">
-                <button type="button" id="btn-km-mode-detection" class="trigger-mode-tab" role="tab" aria-selected="false" aria-controls="km-detection-panel" data-mode="detection"><span data-i18n="triggerModeDetection">Detection</span></button>
-                <button type="button" id="btn-km-mode-trigger" class="trigger-mode-tab is-active" role="tab" aria-selected="true" aria-controls="km-trigger-panel" data-mode="trigger"><span data-i18n="triggerModeTrigger">Trigger</span></button>
+              <div class="trigger-topbar">
+                <div class="trigger-workspace-tabs" role="tablist" aria-label="Protocol workspace" data-i18n-aria-label="protocolWorkspace">
+                  <button type="button" id="btn-km-mode-detection" class="trigger-mode-tab" role="tab" aria-selected="false" aria-controls="km-detection-panel" data-mode="detection"><span data-i18n="triggerModeDetection">Detection</span></button>
+                  <button type="button" id="btn-km-mode-trigger" class="trigger-mode-tab is-active" role="tab" aria-selected="true" aria-controls="km-trigger-panel" data-mode="trigger"><span data-i18n="triggerModeTrigger">Trigger</span></button>
+                </div>
+                <div class="trigger-config-status" id="km-pdm-config-status" role="status"></div>
               </div>
+              <div class="trigger-banner" id="km-banner"><span data-i18n="powerControlHint">Connect a POWER-Z device; open PDM before sending protocol commands except custom commands.</span></div>
               <section id="km-detection-panel" class="trigger-panel" role="tabpanel" aria-labelledby="btn-km-mode-detection" hidden>
                 <div class="trigger-panel-head">
                   <div class="trigger-panel-heading">

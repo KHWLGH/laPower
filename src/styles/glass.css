@@ -168,11 +168,175 @@
 /* 列表与协议表单复用磨砂壁纸层，避免滚动内容参与滤镜合成。 */
 .pd-master,
 .pd-detail-pane,
+.pd-splitter,
 .trigger-controls,
 .trigger-log-pane {
   background: var(--glass-panel);
   border-color: var(--glass-divider);
   box-shadow: none;
+}
+
+.pd-splitter::before {
+  background: color-mix(in srgb, var(--glass-edge) 55%, var(--glass-divider));
+}
+
+.pd-row {
+  border-bottom-color: var(--glass-divider);
+}
+
+.pd-hex-strip th,
+.pd-hex-strip td,
+.pd-kv-table th,
+.pd-kv-table td {
+  border-color: var(--glass-edge);
+}
+
+/* 协议控制与协议检测工作区磨砂玻璃适配。 */
+.trigger-pill:not(.is-open) {
+  background: var(--glass-control);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-banner {
+  background: var(--glass-sheen), color-mix(in srgb, var(--accent-fill) 12%, var(--glass-panel));
+  border: 1px solid color-mix(in srgb, var(--accent-fill) 28%, var(--glass-edge));
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-config-status,
+#km-detection-summary:not([hidden]) {
+  background: var(--glass-control);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-workspace-tabs {
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--glass-radius);
+  background: var(--glass-control);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-mode-tab {
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: calc(var(--glass-radius) - 3px);
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.trigger-mode-tab:hover {
+  background: var(--glass-control-hover);
+  color: var(--text-primary);
+}
+
+.trigger-mode-tab.is-active {
+  background: var(--glass-sheen), var(--glass-control-hover);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-detection-result {
+  background: var(--glass-sheen), var(--glass-panel);
+  border-color: var(--glass-edge);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+
+.trigger-detection-result.is-supported {
+  background: var(--glass-sheen), color-mix(in srgb, var(--status-success) 6%, var(--glass-panel));
+  border-color: color-mix(in srgb, var(--status-success) 32%, var(--glass-edge));
+}
+
+.trigger-detection-result.is-supported.is-pd {
+  background: var(--glass-sheen), color-mix(in srgb, var(--accent-fill) 8%, var(--glass-panel));
+  border-color: color-mix(in srgb, var(--accent-fill) 36%, var(--glass-edge));
+}
+
+.trigger-detection-result.is-checking {
+  background: var(--glass-sheen), color-mix(in srgb, var(--accent-fill) 12%, var(--glass-panel));
+  border-color: color-mix(in srgb, var(--accent-fill) 45%, var(--glass-edge));
+}
+
+.trigger-detection-state {
+  background: color-mix(in srgb, var(--text-tertiary) 12%, var(--glass-control));
+  border-color: var(--glass-edge);
+  color: var(--text-secondary);
+}
+
+.trigger-detection-result.is-supported .trigger-detection-state {
+  background: color-mix(in srgb, var(--status-success) 14%, var(--glass-control));
+  border-color: color-mix(in srgb, var(--status-success) 34%, var(--glass-edge));
+  color: var(--status-success);
+}
+
+.trigger-detection-result.is-checking .trigger-detection-state {
+  background: color-mix(in srgb, var(--accent-fill) 16%, var(--glass-control));
+  border-color: color-mix(in srgb, var(--accent-fill) 36%, var(--glass-edge));
+  color: var(--accent-text);
+}
+
+.trigger-detection-result.is-failed .trigger-detection-state,
+.trigger-detection-result.is-unsupported .trigger-detection-state {
+  background: color-mix(in srgb, var(--status-caution) 14%, var(--glass-control));
+  border-color: color-mix(in srgb, var(--status-caution) 32%, var(--glass-edge));
+  color: var(--status-caution);
+}
+
+.trigger-voltage-chip {
+  background: color-mix(in srgb, var(--accent-fill) 11%, var(--glass-control));
+  border-color: color-mix(in srgb, var(--accent-fill) 28%, var(--glass-edge));
+  color: var(--accent-text);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-detection-detail,
+.trigger-section,
+.trigger-log-head,
+.trigger-log-actions,
+.trigger-log-filters,
+.trigger-history-item {
+  border-color: var(--glass-divider);
+}
+
+.trigger-log-head {
+  background: var(--glass-chrome);
+}
+
+.trigger-detection-diagnostics {
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--glass-radius);
+  background: var(--glass-sheen), var(--glass-panel);
+  box-shadow: var(--glass-rim);
+  box-sizing: border-box;
+}
+
+.trigger-pdo-list {
+  background: var(--glass-sheen), var(--glass-panel);
+  border-color: var(--glass-edge);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-rim);
+}
+
+.trigger-pdo-row {
+  border-bottom-color: var(--glass-divider);
+}
+
+.trigger-pdo-row:hover {
+  background: var(--glass-control-hover);
+}
+
+#km-req-volt[readonly] {
+  background: color-mix(in srgb, var(--glass-control) 65%, transparent);
+  border-color: var(--glass-divider);
 }
 
 .chart-container {
@@ -380,8 +544,12 @@
   .chart-area,
   .pd-master,
   .pd-detail-pane,
+  .pd-splitter,
   .trigger-controls,
   .trigger-log-pane,
+  .trigger-detection-result,
+  .trigger-detection-diagnostics,
+  .trigger-pdo-list,
   .settings-nav,
   .settings-group {
     background: Canvas;

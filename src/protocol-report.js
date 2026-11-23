@@ -35,12 +35,16 @@ function reportStyle(theme) {
   }
   const current = getComputedStyle(document.documentElement);
   return {
-    background: token('--surface-content'),
-    card: token('--surface-card'),
+    canvasBg: token(theme === 'light' ? '--fill-subtle-hover' : '--surface-base'),
+    card: token('--surface-content'),
+    surfaceLayer: token('--fill-subtle-hover'),
     ink: token('--text-primary'),
     muted: token('--text-secondary'),
+    subtle: token('--text-tertiary'),
     border: token('--stroke-divider'),
+    cardBorder: token('--stroke-card'),
     accent: token('--accent-text'),
+    accentFill: token('--accent-fill'),
     success: token('--status-success'),
     successBg: token('--status-success-bg'),
     caution: token('--status-caution'),
@@ -50,6 +54,17 @@ function reportStyle(theme) {
     mono: current.getPropertyValue('--font-mono').trim(),
     radius: Number.parseFloat(token('--radius-surface')),
   };
+}
+
+/** @param {string} color @param {number} opacity */
+function hexAlpha(color, opacity) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color.trim());
+  if (!match) return color;
+  const int = Number.parseInt(match[1], 16);
+  const r = (int >> 16) & 255;
+  const g = (int >> 8) & 255;
+  const b = int & 255;
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
 /** @returns {Promise<HTMLImageElement>} */
@@ -106,27 +121,38 @@ export async function renderProtocolReport(snapshot, requested) {
     return lines;
   }
 
+  /** @param {number} size @param {number|boolean} [weight] @param {boolean} [mono] */
+  function fontSpec(size, weight = 400, mono = false) {
+    const numeric = typeof weight === 'boolean' ? (weight ? 600 : 400) : weight;
+    return `${numeric} ${size}px ${mono ? palette.mono : palette.ui}`;
+  }
+
   /** @param {string} value @param {number} x @param {number} y @param {number} width
-   * @param {number} size @param {number} [lines] @param {string} [color]
-   * @param {boolean} [strong] @param {boolean} [mono] @param {number} [min] */
-  function text(value, x, y, width, size, lines = 1, color = palette.ink, strong = false, mono = false, min = size) {
+   * @param {number} size @param {{ lines?: number, color?: string, weight?: number, mono?: boolean,
+   * min?: number, align?: 'left'|'center'|'right' }} [opts] */
+  function drawText(value, x, y, width, size, opts = {}) {
+    const { lines = 1, color = palette.ink, weight = 400, mono = false, min = size, align = 'left' } = opts;
     let rows = [];
     for (; size >= min; size--) {
-      ctx.font = `${strong ? 600 : 400} ${size}px ${mono ? palette.mono : palette.ui}`;
+      ctx.font = fontSpec(size, weight, mono);
       rows = wrap(value, width);
       if (rows.length <= lines) break;
     }
     if (size < min) throw overflow();
     ctx.fillStyle = color;
+    ctx.textAlign = align;
+    const anchorX = align === 'right' ? x + width : align === 'center' ? x + width / 2 : x;
     rows.forEach((line, i) => {
-      ctx.fillText(line, x, y + i * size * 1.35);
+      ctx.fillText(line, anchorX, y + i * size * 1.35);
     });
+    ctx.textAlign = 'left';
     return rows.length * size * 1.35;
   }
 
-  /** @param {number} x @param {number} y @param {number} w @param {number} h @param {string} [fill] */
-  function card(x, y, w, h, fill = palette.card) {
-    const r = palette.radius;
+  /** @param {number} x @param {number} y @param {number} w @param {number} h
+   * @param {number} [radius] */
+  function roundedPath(x, y, w, h, radius = palette.radius) {
+    const r = Math.max(0, Math.min(radius, w / 2, h / 2));
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
@@ -138,232 +164,613 @@ export async function renderProtocolReport(snapshot, requested) {
     ctx.lineTo(x, y + r);
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
+  }
+
+  /** @param {number} x @param {number} y @param {number} w @param {number} h
+   * @param {{ fill?: string, stroke?: string|null, radius?: number }} [opts] */
+  function card(x, y, w, h, opts = {}) {
+    const { fill = palette.card, stroke = palette.cardBorder, radius = 12 } = opts;
+    roundedPath(x, y, w, h, radius);
     ctx.fillStyle = fill;
     ctx.fill();
-    ctx.strokeStyle = palette.border;
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
   }
-  /** @param {number} x @param {number} y @param {number} width */
-  function divider(x, y, width) {
+
+  /** @param {number} x @param {number} y @param {number} width @param {string} [color] */
+  function divider(x, y, width, color = palette.border) {
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + width, y);
-    ctx.strokeStyle = palette.border;
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.stroke();
   }
+
   /** @param {string} value @param {number} x @param {number} y @param {number} width
-   * @param {'supported'|'unsupported'|'not_checked'|'failed'|string} state @param {number} [size]
-   * @param {boolean} [alignRight] */
-  function badge(value, x, y, width, state, size = 16, alignRight = false) {
+   * @param {'supported'|'unsupported'|'not_checked'|'failed'|string} state
+   * @param {{ size?: number, minSize?: number, align?: 'left'|'center'|'right', minWidth?: number,
+   * withDot?: boolean }} [opts] */
+  function badge(value, x, y, width, state, opts = {}) {
+    const { size: requestedSize = 14, minSize = 12, align = 'left', minWidth = 0, withDot = false } = opts;
     const good = state === 'supported';
     const warning = state === 'unsupported' || state === 'failed';
-    for (; size > 13; size--) {
-      ctx.font = `400 ${size}px ${palette.ui}`;
-      if (ctx.measureText(value).width <= width - 20) break;
+    const fg = good ? palette.success : warning ? palette.caution : palette.muted;
+    const bg = good ? palette.successBg : warning ? palette.cautionBg : palette.neutralBg;
+    const borderColor = hexAlpha(fg, 0.34);
+    const dotSpace = withDot ? 14 : 0;
+    const padX = 12;
+    let size = requestedSize;
+    for (; size > minSize; size--) {
+      ctx.font = fontSpec(size, 600);
+      if (ctx.measureText(value).width + padX * 2 + dotSpace <= width) break;
     }
-    ctx.font = `400 ${size}px ${palette.ui}`;
-    const contentWidth = Math.min(width, Math.ceil(ctx.measureText(value).width) + 20);
-    if (alignRight) x += width - contentWidth;
-    card(x, y, contentWidth, size + 12, good ? palette.successBg : warning ? palette.cautionBg : palette.neutralBg);
-    text(
-      value,
-      x + 9,
-      y + 6,
-      contentWidth - 18,
-      size,
-      1,
-      good ? palette.success : warning ? palette.caution : palette.muted,
-      false,
-      false,
-      13,
-    );
+    ctx.font = fontSpec(size, 600);
+    const labelWidth = Math.ceil(ctx.measureText(value).width);
+    const pillWidth = Math.min(width, Math.max(minWidth, labelWidth + padX * 2 + dotSpace));
+    const pillHeight = size + 12;
+    let pillX = x;
+    if (align === 'right') pillX = x + width - pillWidth;
+    else if (align === 'center') pillX = x + (width - pillWidth) / 2;
+
+    card(pillX, y, pillWidth, pillHeight, { fill: bg, stroke: borderColor, radius: pillHeight / 2 });
+    const innerWidth = labelWidth + dotSpace;
+    const contentLeft = pillWidth > innerWidth + padX * 2 ? pillX + (pillWidth - innerWidth) / 2 : pillX + padX;
+    if (withDot) {
+      ctx.beginPath();
+      ctx.arc(contentLeft + 3, y + pillHeight / 2, 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = fg;
+      ctx.fill();
+    }
+    drawText(value, contentLeft + dotSpace, y + 6, Math.max(pillWidth - padX * 2 - dotSpace, labelWidth), size, {
+      color: fg,
+      weight: 600,
+      min: minSize,
+    });
+    return { x: pillX, y, width: pillWidth, height: pillHeight };
   }
 
-  ctx.fillStyle = palette.background;
-  ctx.fillRect(0, 0, 1920, 1080);
-  ctx.drawImage(icon, 48, 42, 48, 48);
-  text('laPower', 110, 47, 175, 34, 1, palette.ink, true);
-  text(t('protocolReportTitle'), 300, 47, 1120, 34, 1, palette.ink, true, false, 26);
-  badge(detectionSummary(report), 1480, 44, 392, report.completion === 'complete' ? 'supported' : 'failed', 22, true);
-  const timestamp = new Date(metadata.startedAt).toLocaleString(getResolvedLanguage(), { hour12: false });
-  text(`${metadata.device}  ·  ${timestamp}`, 48, 116, 1190, 22, 1, palette.muted, false, false, 18);
-  text(
-    `${t(metadata.full ? 'fullScan' : 'scan')}  ·  ${number(report.elapsed_ms / 1000)} s`,
-    1270,
-    116,
-    602,
-    22,
-    1,
-    palette.muted,
-    false,
-    false,
-    18,
-  );
-  divider(48, 158, 1824);
+  /** @param {string[]} labels @param {number} maxWidth @param {number} fontSize @param {number} maxLines */
+  function layoutChips(labels, maxWidth, fontSize, maxLines) {
+    if (!labels.length) return { fitted: true, rows: [], rowHeight: 0, totalHeight: 0, fontSize };
+    ctx.font = fontSpec(fontSize, 500, true);
+    const padX = 10;
+    const gapX = 6;
+    const gapY = 6;
+    const chipHeight = fontSize + 10;
+    /** @type {Array<Array<{ label: string, width: number }>>} */
+    const lines = [[]];
+    let cursorX = 0;
+    for (const label of labels) {
+      const chipWidth = Math.ceil(ctx.measureText(label).width) + padX * 2;
+      if (chipWidth > maxWidth) return { fitted: false, rows: [], rowHeight: chipHeight, totalHeight: 0, fontSize };
+      const current = lines[lines.length - 1];
+      if (current.length && cursorX + gapX + chipWidth > maxWidth) {
+        if (lines.length >= maxLines) {
+          return { fitted: false, rows: [], rowHeight: chipHeight, totalHeight: 0, fontSize };
+        }
+        lines.push([{ label, width: chipWidth }]);
+        cursorX = chipWidth;
+      } else {
+        if (current.length) cursorX += gapX;
+        current.push({ label, width: chipWidth });
+        cursorX += chipWidth;
+      }
+    }
+    const totalHeight = lines.length * chipHeight + (lines.length - 1) * gapY;
+    return { fitted: true, rows: lines, rowHeight: chipHeight, totalHeight, fontSize };
+  }
 
-  const left = 48,
-    leftWidth = 850,
-    right = 922,
-    rightWidth = 950,
-    top = 182,
-    height = 704;
+  /** @param {ReturnType<typeof layoutChips>} layout @param {number} x @param {number} y */
+  function drawChips(layout, x, y) {
+    const gapX = 6;
+    const gapY = 6;
+    const fill = hexAlpha(palette.accentFill, 0.11);
+    const stroke = hexAlpha(palette.accentFill, 0.34);
+    let cy = y;
+    for (const row of layout.rows) {
+      let cx = x;
+      for (const chip of row) {
+        card(cx, cy, chip.width, layout.rowHeight, { fill, stroke, radius: 6 });
+        drawText(chip.label, cx + 10, cy + 5, chip.width - 20, layout.fontSize, {
+          color: palette.accent,
+          weight: 500,
+          mono: true,
+        });
+        cx += chip.width + gapX;
+      }
+      cy += layout.rowHeight + gapY;
+    }
+  }
+
+  // Page canvas & header card
+  ctx.fillStyle = palette.canvasBg;
+  ctx.fillRect(0, 0, 1920, 1080);
+
+  const margin = 48;
+  const contentWidth = 1824;
+  const headerY = 32;
+  const headerH = 104;
+  const headerRight = margin + contentWidth - 24;
+  card(margin, headerY, contentWidth, headerH);
+  ctx.drawImage(icon, margin + 24, headerY + (headerH - 48) / 2, 48, 48);
+
+  const brandX = margin + 90;
+  ctx.font = fontSpec(28, 700);
+  const brandW = Math.ceil(ctx.measureText('laPower').width);
+  drawText('laPower', brandX, headerY + 20, brandW + 4, 28, { weight: 700 });
+  const sepX = brandX + brandW + 16;
+  ctx.beginPath();
+  ctx.moveTo(sepX, headerY + 24);
+  ctx.lineTo(sepX, headerY + 46);
+  ctx.strokeStyle = palette.cardBorder;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const titleX = sepX + 16;
+  drawText(t('protocolReportTitle'), titleX, headerY + 20, 1410 - titleX, 28, {
+    weight: 700,
+    min: 20,
+  });
+
+  const timestamp = new Date(metadata.startedAt).toLocaleString(getResolvedLanguage(), { hour12: false });
+  drawText(`${metadata.device}  ·  ${timestamp}`, brandX, headerY + 60, 1260, 16, {
+    color: palette.muted,
+    min: 14,
+  });
+
+  const completeState = report.completion === 'complete' ? 'supported' : 'failed';
+  badge(detectionSummary(report), headerRight - 408, headerY + 18, 408, completeState, {
+    size: 16,
+    align: 'right',
+    withDot: true,
+  });
+  drawText(
+    `${t(metadata.full ? 'fullScan' : 'scan')}  ·  ${number(report.elapsed_ms / 1000)} s`,
+    headerRight - 408,
+    headerY + 60,
+    408,
+    16,
+    { color: palette.subtle, min: 14, align: 'right' },
+  );
+
+  // Two-column balanced main grid (y = 156 .. 984)
+  const mainTop = 156;
+  const mainBottom = 984;
+  const mainHeight = mainBottom - mainTop;
+  const colGap = 24;
+  const left = margin;
+  const leftWidth = 876;
+  const right = left + leftWidth + colGap;
+  const rightWidth = contentWidth - leftWidth - colGap;
+
+  // Left card: Protocol detection matrix
   const standard = ['qc', 'qc3', 'bc', 'apple'];
   const groups = [
     { label: 'triggerGroupStandard', results: report.results.filter((r) => standard.includes(r.id)) },
     { label: 'triggerGroupVendor', results: report.results.filter((r) => r.id !== 'pd' && !standard.includes(r.id)) },
   ].filter((group) => group.results.length);
-  const available = height - 117 - groups.length * 30;
   const results = groups.flatMap((group) => group.results);
+  const supportedTableCount = results.filter((r) => r.state === 'supported').length;
+
+  const colProtoX = left + 36;
+  const colProtoW = 196;
+  const colStatusX = left + 244;
+  const colStatusW = 132;
+  const colVoltX = left + 392;
+  const colVoltW = left + leftWidth - 28 - colVoltX;
+
+  const listTop = mainTop + 106;
+  const listBottom = mainBottom - 16;
+  const groupTopFirst = 6;
+  const groupGap = 18;
+  const groupHeaderH = 30;
+  const groupOverhead = groups.length
+    ? groupTopFirst + Math.max(0, groups.length - 1) * groupGap + groups.length * groupHeaderH
+    : 0;
+  const availableRowSpace = listBottom - listTop - groupOverhead;
+
+  /**
+   * @type {Array<{
+   *   result: import('./km003c-model.js').ProtocolDetection,
+   *   chips: string[],
+   *   value: string,
+   *   hasVoltages: boolean,
+   *   chipLayout: ReturnType<typeof layoutChips>|null,
+   *   textSize: number,
+   *   lines: number,
+   *   height: number
+   * }>}
+   */
   const rows = results.map((result) => {
     const voltages = detectionVoltages(result);
     return {
       result,
+      chips: voltages,
       value: voltages.length ? voltages.join(' · ') : result.state === 'supported' ? t('scanVoltageUnknown') : '—',
       hasVoltages: !!voltages.length,
+      chipLayout: null,
+      textSize: 15,
       lines: 1,
-      height: 32,
+      height: 44,
     };
   });
-  let voltageSize = 18;
-  for (; voltageSize >= 14; voltageSize--) {
-    for (const row of rows) {
-      ctx.font = `400 ${voltageSize}px ${row.hasVoltages ? palette.mono : palette.ui}`;
-      row.lines = wrap(row.value, leftWidth - 417).length;
-      row.height = Math.max(32, Math.ceil((row.lines - 1) * voltageSize * 1.35 + voltageSize + 14));
+
+  if (rows.length) {
+    let fitted = false;
+    for (let fontSize = 14; fontSize >= 12 && !fitted; fontSize--) {
+      for (const row of rows) {
+        if (row.hasVoltages) {
+          const layout = layoutChips(row.chips, colVoltW, fontSize, 2);
+          if (layout.fitted) {
+            row.chipLayout = layout;
+            row.lines = layout.rows.length;
+            row.height = Math.max(42, layout.totalHeight + 18);
+          } else {
+            row.chipLayout = null;
+            ctx.font = fontSpec(fontSize + 1, 500, true);
+            const wrapped = wrap(row.value, colVoltW);
+            row.textSize = fontSize + 1;
+            row.lines = wrapped.length;
+            row.height = Math.max(40, Math.ceil(wrapped.length * (fontSize + 1) * 1.35 + 16));
+          }
+        } else {
+          row.chipLayout = null;
+          ctx.font = fontSpec(fontSize + 1, 400, false);
+          const wrapped = wrap(row.value, colVoltW);
+          row.textSize = fontSize + 1;
+          row.lines = wrapped.length;
+          row.height = Math.max(40, Math.ceil(wrapped.length * (fontSize + 1) * 1.35 + 16));
+        }
+      }
+      if (rows.reduce((sum, row) => sum + row.height, 0) <= availableRowSpace) fitted = true;
     }
-    if (rows.reduce((sum, row) => sum + row.height, 0) <= available) break;
-  }
-  if (voltageSize < 14) throw overflow();
-  const extra = Math.floor((available - rows.reduce((sum, row) => sum + row.height, 0)) / Math.max(rows.length, 1));
-  for (const row of rows) row.height += Math.min(extra, Math.max(0, 38 - row.height));
-  card(left, top, leftWidth, height);
-  text(t('scanTitle'), left + 22, top + 20, leftWidth - 44, 25, 1, palette.ink, true);
-  const protocolX = left + 22,
-    statusX = left + 235,
-    voltageX = left + 395;
-  text(t('protocol'), protocolX, top + 66, 195, 17, 1, palette.muted, true);
-  text(t('protocolReportStatus'), statusX, top + 66, 140, 17, 1, palette.muted, true);
-  text(t('scanVoltages'), voltageX, top + 66, leftWidth - 417, 17, 1, palette.muted, true);
-  divider(left + 22, top + 96, leftWidth - 44);
-  let y = top + 105;
-  for (const group of groups) {
-    text(t(group.label), protocolX, y + 2, leftWidth - 44, 16, 1, palette.muted, true);
-    y += 30;
-    for (const result of group.results) {
-      const row = rows.find((row) => row.result === result);
-      if (!row) throw overflow();
-      text(result.label, protocolX, y + (row.height - 19) / 2, 195, 19, 1, palette.ink, true, false, 16);
-      badge(detectionStateLabel(result), statusX, y + (row.height - 27) / 2, 142, result.state, 15);
-      text(
-        row.value,
-        voltageX,
-        y + (row.height - ((row.lines - 1) * voltageSize * 1.35 + voltageSize)) / 2,
-        leftWidth - 417,
-        voltageSize,
-        row.lines,
-        row.hasVoltages ? palette.accent : palette.muted,
-        false,
-        row.hasVoltages,
-      );
-      divider(left + 22, y + row.height - 1, leftWidth - 44);
-      y += row.height;
+    if (!fitted) {
+      let fallbackSize = 14;
+      for (; fallbackSize >= 12; fallbackSize--) {
+        for (const row of rows) {
+          row.chipLayout = null;
+          ctx.font = fontSpec(fallbackSize, 400, row.hasVoltages);
+          row.lines = wrap(row.value, colVoltW).length;
+          row.textSize = fallbackSize;
+          row.height = Math.max(30, Math.ceil(row.lines * fallbackSize * 1.35 + 12));
+        }
+        if (rows.reduce((sum, row) => sum + row.height, 0) <= availableRowSpace) break;
+      }
+      if (fallbackSize < 12) throw overflow();
+    } else {
+      const leftover = availableRowSpace - rows.reduce((sum, row) => sum + row.height, 0);
+      const bonus = Math.floor(leftover / rows.length);
+      for (const row of rows) {
+        row.height += Math.min(bonus, Math.max(0, 58 - row.height));
+      }
     }
   }
 
+  card(left, mainTop, leftWidth, mainHeight);
+  drawText(t('scanTitle'), left + 24, mainTop + 18, 520, 22, { weight: 700, min: 18 });
+  badge(
+    `${supportedTableCount} / ${results.length} ${t('scanSupported')}`,
+    left + leftWidth - 284,
+    mainTop + 18,
+    260,
+    supportedTableCount > 0 ? 'supported' : 'not_checked',
+    {
+      size: 13,
+      align: 'right',
+      withDot: supportedTableCount > 0,
+    },
+  );
+
+  card(left + 20, mainTop + 62, leftWidth - 40, 34, {
+    fill: palette.surfaceLayer,
+    stroke: null,
+    radius: 8,
+  });
+  drawText(t('protocol'), colProtoX, mainTop + 70, colProtoW, 14, { color: palette.subtle, weight: 600, min: 12 });
+  drawText(t('protocolReportStatus'), colStatusX, mainTop + 70, colStatusW, 14, {
+    color: palette.subtle,
+    weight: 600,
+    min: 12,
+    align: 'center',
+  });
+  drawText(t('scanVoltages'), colVoltX, mainTop + 70, colVoltW, 14, { color: palette.subtle, weight: 600, min: 12 });
+
+  let cursorY = listTop;
+  groups.forEach((group, groupIndex) => {
+    cursorY += groupIndex === 0 ? groupTopFirst : groupGap;
+    card(left + 28, cursorY + 8, 3, 14, { fill: palette.accentFill, stroke: null, radius: 1.5 });
+    const groupTitle = t(group.label);
+    ctx.font = fontSpec(14, 700);
+    const groupTitleW = Math.ceil(ctx.measureText(groupTitle).width);
+    drawText(groupTitle, left + 40, cursorY + 6, Math.min(340, leftWidth - 80), 14, {
+      color: palette.muted,
+      weight: 700,
+      min: 12,
+    });
+    const ruleStart = left + 40 + groupTitleW + 14;
+    if (ruleStart < left + leftWidth - 36) {
+      divider(ruleStart, cursorY + 15, left + leftWidth - 28 - ruleStart);
+    }
+    cursorY += groupHeaderH;
+
+    group.results.forEach((result, rowIndex) => {
+      const row = rows.find((item) => item.result === result);
+      if (!row) throw overflow();
+      drawText(result.label, colProtoX, cursorY + (row.height - 20) / 2, colProtoW, 16, {
+        color: result.state === 'supported' ? palette.ink : palette.muted,
+        weight: 600,
+        min: 13,
+      });
+      badge(detectionStateLabel(result), colStatusX, cursorY + (row.height - 26) / 2, colStatusW, result.state, {
+        size: 13,
+        align: 'center',
+        minWidth: 92,
+        withDot: result.state === 'supported',
+      });
+      if (row.chipLayout) {
+        drawChips(row.chipLayout, colVoltX, cursorY + (row.height - row.chipLayout.totalHeight) / 2);
+      } else {
+        const textBlockH = row.lines * row.textSize * 1.35;
+        drawText(row.value, colVoltX, cursorY + (row.height - textBlockH) / 2 + 1, colVoltW, row.textSize, {
+          lines: row.lines,
+          color: row.hasVoltages ? palette.accent : palette.subtle,
+          mono: row.hasVoltages,
+          min: 12,
+        });
+      }
+      if (rowIndex < group.results.length - 1) {
+        divider(colProtoX, cursorY + row.height, left + leftWidth - 28 - colProtoX);
+      }
+      cursorY += row.height;
+    });
+  });
+
+  // Right column: USB PD hero card + Adaptive PDO table + Bottom-anchored Conditions card
+  const rightCardGap = 16;
   const pd = report.results.find((result) => result.id === 'pd');
-  card(right, top, rightWidth, 112);
-  text('USB Power Delivery', right + 22, top + 18, rightWidth - 250, 25, 1, palette.ink, true);
+  const pdChips = pd ? detectionVoltages(pd) : [];
+  let pdChipLayout = layoutChips(pdChips, rightWidth - 48, 14, 2);
+  if (!pdChipLayout.fitted && pdChips.length) {
+    pdChipLayout = layoutChips(pdChips, rightWidth - 48, 12, 2);
+  }
+  const pdCardHeight = pdChipLayout.fitted && pdChips.length ? 86 + pdChipLayout.totalHeight + 18 : 108;
+
+  card(right, mainTop, rightWidth, pdCardHeight);
+  drawText('USB Power Delivery', right + 24, mainTop + 18, rightWidth - 260, 22, { weight: 700, min: 18 });
   if (pd) {
-    badge(detectionStateLabel(pd), right + rightWidth - 200, top + 16, 178, pd.state, 18, true);
-    text(pdVersionLabel(pd), right + 22, top + 59, rightWidth - 44, 20, 2, palette.muted, false, false, 17);
-  } else text(t('protocolReportNoPdos'), right + 22, top + 59, rightWidth - 44, 20, 1, palette.muted);
+    badge(detectionStateLabel(pd), right + rightWidth - 224, mainTop + 16, 200, pd.state, {
+      size: 15,
+      align: 'right',
+      withDot: pd.state === 'supported',
+    });
+    drawText(pdVersionLabel(pd), right + 24, mainTop + 52, rightWidth - 48, 16, {
+      lines: 1,
+      color: palette.muted,
+      min: 13,
+    });
+    if (pdChipLayout.fitted && pdChips.length) {
+      drawChips(pdChipLayout, right + 24, mainTop + 86);
+    } else if (pdChips.length) {
+      drawText(pdChips.join(' · '), right + 24, mainTop + 86, rightWidth - 48, 14, {
+        lines: 2,
+        color: palette.accent,
+        mono: true,
+        min: 12,
+      });
+    }
+  } else {
+    drawText(t('protocolReportNoPdos'), right + 24, mainTop + 52, rightWidth - 48, 16, {
+      color: palette.muted,
+      min: 13,
+    });
+  }
 
   const pdos = report.pdos ?? [];
-  const tableTop = top + 128;
-  const tableRowHeight = Math.min(42, Math.floor((height - 224) / Math.max(pdos.length, 1)));
-  if (tableRowHeight < 24) throw overflow();
-  const tableHeight = 96 + Math.max(pdos.length * tableRowHeight, 66);
+  const tableTop = mainTop + pdCardHeight + rightCardGap;
+  let infoHeight = 122;
+  let tableHeight = mainBottom - infoHeight - rightCardGap - tableTop;
+  let tableRowHeight = pdos.length ? Math.min(62, Math.floor((tableHeight - 108) / pdos.length)) : 120;
+  if (pdos.length && tableRowHeight < 24) {
+    infoHeight = 96;
+    tableHeight = mainBottom - infoHeight - rightCardGap - tableTop;
+    tableRowHeight = Math.min(62, Math.floor((tableHeight - 108) / pdos.length));
+  }
+  if (pdos.length && tableRowHeight < 24) throw overflow();
+
+  // Middle card: Complete PD capabilities table
   card(right, tableTop, rightWidth, tableHeight);
-  text(t('protocolReportPdoTitle'), right + 22, tableTop + 18, 610, 23, 1, palette.ink, true);
-  const columns = [48, 174, 254, 184, 246];
-  const labels = ['#', t('protocolReportPdoType'), t('voltage'), t('current'), t('power')];
-  let columnX = right + 22;
-  labels.forEach((label, i) => {
-    text(label, columnX, tableTop + 61, columns[i] - 14, 17, 1, palette.muted, true, false, 14);
-    columnX += columns[i];
+  drawText(t('protocolReportPdoTitle'), right + 24, tableTop + 18, 420, 22, { weight: 700, min: 18 });
+  drawText(t('protocolReportPdoScope'), right + 444, tableTop + 23, rightWidth - 468, 13, {
+    color: palette.subtle,
+    min: 11,
+    align: 'right',
   });
-  divider(right + 22, tableTop + 89, rightWidth - 44);
-  if (!pdos.length) text(t('protocolReportNoPdos'), right + 22, tableTop + 111, rightWidth - 44, 20, 2, palette.muted);
-  pdos.forEach((pdo, i) => {
-    const values = pdoReportParameters(pdo);
-    const validVoltage =
-      Number.isFinite(pdo.volt_min_mv) &&
-      Number.isFinite(pdo.volt_max_mv) &&
-      pdo.volt_min_mv > 0 &&
-      pdo.volt_max_mv >= pdo.volt_min_mv;
-    const voltage = validVoltage
-      ? `${number(pdo.volt_min_mv / 1000)}${pdo.volt_min_mv === pdo.volt_max_mv ? '' : `–${number(pdo.volt_max_mv / 1000)}`} V`
-      : '—';
-    const current = values.currentMa
-      ? `${number(values.currentMa / 1000)} A${values.currentAtMaxVoltage ? '†' : ''}`
-      : '—';
-    const power = values.powerMw
-      ? `${number(values.powerMw / 1000)} W${values.powerSource === 'calculated' ? '*' : pdo.kind === 'epr_avs' ? ' PDP' : ''}`
-      : '—';
-    const cells = [String(pdo.position), pdo.kind.replaceAll('_', ' ').toUpperCase(), voltage, current, power];
-    const rowY = tableTop + 94 + i * tableRowHeight;
-    columnX = right + 22;
-    cells.forEach((cell, j) => {
-      text(
-        cell,
-        columnX,
-        rowY + (tableRowHeight - 23) / 2,
-        columns[j] - 14,
-        19,
-        1,
-        j === 0 ? palette.muted : palette.ink,
-        false,
-        j >= 2,
-        15,
-      );
-      columnX += columns[j];
+
+  const bandX = right + 20;
+  const bandW = rightWidth - 40;
+  card(bandX, tableTop + 56, bandW, 34, { fill: palette.surfaceLayer, stroke: null, radius: 8 });
+  /** @type {Array<{ label: string, x: number, w: number, align: 'left'|'center'|'right' }>} */
+  const pdoCols = [
+    { label: '#', x: right + 28, w: 44, align: 'center' },
+    { label: t('protocolReportPdoType'), x: right + 84, w: 158, align: 'left' },
+    { label: t('voltage'), x: right + 252, w: 236, align: 'right' },
+    { label: t('current'), x: right + 500, w: 176, align: 'right' },
+    { label: t('power'), x: right + 688, w: 204, align: 'right' },
+  ];
+  for (const col of pdoCols) {
+    drawText(col.label, col.x, tableTop + 64, col.w, 14, {
+      color: palette.subtle,
+      weight: 600,
+      min: 12,
+      align: col.align,
     });
-    if (i < pdos.length - 1) divider(right + 22, rowY + tableRowHeight - 1, rightWidth - 44);
+  }
+
+  const bodyTop = tableTop + 94;
+  if (!pdos.length) {
+    drawText(t('protocolReportNoPdos'), right + 24, bodyTop + 28, rightWidth - 48, 17, {
+      lines: 2,
+      color: palette.muted,
+      align: 'center',
+      min: 14,
+    });
+  } else {
+    const pdoPillHeight = Math.min(26, Math.max(20, tableRowHeight - 8));
+    const pdoFontSize = tableRowHeight >= 34 ? 16 : 14;
+    pdos.forEach((pdo, i) => {
+      const values = pdoReportParameters(pdo);
+      const validVoltage =
+        Number.isFinite(pdo.volt_min_mv) &&
+        Number.isFinite(pdo.volt_max_mv) &&
+        pdo.volt_min_mv > 0 &&
+        pdo.volt_max_mv >= pdo.volt_min_mv;
+      const voltageRange = pdo.volt_min_mv === pdo.volt_max_mv ? '' : `–${number(pdo.volt_max_mv / 1000)}`;
+      const voltage = validVoltage ? `${number(pdo.volt_min_mv / 1000)}${voltageRange} V` : '—';
+      const current = values.currentMa
+        ? `${number(values.currentMa / 1000)} A${values.currentAtMaxVoltage ? '†' : ''}`
+        : '—';
+      const powerSuffix = values.powerSource === 'calculated' ? '*' : pdo.kind === 'epr_avs' ? ' PDP' : '';
+      const power = values.powerMw ? `${number(values.powerMw / 1000)} W${powerSuffix}` : '—';
+      const rowY = bodyTop + i * tableRowHeight;
+      const textY = rowY + (tableRowHeight - pdoFontSize * 1.15) / 2;
+
+      drawText(String(pdo.position), pdoCols[0].x, textY, pdoCols[0].w, pdoFontSize - 1, {
+        color: palette.subtle,
+        weight: 600,
+        mono: true,
+        align: 'center',
+        min: 12,
+      });
+
+      const kindText = pdo.kind.replaceAll('_', ' ').toUpperCase();
+      const kindFontSize = tableRowHeight >= 34 ? 12 : 11;
+      ctx.font = fontSpec(kindFontSize, 600, true);
+      const kindPillW = Math.min(pdoCols[1].w, Math.ceil(ctx.measureText(kindText).width) + 20);
+      const kindY = rowY + (tableRowHeight - pdoPillHeight) / 2;
+      const isPps = pdo.kind === 'pps';
+      const isAvs = pdo.kind === 'spr_avs' || pdo.kind === 'epr_avs' || pdo.kind === 'avs';
+      const kindFill = isPps ? palette.successBg : isAvs ? hexAlpha(palette.accentFill, 0.13) : palette.surfaceLayer;
+      const kindStroke = isPps
+        ? hexAlpha(palette.success, 0.34)
+        : isAvs
+          ? hexAlpha(palette.accentFill, 0.34)
+          : palette.cardBorder;
+      const kindFg = isPps ? palette.success : isAvs ? palette.accent : palette.muted;
+      card(pdoCols[1].x, kindY, kindPillW, pdoPillHeight, {
+        fill: kindFill,
+        stroke: kindStroke,
+        radius: 6,
+      });
+      drawText(
+        kindText,
+        pdoCols[1].x + 10,
+        kindY + (pdoPillHeight - kindFontSize * 1.1) / 2,
+        kindPillW - 20,
+        kindFontSize,
+        {
+          color: kindFg,
+          weight: 600,
+          mono: true,
+          min: 10,
+        },
+      );
+
+      drawText(voltage, pdoCols[2].x, textY, pdoCols[2].w, pdoFontSize, {
+        color: palette.ink,
+        mono: true,
+        align: 'right',
+        min: 12,
+      });
+      drawText(current, pdoCols[3].x, textY, pdoCols[3].w, pdoFontSize, {
+        color: palette.muted,
+        mono: true,
+        align: 'right',
+        min: 12,
+      });
+      drawText(power, pdoCols[4].x, textY, pdoCols[4].w, pdoFontSize, {
+        color: palette.ink,
+        weight: 600,
+        mono: true,
+        align: 'right',
+        min: 12,
+      });
+
+      if (i < pdos.length - 1) divider(right + 28, rowY + tableRowHeight - 1, rightWidth - 56);
+    });
+  }
+
+  // Bottom-anchored Conditions card (bottom = mainBottom, aligned with left column)
+  const infoY = mainBottom - infoHeight;
+  card(right, infoY, rightWidth, infoHeight);
+  const compactInfo = infoHeight < 110;
+  drawText(t('protocolReportConditions'), right + 24, infoY + (compactInfo ? 11 : 14), rightWidth - 48, 17, {
+    weight: 700,
+    min: 15,
   });
 
   const applied = report.context?.applied_pdm;
-  const configuration = applied
+  const firmwareValue = report.context?.firmware_version ?? '—';
+  const pdmVersionValue = report.pdm_version ?? '—';
+  const configValue = applied
     ? `PDM: type=${applied.pd_type}, em=${applied.em}, sink=${applied.sink}`
     : t('triggerConfigUnknown');
-  const firmware = `${t('triggerFirmware')} ${report.context?.firmware_version ?? '—'}  ·  PDM ${report.pdm_version ?? '—'}`;
-  const infoY = tableTop + tableHeight + 16;
-  const infoHeight = top + height - infoY;
-  if (infoHeight >= 118) {
-    card(right, infoY, rightWidth, infoHeight);
-    text(t('protocolReportConditions'), right + 22, infoY + 18, rightWidth - 44, 21, 1, palette.ink, true);
-    text(firmware, right + 22, infoY + 55, rightWidth - 44, 19, 1, palette.muted);
-    text(configuration, right + 22, infoY + 86, rightWidth - 44, 19, 1, palette.muted, false, false, 16);
-  }
-  text(
-    infoHeight >= 118 ? t('protocolReportPdoScope') : `${configuration}  ·  ${firmware}`,
-    48,
-    913,
-    1824,
-    19,
-    1,
-    palette.muted,
-    false,
-    false,
-    16,
-  );
+
+  const tileY = infoY + (compactInfo ? 38 : 44);
+  const tileH = infoY + infoHeight - (compactInfo ? 10 : 14) - tileY;
+  const tileGap = 12;
+  const innerInfoW = rightWidth - 48;
+  const tileWidths = [204, 180, innerInfoW - 204 - 180 - tileGap * 2];
+  const tiles = [
+    { label: t('triggerFirmware'), value: firmwareValue, mono: true },
+    { label: 'PDM', value: pdmVersionValue, mono: true },
+    { label: t('protocolControl'), value: configValue, mono: !!applied },
+  ];
+  let tileX = right + 24;
+  tiles.forEach((tile, i) => {
+    const w = tileWidths[i];
+    card(tileX, tileY, w, tileH, { fill: palette.surfaceLayer, stroke: null, radius: 8 });
+    drawText(tile.label, tileX + 14, tileY + (compactInfo ? 6 : 10), w - 28, 12, {
+      color: palette.subtle,
+      weight: 600,
+      min: 11,
+    });
+    drawText(tile.value, tileX + 14, tileY + (compactInfo ? 23 : 30), w - 28, compactInfo ? 14 : 15, {
+      color: tile.value === '—' ? palette.subtle : palette.ink,
+      weight: 600,
+      mono: tile.mono,
+      min: 12,
+    });
+    tileX += w + tileGap;
+  });
+
+  // Footer strip
   const warnings = [];
   if (report.completion !== 'complete') warnings.push(t('protocolReportIncomplete'));
-  if (report.reset_verification && report.reset_verification.status !== 'verified')
+  if (report.reset_verification && report.reset_verification.status !== 'verified') {
     warnings.push(t('triggerResetUnconfirmed'));
-  if (warnings.length) text(warnings.join(' · '), 48, 947, 1824, 19, 1, palette.caution, false, false, 16);
-  text(t('protocolReportPowerNote'), 48, warnings.length ? 982 : 958, 1824, 17, 2, palette.muted, false, false, 15);
+  }
+  if (warnings.length) {
+    badge(warnings.join('  ·  '), margin, 996, contentWidth, 'failed', {
+      size: 13,
+      minSize: 11,
+      withDot: true,
+    });
+    drawText(t('protocolReportPowerNote'), margin, 1030, contentWidth, 13, {
+      lines: 2,
+      color: palette.subtle,
+      min: 11,
+    });
+  } else {
+    drawText(t('protocolReportPowerNote'), margin, 1004, contentWidth, 14, {
+      lines: 2,
+      color: palette.subtle,
+      min: 12,
+    });
+  }
 
   return new Promise((resolve, reject) =>
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error(t('protocolReportRenderFailed')))), 'image/png'),
