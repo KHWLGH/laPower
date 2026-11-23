@@ -16,6 +16,7 @@ let failCsv = false;
 let onFirstWrite = null;
 let pdGeneration = 0;
 let pdBackend = [];
+let pdStagedImport = [];
 let onPdPage = null;
 let onDecode = null;
 let decodeCalls = 0;
@@ -44,15 +45,32 @@ globalThis.window = {
           if (onPdPage) return onPdPage(args, page);
           return page;
         }
-        if (command === 'pd_log_replace') {
+        if (command === 'pd_import_pick') {
+          return { handle: 201, name: 'capture.json', path: 'capture.json', size: 128 };
+        }
+        if (command === 'pd_log_import') {
+          assert.equal(args.handle, 201);
           pdBackend = [];
           pdGeneration++;
-          return args.entries.map((entry) => {
+          pdStagedImport = importedEntries.map((entry) => {
             if (entry.divider) return { t: entry.t, divider: true, gen: pdGeneration };
-            const event = { ...pdEvent(pdBackend.length, entry.t), bytes: entry.bytes };
-            pdBackend.push(event);
-            return event;
+            if (entry.bytes?.length) {
+              const event = { ...pdEvent(pdBackend.length, entry.t), bytes: entry.bytes };
+              pdBackend.push(event);
+              return entry.meta ? { ...event, meta: entry.meta } : event;
+            }
+            return { ...entry, gen: pdGeneration };
           });
+          return { generation: pdGeneration, total: pdStagedImport.length };
+        }
+        if (command === 'pd_log_import_page') {
+          assert.equal(args.generation, pdGeneration);
+          const total = pdStagedImport.length;
+          const start = Math.min(args.offset ?? 0, total);
+          const end = Math.min(start + 2048, total);
+          const entries = pdStagedImport.slice(start, end);
+          if (end >= total) pdStagedImport = [];
+          return { generation: pdGeneration, offset: start, total, entries };
         }
         if (command === 'decode_pd_at') {
           decodeCalls++;
@@ -88,16 +106,6 @@ globalThis.window = {
       },
     },
   },
-};
-window.__TAURI__.dialog = { open: async () => 'capture.json' };
-window.__TAURI__.fs = {
-  readTextFile: async () =>
-    JSON.stringify({
-      app: 'laPower',
-      kind: 'pd-capture',
-      version: 1,
-      entries: importedEntries,
-    }),
 };
 globalThis.document = {
   addEventListener() {},

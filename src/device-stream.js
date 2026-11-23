@@ -10,7 +10,7 @@
  * @typedef {{generation:number, wall_anchor_ms:number}} StreamOpen
  * @typedef {{generation:number, after_seq:number, segment:number, received_us:number, wall_anchor_ms:number, rate_ms:number}} StreamBoundary
  * @typedef {{id:number, generation:number, columns:object, baseSeconds:number, lastX:number|null, first:boolean}} RecordingSegment
- * @typedef {{invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>, getColumns:()=>object, onSample:(sample:StreamSample, segment:RecordingSegment|null)=>void, onBatchStart?: (size:number)=>void, onBatch?:(count:number)=>void, onBatchEnd?: (count:number, timing:{startedAt:number, endedAt:number, durationMs:number, firstReceivedWallMs?:number|null, lastReceivedWallMs?:number|null, lastSeq:(number|null)|undefined})=>void, onError:(error:StreamEnd)=>void, onEnd:(end:StreamEnd)=>void, drainTimeoutMs?:number}} StreamHooks
+ * @typedef {{invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>, getColumns:()=>object, getPdEnabled?:()=>boolean, onSample:(sample:StreamSample, segment:RecordingSegment|null)=>void, onBatchStart?: (size:number)=>void, onBatch?:(count:number)=>void, onBatchEnd?: (count:number, timing:{startedAt:number, endedAt:number, durationMs:number, firstReceivedWallMs?:number|null, lastReceivedWallMs?:number|null, lastSeq:(number|null)|undefined})=>void, onError:(error:StreamEnd)=>void, onEnd:(end:StreamEnd)=>void, drainTimeoutMs?:number}} StreamHooks
  */
 
 import { performanceDiagnostics } from './performance-diagnostics.js';
@@ -43,6 +43,7 @@ export function createDeviceStream(options = {}) {
   let terminalError = null;
   let failed = false;
   let closing = false;
+  let abandoned = false;
   /** 已经尝试过几次退出屏障；第一次严格，之后允许走终态出口。 */
   let drainAttempts = 0;
   let columns = hooks.getColumns();
@@ -120,18 +121,18 @@ export function createDeviceStream(options = {}) {
   }
 
   function acknowledge() {
-    if (ackQueued || !generation || failed) return ackTail;
+    if (ackQueued || !generation || failed || abandoned) return ackTail;
     ackQueued = true;
     const gen = generation;
     ackTail = ackTail
       .then(async () => {
         ackQueued = false;
-        if (gen !== generation || failed) return;
+        if (gen !== generation || failed || abandoned) return;
         const consumed = seq;
         await hooks.invoke('ack_device_stream', { generation: gen, seq: consumed });
       })
       .catch((error) => {
-        if (gen === generation) fail(`stream acknowledgment failed: ${error}`);
+        if (gen === generation && !abandoned) fail(`stream acknowledgment failed: ${error}`);
       });
     return ackTail;
   }
@@ -147,6 +148,7 @@ export function createDeviceStream(options = {}) {
     terminalError = null;
     failed = false;
     closing = false;
+    abandoned = false;
     drainAttempts = 0;
     columns = hooks.getColumns();
     replacement++;
@@ -155,17 +157,19 @@ export function createDeviceStream(options = {}) {
   }
 
   /** Invalidates synchronously. Safe when clear/import callers do not await.
-   * A read-thread barrier also fences already queued preview updates. */
-  function replace() {
+   * A read-thread barrier also fences already queued preview updates.
+   * @param {{pdEnabled?: boolean}} [options] */
+  function replace(options = {}) {
     segment = null;
     columns = hooks.getColumns();
     const ticket = ++replacement;
     displayBlocked = true;
     if (!enabled || !generation || ended) return;
     const gen = generation;
+    const pdEnabled = options.pdEnabled ?? hooks.getPdEnabled?.() ?? false;
     void ordered(async () => {
       if (gen !== generation || ended) return;
-      const boundary = await hooks.invoke('set_recording_segment', { generation: gen, segment: 0, pdEnabled: false });
+      const boundary = await hooks.invoke('set_recording_segment', { generation: gen, segment: 0, pdEnabled });
       await waitForSeq(boundary.after_seq, gen);
       if (ticket === replacement && gen === generation) displayBlocked = false;
     }).catch((e) => {
@@ -312,7 +316,10 @@ export function createDeviceStream(options = {}) {
   async function drain() {
     closing = true;
     const end = await hooks.invoke('drain_device_stream', { generation });
-    if (!end) return null;
+    if (!end) {
+      if (generation) abandoned = true;
+      return null;
+    }
     drainAttempts += 1;
     if (!failed && drainAttempts === 1) {
       /** @type {unknown} */
@@ -336,6 +343,7 @@ export function createDeviceStream(options = {}) {
     }
     // 终态出口：fail() 早已把生产端停掉，屏障守的样本已经不存在了。
     // 这里只退休后端会话，绝不补 ACK —— 空洞仍然是未消费，但退出必须走得通。
+    abandoned = true;
     await hooks.invoke('abandon_device_stream', { generation: end.generation }).catch((e) => console.error(e));
     if (!ended) adoptEnd(end);
     return end;

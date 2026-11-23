@@ -114,22 +114,25 @@ function* projectionSteps(input) {
     if (temperature > maxTempC) maxTempC = temperature;
     if (Number.isFinite(temperature)) hasTemperature = true;
     const x = read(columns.x, index);
-    const dt = x - previousX;
-    const power = read(columns.power, index - 1);
-    if (index > 0 && dt > 0 && dt <= maxAgeS && Number.isFinite(power)) {
-      area += power * dt;
-      weighted += dt;
-    }
-    const previousVoltage = read(columns.voltage, index - 1);
-    if (index > 0 && dt > 0 && dt <= maxAgeS && Number.isFinite(previousVoltage)) {
-      voltageArea += previousVoltage * dt;
-      voltageWeighted += dt;
-    }
-    previousX = x;
     if (index > 0) {
       const segment = read(columns.recordingSegments, index);
       const boundary = Number.isFinite(segment) && segment !== read(columns.recordingSegments, index - 1);
-      const dt = (read(columns.timestamps, index) - read(columns.timestamps, index - 1)) / 3600000;
+      const stepS = x - previousX;
+      const pointMaxStepS = pointEnergyMaxStepS(read(columns.sampleIntervals, index), maxAgeS);
+      if (!boundary && stepS > 0 && stepS <= pointMaxStepS) {
+        const previousPower = read(columns.power, index - 1);
+        if (Number.isFinite(previousPower)) {
+          area += previousPower * stepS;
+          weighted += stepS;
+        }
+        const previousVoltage = read(columns.voltage, index - 1);
+        if (Number.isFinite(previousVoltage)) {
+          voltageArea += previousVoltage * stepS;
+          voltageWeighted += stepS;
+        }
+      }
+      // 与主监控、范围统计及 CSV 导入同源：统一按单调相对秒 x 积分，避开挂钟 NTP 跳变。
+      const dt = stepS / 3600;
       const watts = Math.abs(read(columns.power, index));
       if (
         !boundary &&
@@ -137,12 +140,13 @@ function* projectionSteps(input) {
         Number.isFinite(dt) &&
         Number.isFinite(current) &&
         Number.isFinite(watts) &&
-        dt * 3600 <= pointEnergyMaxStepS(read(columns.sampleIntervals, index), maxAgeS)
+        dt * 3600 <= pointMaxStepS
       ) {
         wh += watts * dt;
         mah += current * 1000 * dt;
       }
     }
+    previousX = x;
   }
 
   yield;

@@ -16,28 +16,16 @@
 
 import { runCooperativeSlices } from '../cooperative.js';
 import { errorText, t } from '../i18n.js';
-import { exportPdFile } from '../pd-export.js';
 import {
   buildRowOffsets,
   createPdProjection,
-  directionClass,
-  displayType,
   filterIndices,
-  formatBusVI,
-  formatDirectionDisplay,
-  formatElapsed,
-  headerFields,
-  hexWordsForEntry,
   isDivider,
   matchesFilter,
-  msgTypeClass,
   nextMessageIndex,
   normalizePdPayload,
-  noteUsesTwoLines,
-  objectTables,
   PD_ROW_HEIGHT,
   PD_SOFT_CAP,
-  parsePdCaptureFile,
   rowHeightOf,
   visibleRangeByOffsets,
 } from '../pd-model.js';
@@ -46,6 +34,8 @@ import { state } from '../state.js';
 import { syncPdCaptureUI } from '../ui/controlbar.js';
 import { ask } from '../ui/dialog.js';
 import { toast } from '../ui/toast.js';
+import { applyPdSplitLayoutDom, buildPdDetail, initPdSplitter, patchPdWindow } from './pd-list.js';
+import { createPdTransferActions } from './pd-transfer.js';
 
 /** @typedef {import('../pd-model.js').PdMeta} PdMeta */
 /** @typedef {import('../pd-model.js').PdEntry} PdEntry */
@@ -109,6 +99,7 @@ let listWindow = null;
 let rowOffsets = [0];
 let noteColWidth = 0;
 let monoAdvance = 0;
+let metricsDirty = true;
 /** @type {{cancelled: boolean,key:string}|null} */
 let projectionWork = null;
 let projectionKey = '';
@@ -444,7 +435,10 @@ function syncWindow(followTail = false) {
     return;
   }
 
-  refreshRowMetrics();
+  if (metricsDirty || noteColWidth === 0 || monoAdvance === 0) {
+    refreshRowMetrics();
+    metricsDirty = false;
+  }
   if (projectionWork || projectionScheduled) return;
   if (projectionKey !== currentProjectionKey() || (!paused && projectedLength !== log.length)) {
     rebuildFilterAndWindow();
@@ -468,12 +462,6 @@ function syncWindow(followTail = false) {
 
   updateEmptyState();
   updateCounter();
-  const afterWidth = measureNoteColWidth();
-  if (afterWidth > 0 && Math.abs(afterWidth - noteColWidth) > 0.5) {
-    noteColWidth = afterWidth;
-    rebuildRowOffsets();
-    scheduleWindowSync(followTail);
-  }
 }
 
 function rebuildFilterAndWindow() {
@@ -587,39 +575,11 @@ function rebuildRowOffsets() {
  * @param {number} origin
  */
 function patchWindow(start, end, origin) {
-  if (!listWindow) return;
-  let node = listWindow.firstChild;
-  for (let i = start; i < end; i++) {
-    const logIndex = filtered[i];
-    const entry = log[logIndex];
-    if (!entry) continue;
-    const wantDivider = isDivider(entry);
-    const reusable =
-      node instanceof HTMLElement &&
-      (wantDivider ? node.classList.contains('pd-divider-row') : node.classList.contains('pd-row'));
-    if (reusable && node instanceof HTMLElement) {
-      if (wantDivider) {
-        const text = `── ${formatTime(entry.t)} ${t('pdDisconnected')} ──`;
-        if (node.textContent !== text) node.textContent = text;
-      } else {
-        updateMessageRow(node, /** @type {PdEntry} */ (entry), logIndex, i + 1, origin);
-      }
-      node = node.nextSibling;
-      continue;
-    }
-    const next = buildRow(entry, logIndex, i + 1, origin);
-    if (node instanceof HTMLElement) {
-      node.replaceWith(next);
-      node = next.nextSibling;
-    } else {
-      listWindow.appendChild(next);
-    }
-  }
-  while (node) {
-    const dead = node;
-    node = node.nextSibling;
-    dead.remove();
-  }
+  patchPdWindow(listWindow, log, filtered, start, end, origin, {
+    selectedIndex,
+    noteColWidth,
+    monoAdvance,
+  });
 }
 
 /** @param {PdEntry|PdDivider} entry */
@@ -629,112 +589,6 @@ function appendRowOffset(entry) {
     return;
   }
   rowOffsets.push(rowOffsets[rowOffsets.length - 1] + rowHeightOf(entry, noteColWidth, monoAdvance));
-}
-
-/**
- * @param {PdEntry|PdDivider} entry
- * @param {number} logIndex
- * @param {number} visibleN
- * @param {number} origin
- * @returns {HTMLElement}
- */
-function buildRow(entry, logIndex, visibleN, origin) {
-  if (isDivider(entry)) {
-    const div = document.createElement('div');
-    div.className = 'pd-divider-row';
-    div.textContent = `── ${formatTime(entry.t)} ${t('pdDisconnected')} ──`;
-    return div;
-  }
-
-  const msg = /** @type {PdEntry} */ (entry);
-  const row = document.createElement('div');
-  row.className = 'pd-row';
-  row.tabIndex = 0;
-  row.dataset.index = String(logIndex);
-  if (selectedIndex === logIndex) row.classList.add('selected');
-  if (noteUsesTwoLines(msg.summary, noteColWidth, monoAdvance)) row.classList.add('pd-row-wrap');
-  const vi = formatBusVI(msg.vbus, msg.ibus);
-
-  row.append(
-    cell('pd-col-n', String(visibleN)),
-    cell('pd-col-time', formatElapsed(msg.t, origin), formatTime(msg.t)),
-    cell('pd-col-sop', msg.sop),
-    cell(`pd-col-msg ${msgTypeClass(msg.type)}`, displayType(msg.type)),
-    cell('pd-col-id', msg.id ?? ''),
-    dirCell(msg.direction ?? ''),
-    cell('pd-col-obj', msg.obj ?? ''),
-    cell('pd-col-rev', msg.rev ?? ''),
-    cell('pd-col-vi', vi, vi ? t('pdBusHint') : undefined),
-    cell('pd-col-note', msg.summary, msg.summary),
-  );
-  return row;
-}
-
-/**
- * @param {HTMLElement} row
- * @param {PdEntry} msg
- * @param {number} logIndex
- * @param {number} visibleN
- * @param {number} origin
- */
-function updateMessageRow(row, msg, logIndex, visibleN, origin) {
-  row.dataset.index = String(logIndex);
-  row.classList.toggle('selected', selectedIndex === logIndex);
-  row.classList.toggle('pd-row-wrap', noteUsesTwoLines(msg.summary, noteColWidth, monoAdvance));
-  const vi = formatBusVI(msg.vbus, msg.ibus);
-  const kids = row.children;
-  setCellText(kids[0], String(visibleN));
-  setCellText(kids[1], formatElapsed(msg.t, origin), formatTime(msg.t));
-  setCellText(kids[2], msg.sop);
-  if (kids[3]) {
-    kids[3].className = `pd-col-msg ${msgTypeClass(msg.type)}`;
-    setCellText(kids[3], displayType(msg.type));
-  }
-  setCellText(kids[4], msg.id ?? '');
-  if (kids[5] instanceof HTMLElement) {
-    const tone = directionClass(msg.direction ?? '');
-    kids[5].className = tone ? `pd-col-dir ${tone}` : 'pd-col-dir';
-    kids[5].textContent = msg.direction ? formatDirectionDisplay(msg.direction) : '';
-    kids[5].title = msg.direction || '';
-  }
-  setCellText(kids[6], msg.obj ?? '');
-  setCellText(kids[7], msg.rev ?? '');
-  setCellText(kids[8], vi, vi ? t('pdBusHint') : '');
-  setCellText(kids[9], msg.summary, msg.summary);
-}
-
-/**
- * @param {string} className
- * @param {string} text
- * @param {string} [title]
- */
-function cell(className, text, title) {
-  const span = document.createElement('span');
-  span.className = className;
-  span.textContent = text;
-  if (title) span.title = title;
-  return span;
-}
-
-/**
- * @param {Element|undefined} el
- * @param {string} text
- * @param {string} [title]
- */
-function setCellText(el, text, title) {
-  if (!(el instanceof HTMLElement)) return;
-  if (el.textContent !== text) el.textContent = text;
-  if (title !== undefined && el.title !== title) el.title = title;
-}
-
-/** @param {string} direction */
-function dirCell(direction) {
-  const span = document.createElement('span');
-  const tone = directionClass(direction);
-  span.className = tone ? `pd-col-dir ${tone}` : 'pd-col-dir';
-  span.textContent = direction ? formatDirectionDisplay(direction) : '';
-  if (direction) span.title = direction;
-  return span;
 }
 
 /** @param {1|-1} dir */
@@ -801,111 +655,10 @@ async function renderDetail(entry, logIndex) {
   cacheMeta(logIndex, meta);
   const body = els.detailBody();
   if (!body) return;
-  body.replaceChildren(buildDetail(entry, meta));
+  body.replaceChildren(buildPdDetail(entry, meta));
   body.hidden = false;
   const empty = els.detailEmpty();
   if (empty) empty.hidden = true;
-}
-
-/**
- * @param {PdEntry} entry
- * @param {PdMeta} meta
- */
-function buildDetail(entry, meta) {
-  const wrap = document.createElement('div');
-  wrap.className = 'pd-detail-stack';
-
-  const vi = formatBusVI(entry.vbus, entry.ibus);
-  if (vi) {
-    const sample = document.createElement('div');
-    sample.className = 'pd-detail-vi';
-    sample.title = t('pdBusHint');
-    sample.textContent = `V/I  ${vi}`;
-    wrap.appendChild(sample);
-  }
-
-  const words = hexWordsForEntry(entry);
-  if (words.length) wrap.appendChild(buildHexStrip(entry.sop, words));
-
-  const header = headerFields(meta);
-  if (header.length) wrap.appendChild(buildKvTable(header, 'pd-header-table'));
-
-  for (const obj of objectTables(meta)) {
-    if (obj.fields.length === 0 && !obj.chip && !obj.hex) continue;
-    const block = document.createElement('div');
-    block.className = 'pd-object-block';
-    const title = document.createElement('div');
-    title.className = 'pd-object-title';
-    const name = document.createElement('span');
-    name.textContent = obj.title;
-    title.appendChild(name);
-    if (obj.chip) {
-      const chip = document.createElement('span');
-      chip.className = 'pd-object-chip';
-      chip.textContent = obj.chip;
-      title.appendChild(chip);
-    }
-    if (obj.hex) {
-      const hex = document.createElement('span');
-      hex.className = 'pd-object-hex';
-      hex.textContent = obj.hex;
-      title.appendChild(hex);
-    }
-    block.appendChild(title);
-    if (obj.fields.length) block.appendChild(buildKvTable(obj.fields, 'pd-object-table'));
-    wrap.appendChild(block);
-  }
-
-  return wrap;
-}
-
-/**
- * @param {string} sop
- * @param {{ label: string, hex: string }[]} words
- */
-function buildHexStrip(sop, words) {
-  const table = document.createElement('table');
-  table.className = 'pd-hex-strip';
-  const head = document.createElement('tr');
-  const body = document.createElement('tr');
-  const sopTh = document.createElement('th');
-  sopTh.textContent = 'SOP*';
-  const sopTd = document.createElement('td');
-  sopTd.textContent = sop || '—';
-  head.appendChild(sopTh);
-  body.appendChild(sopTd);
-  for (const word of words) {
-    const th = document.createElement('th');
-    th.textContent = word.label;
-    const td = document.createElement('td');
-    td.textContent = word.hex;
-    head.appendChild(th);
-    body.appendChild(td);
-  }
-  table.append(head, body);
-  return table;
-}
-
-/**
- * @param {{ label: string, value: string, className?: string }[]} fields
- * @param {string} extraClass
- */
-function buildKvTable(fields, extraClass) {
-  const table = document.createElement('table');
-  table.className = `pd-kv-table ${extraClass}`;
-  const head = document.createElement('tr');
-  const body = document.createElement('tr');
-  for (const field of fields) {
-    const th = document.createElement('th');
-    th.textContent = field.label;
-    const td = document.createElement('td');
-    td.textContent = field.value;
-    if (field.className) td.className = field.className;
-    head.appendChild(th);
-    body.appendChild(td);
-  }
-  table.append(head, body);
-  return table;
 }
 
 /** @param {number} index @param {PdMeta} meta */
@@ -990,124 +743,45 @@ export async function requestPdClear() {
 
 // ─── 导入 / 导出 ─────────────────────────────────────────────────────────────
 
-let exportPending = false;
-async function exportPdCapture() {
-  if (exportPending) return;
-  if (log.length === 0) {
-    toast.warning(() => t('noMessagesToExport'));
-    return;
-  }
-  exportPending = true;
-  try {
-    const count = await exportPdFile(() => log);
-    if (count !== null) toast.success(() => t('exportPdCount', { count }));
-  } catch (e) {
-    console.error(e);
-    toast.error(() => t('csvExportFailed', { detail: errorText(e) }));
-  } finally {
-    exportPending = false;
-  }
-}
-
-export async function importPdCapture() {
-  if (ingestSuspended) return;
-  const { open } = window.__TAURI__.dialog;
-  const { readTextFile } = window.__TAURI__.fs;
-  try {
-    if (log.length > 0) {
-      const confirmed = await ask(() => t('importPdReplace', { count: log.length }), {
-        title: () => t('import'),
-        kind: 'warning',
-      });
-      if (!confirmed) return;
-    }
-    const selected = await open({
-      title: t('pdImportTitle'),
-      multiple: false,
-      filters: [{ name: t('pdFile'), extensions: ['json'] }],
-    });
-    if (!selected) return;
-
-    const content = await readTextFile(/** @type {string} */ (selected));
-    const result = parsePdCaptureFile(JSON.parse(content));
-    if (!result.ok) {
-      toast.error(() => t('csvImportFailed', { detail: errorText(result.description) }));
-      return;
-    }
-
-    invalidatePdWork();
-    const revision = dataRevision;
-    ingestSuspended = true;
-    await invokeCmd('set_pd_capture_enabled', { enabled: false });
-    if (revision !== dataRevision) return;
-
-    const needBackend = result.entries.some((e) => {
-      if (isDivider(e)) return false;
-      return (e.bytes?.length ?? 0) > 0;
-    });
-
-    /** @type {(typeof result.entries)} */
-    let nextEntries = result.entries;
-    if (needBackend) {
-      const loaded = await invokeCmd('pd_log_replace', {
-        entries: result.entries.map((e) => {
-          if (isDivider(e)) return { t: e.t, divider: true, bytes: [] };
-          return { t: e.t, divider: false, bytes: e.bytes ?? [], vbus: e.vbus, ibus: e.ibus };
-        }),
-      });
-      if (revision !== dataRevision) return;
-      if (!Array.isArray(loaded)) {
-        toast.error(() => t('pdBackendReplaceFailed'));
-        return;
-      }
-      nextEntries = [];
-      for (let index = 0; index < loaded.length; index++) {
-        const entry = normalizePdPayload(loaded[index]);
-        if (!entry) continue;
-        const original = result.entries[index];
-        if (!isDivider(entry) && original && !isDivider(original) && original.meta) entry.meta = original.meta;
-        nextEntries.push(entry);
-      }
-    } else {
-      const gen = await invokeCmd('pd_log_clear');
-      if (revision !== dataRevision) return;
-      if (typeof gen === 'number' && Number.isFinite(gen)) {
-        acceptedGen = gen;
-      } else {
-        toast.error(() => t('pdBackendClearFailed'));
-        return;
-      }
-    }
-
+const pdTransfer = createPdTransferActions({
+  getLog: () => log,
+  isIngestSuspended: () => ingestSuspended,
+  setIngestSuspended: (suspended) => {
+    ingestSuspended = suspended;
+  },
+  invalidatePdWork,
+  getDataRevision: () => dataRevision,
+  invokeCmd,
+  resetForImport: (generation) => {
     cancelProjection();
     log.length = 0;
     originTime = null;
     filtered = [];
+    rowOffsets = [0];
+    projectionKey = '';
+    projectedLength = 0;
     bufferedWhilePaused = 0;
     softCapWarned = false;
     lastIngestedSeq = -1;
-    if (needBackend) acceptedGen = null;
+    acceptedGen = generation;
     metaCache.clear();
     clearSelection();
-    for (const entry of nextEntries) {
-      log.push(entry);
-      if (originTime === null && !isDivider(entry)) originTime = entry.t;
-      rememberSeq(entry);
-      if (!isDivider(entry) && Number.isFinite(entry.gen)) acceptedGen = /** @type {number} */ (entry.gen);
-    }
-
+  },
+  appendImportedEntry: (entry) => {
+    log.push(entry);
+    if (originTime === null && !isDivider(entry)) originTime = entry.t;
+    rememberSeq(entry);
+    if (!isDivider(entry) && Number.isFinite(entry.gen)) acceptedGen = /** @type {number} */ (entry.gen);
+  },
+  finishImport: () => {
     rebuildFilterAndWindow();
     document.dispatchEvent?.(new Event('lapower:export-availability-changed'));
-    const count = log.length;
-    toast.success(() => t('importPdCount', { count }));
-  } catch (e) {
-    console.error(e);
-    toast.error(() => t('csvImportFailed', { detail: errorText(e) }));
-  } finally {
-    ingestSuspended = false;
-    syncBackendCaptureFlag();
-  }
-}
+  },
+  syncBackendCaptureFlag,
+});
+
+const exportPdCapture = pdTransfer.exportPdCapture;
+export const importPdCapture = pdTransfer.importPdCapture;
 
 // ─── 状态显示 ────────────────────────────────────────────────────────────────
 
@@ -1132,96 +806,21 @@ function updateCounter() {
   counter.textContent = parts.join(' / ');
 }
 
-/** @param {number} t */
-function formatTime(t) {
-  const d = new Date(t);
-  const pad = (/** @type {number} */ n, /** @type {number} */ w = 2) => String(n).padStart(w, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
-}
-
 // ─── 视图钩子 ────────────────────────────────────────────────────────────────
-
-const PD_SIDE_MIN_WIDTH = 1400;
 
 /**
  * 按偏好与窗口宽度应用 PD 分栏方向。宽屏（≥1400px）且偏好开启时左右分栏。
  */
 export function applyPdSplitLayout() {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return;
-  const split = els.split();
-  const handle = els.splitter();
-  const btn = els.layoutBtn();
-  const icon = els.layoutIcon();
-  const preferSide = state.settings.pdSplitSide === true;
-  const side = preferSide && window.innerWidth >= PD_SIDE_MIN_WIDTH;
-  split?.classList.toggle('pd-split-side', side);
-  if (handle) {
-    handle.style.cursor = side ? 'col-resize' : 'row-resize';
-    handle.setAttribute('aria-orientation', side ? 'vertical' : 'horizontal');
-    handle.setAttribute('aria-label', side ? t('pdAdjustWidth') : t('pdAdjustHeight'));
-  }
-  if (btn) {
-    btn.setAttribute('aria-pressed', String(preferSide));
-    btn.title = preferSide ? t('pdSplitBack') : t('pdSplitSide');
-    btn.setAttribute('aria-label', btn.title);
-  }
-  if (icon) {
-    icon.classList.toggle('fi-split-side', !preferSide);
-    icon.classList.toggle('fi-split', preferSide);
-  }
+  applyPdSplitLayoutDom(els, () => {
+    metricsDirty = true;
+  });
 }
 
 function initSplitter() {
-  const split = els.split();
-  const handle = els.splitter();
-  if (!split || !handle) return;
-
-  /** @param {number} listRatio */
-  const apply = (listRatio) => {
-    const clamped = Math.min(0.8, Math.max(0.22, listRatio));
-    split.style.setProperty('--pd-list-basis', `${(clamped * 100).toFixed(1)}%`);
-    split.style.setProperty('--pd-detail-basis', `${((1 - clamped) * 100).toFixed(1)}%`);
-    handle.setAttribute('aria-valuenow', String(Math.round(clamped * 100)));
-  };
-
-  /** @type {number|null} */
-  let pointer = null;
-  /** @param {PointerEvent} e */
-  const endDrag = (e) => {
-    if (pointer === null || e.pointerId !== pointer) return;
-    pointer = null;
-  };
-  handle.addEventListener('pointerdown', (e) => {
-    pointer = e.pointerId;
-    handle.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  handle.addEventListener('pointermove', (e) => {
-    // 只认 pointer !== null 不够：捕获被抢走后它仍非空，裸移动鼠标会继续改写分栏。
-    if (pointer === null || !handle.hasPointerCapture(e.pointerId)) return;
-    const rect = split.getBoundingClientRect();
-    const side = split.classList.contains('pd-split-side');
-    if (side) {
-      if (rect.width <= 0) return;
-      apply((e.clientX - rect.left) / rect.width);
-    } else {
-      if (rect.height <= 0) return;
-      apply((e.clientY - rect.top) / rect.height);
-    }
-  });
-  // 捕获被其他元素抢走时浏览器只发 lostpointercapture，漏掉它 pointer 就永不归零。
-  handle.addEventListener('pointerup', endDrag);
-  handle.addEventListener('pointercancel', endDrag);
-  handle.addEventListener('lostpointercapture', endDrag);
-  handle.addEventListener('keydown', (e) => {
-    const side = split.classList.contains('pd-split-side');
-    const shrink = side ? 'ArrowLeft' : 'ArrowUp';
-    const grow = side ? 'ArrowRight' : 'ArrowDown';
-    if (e.key !== shrink && e.key !== grow) return;
-    e.preventDefault();
-    const current = Number.parseFloat(getComputedStyle(split).getPropertyValue('--pd-list-basis')) / 100;
-    const basis = Number.isFinite(current) ? current : 0.56;
-    apply(basis + (e.key === shrink ? -0.04 : 0.04));
+  initPdSplitter(els.split(), els.splitter(), () => {
+    metricsDirty = true;
+    scheduleWindowSync(false);
   });
 }
 
@@ -1253,7 +852,13 @@ export function initPdView() {
       }
     });
     if (typeof ResizeObserver !== 'undefined') {
-      new ResizeObserver(() => scheduleWindowSync(false)).observe(list);
+      const observer = new ResizeObserver(() => {
+        metricsDirty = true;
+        scheduleWindowSync(false);
+      });
+      observer.observe(list);
+      const head = els.tableHead();
+      if (head) observer.observe(head);
     }
   }
 
@@ -1333,6 +938,7 @@ export function initPdView() {
 
   void document.fonts?.ready?.then(() => {
     monoAdvance = 0;
+    metricsDirty = true;
     scheduleWindowSync(false);
   });
 
@@ -1343,6 +949,7 @@ export function initPdView() {
 export function syncPdView() {
   const revision = ++showRevision;
   showing = true;
+  metricsDirty = true;
   els.list()?.setAttribute?.('aria-busy', 'false');
   refreshPdLanguage();
   void fillPdGap().finally(() => {

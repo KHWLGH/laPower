@@ -481,6 +481,23 @@ test('history eviction protects an active command even when a newer PDM status a
   assert.match(exportTriggerHistory([final]), /Earlier log content was removed/);
 });
 
+test('trimTriggerHistory handles many completed entries and long progress linearly within LOG_LIMIT', () => {
+  const entries = Array.from({ length: 120 }, (_, index) => ({
+    id: `cmd-${index}`,
+    command: { type: 'raw', command: `cmd ${index}` },
+    startedAt: 1_700_000_000_000 + index * 1000,
+    elapsedMs: 12,
+    status: /** @type {const} */ ('success'),
+    progress: '',
+    reply: `${'x'.repeat(1200)}\n`,
+  }));
+  const trimmed = trimTriggerHistory(entries);
+  assert.ok(trimmed.length > 0 && trimmed.length < entries.length);
+  assert.equal(trimmed[0].id, 'cmd-0', 'newest entries stay at the front');
+  assert.ok(trimmed.map(formatTriggerHistoryEntry).join('\n\n').length <= LOG_LIMIT);
+  assert.deepEqual(trimTriggerHistory(trimmed), trimmed, 'trimming is idempotent');
+});
+
 test('PDO rows read like the meter and fill the request form sensibly', () => {
   const fixed = {
     position: 2,

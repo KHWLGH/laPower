@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  * For original project contributions; see COPYRIGHT.
  */
-import { summarize } from '../../src/pd-model.js';
+import { parsePdCaptureFile, summarize } from '../../src/pd-model.js';
 import fixtures from './pd-fixtures.json';
 import { DEVICES, EPOCH, meterAt, PD_HANDSHAKES, PDOS, PROTOCOLS } from './scenario.js';
 
@@ -39,6 +39,7 @@ let minimized = false;
 let closed = false;
 const handlers = new Map();
 const pdLog = [];
+let stagedPdImport = [];
 const errors = [];
 const files = new Map();
 const textExports = [];
@@ -476,6 +477,7 @@ async function invoke(command, args = {}, ipc = {}) {
       return;
     case 'pd_log_clear':
       pdLog.length = 0;
+      stagedPdImport = [];
       return ++pdGeneration;
     case 'pd_log_after': {
       if (args.generation != null && args.generation !== pdGeneration) throw new Error('Stale PD generation');
@@ -495,19 +497,42 @@ async function invoke(command, args = {}, ipc = {}) {
       if (!entry) throw new Error('Unknown virtual PD index');
       return structuredClone(entry.meta);
     }
-    case 'pd_log_replace': {
-      const replacements = args.entries.map((entry) => {
-        if (entry.divider) return { entry, fixture: null };
+    case 'pd_import_pick': {
+      const file = await chooseFile('.json');
+      return file ? newFile(file.name, false, new Uint8Array(await file.arrayBuffer())) : null;
+    }
+    case 'pd_log_import': {
+      const file = fileFor(args.handle);
+      files.delete(args.handle);
+      const parsed = parsePdCaptureFile(JSON.parse(new TextDecoder().decode(file.bytes)));
+      if (!parsed.ok) throw parsed.description ?? new Error(parsed.error);
+      const replacements = parsed.entries.map((entry) => {
+        if ('divider' in entry && entry.divider) return { entry, fixture: null };
+        if (!entry.bytes?.length) return { entry, fixture: null };
         const fixture = fixtures.find((sample) => JSON.stringify(sample.bytes) === JSON.stringify(entry.bytes));
         if (!fixture) throw new Error('Virtual PD import supports only the bundled fixture reports');
         return { entry, fixture };
       });
       pdLog.length = 0;
       pdGeneration++;
-      return replacements.map(({ entry, fixture }) => {
-        if (entry.divider) return { t: entry.t, divider: true, gen: pdGeneration };
-        return { ...appendPd(entry.t - EPOCH, fixture), vbus: entry.vbus, ibus: entry.ibus };
+      stagedPdImport = replacements.map(({ entry, fixture }) => {
+        if ('divider' in entry && entry.divider) return { t: entry.t, divider: true, gen: pdGeneration };
+        if (fixture) {
+          const event = { ...appendPd(entry.t - EPOCH, fixture), vbus: entry.vbus, ibus: entry.ibus };
+          return entry.meta ? { ...event, meta: entry.meta } : event;
+        }
+        return { ...entry, gen: pdGeneration };
       });
+      return { generation: pdGeneration, total: stagedPdImport.length };
+    }
+    case 'pd_log_import_page': {
+      if (args.generation !== pdGeneration) throw new Error('Stale PD generation');
+      const total = stagedPdImport.length;
+      const start = Math.min(Math.max(0, args.offset ?? 0), total);
+      const end = Math.min(start + 2048, total);
+      const entries = stagedPdImport.slice(start, end);
+      if (end >= total) stagedPdImport = [];
+      return { generation: pdGeneration, offset: start, total, entries };
     }
     case 'km003c_trigger':
       return runTrigger(args);
@@ -530,6 +555,7 @@ async function invoke(command, args = {}, ipc = {}) {
       return newFile(`${args.stem}.csv`, true);
     case 'csv_export_pick':
     case 'pd_export_pick':
+    case 'text_export_pick':
     case 'png_export_pick':
       return newFile(args.defaultName);
     case 'paired_export_pick':
@@ -612,7 +638,10 @@ async function invoke(command, args = {}, ipc = {}) {
       return;
     case 'csv_write_close': {
       const file = fileFor(args.handle);
-      if (!file.spool && !args.options?.abort) download(file);
+      if (!file.spool && !args.options?.abort) {
+        if (file.name.endsWith('.txt')) textExports.push(new TextDecoder().decode(file.bytes));
+        download(file);
+      }
       files.delete(args.handle);
       return;
     }

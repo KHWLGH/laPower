@@ -19,7 +19,8 @@ use witrn_hid::{decode_pd_report, Parser};
 use crate::app_nap::AcquisitionActivity;
 use crate::pd_capture::{now_ms, PdEvent, PdLog};
 use crate::stream;
-use crate::{drain_pd_pending, enqueue_pd_pending, DeviceData, DeviceInfo, DeviceOutgoing};
+use crate::stream_commands::{drain_pd_pending, enqueue_pd_pending, DeviceOutgoing};
+use crate::{DeviceData, DeviceInfo};
 
 /// What a device delivered, stamped on the session clock.
 pub(crate) struct Arrival {
@@ -195,13 +196,11 @@ impl Loop<'_> {
                         let (vbus, ibus) = self
                             .last_bus
                             .map_or((None, None), |(v, i)| (Some(v), Some(i)));
-                        let event = self.pd_log.lock().unwrap().push_message(
-                            now_ms(),
-                            report,
-                            metadata,
-                            vbus,
-                            ibus,
-                        );
+                        let event = self
+                            .pd_log
+                            .lock()
+                            .map_err(|_| "PD 日志状态已损坏".to_string())?
+                            .push_message(now_ms(), report, metadata, vbus, ibus);
                         if let Some(event) = event {
                             enqueue_pd_pending(&mut self.pd_pending, event);
                         }
@@ -406,7 +405,7 @@ pub(crate) fn run_reader<S: Source>(mut source: S, ctx: ReaderCtx) {
         last_seq: state.selection.seq,
         error: failure,
     };
-    *end.lock().unwrap() = Some(receipt.clone());
+    *end.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(receipt.clone());
     let _ = tx.send(DeviceOutgoing::End(receipt));
 }
 

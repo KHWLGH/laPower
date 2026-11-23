@@ -31,16 +31,25 @@ fn directory(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(path)
 }
 
+fn mime_for(extension: &str) -> Result<&'static str, AppError> {
+    FILES
+        .iter()
+        .find_map(|(candidate, mime)| (*candidate == extension).then_some(*mime))
+        .ok_or_else(|| AppError::message("customBackgroundUnsupported", std::iter::empty()))
+}
+
+fn encode_data_url(extension: &str, bytes: &[u8]) -> Result<String, AppError> {
+    let mime = mime_for(extension)?;
+    Ok(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
+}
+
 fn data_url(path: &Path) -> Result<String, AppError> {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let mime = FILES
-        .iter()
-        .find_map(|(candidate, mime)| (*candidate == extension).then_some(*mime))
-        .ok_or_else(|| AppError::message("customBackgroundUnsupported", std::iter::empty()))?;
+    let _ = mime_for(&extension)?;
     let metadata = fs::metadata(path).map_err(backend_error)?;
     if metadata.len() == 0 || metadata.len() > MAX_IMAGE_BYTES {
         return Err(AppError::message(
@@ -55,7 +64,7 @@ fn data_url(path: &Path) -> Result<String, AppError> {
             std::iter::empty(),
         ));
     }
-    Ok(format!("data:{mime};base64,{}", STANDARD.encode(bytes)))
+    encode_data_url(&extension, &bytes)
 }
 
 fn supported_extension(path: &Path) -> Result<&'static str, AppError> {
@@ -132,7 +141,7 @@ pub(crate) async fn choose_custom_background(
         let folder = directory(&app)?;
         let destination = folder.join(format!("background.{extension}"));
         let temporary = folder.join(format!("background.{extension}.tmp"));
-        fs::write(&temporary, bytes).map_err(backend_error)?;
+        fs::write(&temporary, &bytes).map_err(backend_error)?;
         if destination.exists() {
             fs::remove_file(&destination).map_err(backend_error)?;
         }
@@ -145,7 +154,7 @@ pub(crate) async fn choose_custom_background(
                 }
             }
         }
-        data_url(&destination).map(Some)
+        encode_data_url(extension, &bytes).map(Some)
     })
     .await
     .map_err(backend_error)?

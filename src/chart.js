@@ -26,29 +26,16 @@
  * - setChartFillEnabled() 统一启用 / 关闭监控曲线填充，保留各通道透明度
  */
 
-import {
-  bucketCap,
-  firstIndexAfter,
-  firstIndexAtOrAfter,
-  nearestIndex,
-  SeriesBuckets,
-  stripePpb,
-} from './chart-buckets.js';
+import { createChartAxes, headroomFrac, VOLTAGE_SCALE_SERIES, Y_AXIS_LABEL_PAD } from './chart-axes.js';
+import { bucketCap, firstIndexAfter, firstIndexAtOrAfter, SeriesBuckets, stripePpb } from './chart-buckets.js';
 import { BLOCK_SIZE, ExactExtremaIndex } from './chart-extrema.js';
-import { rasterOrderedFill } from './chart-fill.js';
 import { ChartRenderPolicy, liveChartIntervalMs, zoomStrokeFactor } from './chart-pacing.js';
-import {
-  minZoomSpan,
-  panTimeWindow,
-  settleWheelZoomWindow,
-  wheelZoomFactor,
-  wheelZoomPivot,
-  zoomTimeWindow,
-} from './chart-window.js';
+import { createChartInteractions, createCursorAndTooltip, drawMarkers, drawNavigatorMarkers } from './chart-plugins.js';
+import { createBucketRasterizer, getEmptyPath } from './chart-raster.js';
 import { runCooperativeSlices } from './cooperative.js';
 import { displayFrames } from './frame-scheduler.js';
-import { getResolvedLanguage, t } from './i18n.js';
-import { markersOf, onMarkersChange } from './markers.js';
+import { t } from './i18n.js';
+import { onMarkersChange } from './markers.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
@@ -107,35 +94,6 @@ let mainData = [[], [], [], [], [], [], [], [], []];
 /** 导航图数据：[x, power]（短历史的有界拷贝或桶数组）。 */
 /** @type {ChartColView[]} */
 let navData = [[], []];
-const IS_LITTLE_ENDIAN = new Uint8Array(Uint32Array.of(0x04030201).buffer)[0] === 0x01;
-/** @type {Path2D|null} */
-let emptyPath = null;
-function getEmptyPath() {
-  if (!(emptyPath instanceof Path2D)) emptyPath = new Path2D();
-  return emptyPath;
-}
-/** @param {number} r @param {number} g @param {number} b @param {number} a */
-function packRgba(r, g, b, a) {
-  return (
-    (IS_LITTLE_ENDIAN
-      ? ((a & 255) << 24) | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255)
-      : ((r & 255) << 24) | ((g & 255) << 16) | ((b & 255) << 8) | (a & 255)) >>> 0
-  );
-}
-/** @type {Map<string, {rgb: number, opacity: number}|null>} */
-const fillColorCache = new Map();
-/** @param {string} fill */
-function parseFillRgba(fill) {
-  let cached = fillColorCache.get(fill);
-  if (cached !== undefined) return cached;
-  const rgba = fill.match(/[\d.]+/g)?.map(Number);
-  cached =
-    rgba && rgba.length === 4
-      ? { rgb: (((rgba[2] & 255) << 16) | ((rgba[1] & 255) << 8) | (rgba[0] & 255)) >>> 0, opacity: rgba[3] }
-      : null;
-  fillColorCache.set(fill, cached);
-  return cached;
-}
 
 /** 范围滑块设定的主图 X 轴窗口；null 表示尚无数据（使用默认范围）。 */
 /** @type {{ min: number|null, max: number|null }} */
@@ -440,17 +398,47 @@ function bindNavData() {
 
 /** @type {any} */
 let linearBuilder = null;
-const HEX6_RE = /^#[\da-f]{6}$/i;
 /** @type {import('./chart-buckets.js').OrderedGeometry[]} */
 let mainGeometry = [];
-/** @type {{canvas:OffscreenCanvas,ctx:OffscreenCanvasRenderingContext2D,image:ImageData,pixels:Uint32Array,dirtyTop:number,dirtyBottom:number,dirtyLeft:number,dirtyRight:number,columns:number[][],columnLengths:Uint32Array,coverage:Float64Array,pending:boolean,scale:number}|null} */
-let bucketRaster = null;
-let restingRaster = null;
-let gestureRaster = null;
-const GESTURE_RASTER_PIXELS = 480_000;
 const GESTURE_SERIES_BUCKETS = 3072;
 /** @type {WeakMap<object, Map<number, any>>} */
 let orderedPaints = new WeakMap();
+
+const rasterizer = createBucketRasterizer({
+  isMainChart: (u) => u === state.mainChart,
+  isWindowBound: () => boundKind === 'window',
+  isRangeDragging: () => rangeDragging,
+  getPlotPixelRatio: () => plotPixelRatio(),
+  getOrderedPaint: (u, seriesIdx) => orderedPaints.get(u)?.get(seriesIdx),
+  recordPaintStage,
+});
+
+const chartAxes = createChartAxes({
+  getSeriesMax: () => seriesMax,
+  getSeriesMin: () => seriesMin,
+  getChartFont: () => CHART_FONT,
+  getMonoFont: () => MONO_FONT,
+  scheduleChartUpdate: () => scheduleChartUpdate(),
+});
+
+const cursorTooltip = createCursorAndTooltip({
+  fields: FIELDS,
+  seriesScales: SERIES_SCALES,
+  units: UNITS,
+  chartLabel,
+  isMainGenFresh: () => appliedMainGen === dataGen,
+  getDataGen: () => dataGen,
+  getTooltipThemeGen: () => tooltipThemeGen,
+  monitorVisible,
+});
+
+const interactions = createChartInteractions({
+  monitorVisible,
+  isRangeDragging: () => rangeDragging,
+  setRangeDragging,
+  xRange,
+  updateCharts,
+});
 
 /** @param {any} u @param {string} name @param {number} started @param {number} [count=1] */
 function recordPaintStage(u, name, started, count = 1) {
@@ -572,7 +560,7 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
     recordPaintStage(u, 'coordinates', started);
   } else recordPaintStage(u, 'coordinatesCached', started);
   // The bitmap path has no discarded standard stroke/fill construction.
-  if (main && useBucketRaster(u)) return { stroke: getEmptyPath(), fill: null };
+  if (main && rasterizer.useBucketRaster(u)) return { stroke: getEmptyPath(), fill: null };
   if (paint.stroke)
     return main && series.fill(u, seriesIdx)
       ? { stroke: getEmptyPath(), fill: null }
@@ -594,323 +582,6 @@ function adaptivePaths(u, seriesIdx, idx0, idx1) {
   return { stroke, fill: null };
 }
 
-function drawBucketFill(u, seriesIdx) {
-  if (boundKind !== 'window') return;
-  const geometry = orderedPaints.get(u)?.get(seriesIdx),
-    series = u.series[seriesIdx];
-  const fill = series.fill(u, seriesIdx);
-  if (!geometry || !fill || !Number.isFinite(geometry.base)) return;
-  if (useBucketRaster(u) && useRasterFill(geometry, fill)) return;
-  if (bucketRaster?.pending) flushBucketRaster(u);
-  const started = performance.now();
-  const { points, connect, base } = geometry,
-    ctx = u.ctx,
-    bbox = u.bbox;
-  if (!geometry.fill) {
-    const path = new Path2D();
-    let open = false,
-      lastX = 0;
-    const close = () => {
-      if (!open) return;
-      path.lineTo(lastX, base);
-      path.closePath();
-      open = false;
-    };
-    for (let i = 0; i < connect.length; i++) {
-      const x = points[i * 2],
-        y = points[i * 2 + 1];
-      if (!connect[i] || !Number.isFinite(x) || !Number.isFinite(y)) close();
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      if (!open) {
-        path.moveTo(x, base);
-        path.lineTo(x, y);
-        open = true;
-      } else path.lineTo(x, y);
-      lastX = x;
-    }
-    close();
-    geometry.fill = path;
-  }
-  // Keep the area on the destination canvas. Filling the CPU scratch before
-  // drawImage forces its pending path to rasterize synchronously on WebView2.
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
-  ctx.clip();
-  ctx.fillStyle = fill;
-  ctx.globalAlpha = series.alpha;
-  ctx.fill(geometry.fill);
-  ctx.restore();
-  recordPaintStage(u, 'fill', started);
-}
-
-function useBucketRaster(u) {
-  if (u !== state.mainChart || boundKind !== 'window' || typeof OffscreenCanvas === 'undefined') return false;
-  for (let i = 1; i < u.series.length; i++) {
-    const s = u.series[i];
-    if (s.show && (s.alpha !== 1 || !HEX6_RE.test(s.stroke(u, 0)))) return false;
-  }
-  return true;
-}
-
-/** @param {{rasterFill: boolean}} geometry @param {unknown} fill */
-function useRasterFill(geometry, fill) {
-  // One upload for all supported strokes and shadows in a moving viewport.
-  return (rangeDragging || geometry.rasterFill) && typeof fill === 'string' && fill.startsWith('rgba(');
-}
-
-/** Scan-convert by x column, then union covered intervals before writing any pixels. */
-function drawBucketRaster(u, seriesIdx) {
-  if (!useBucketRaster(u)) {
-    if (u !== state.mainChart || boundKind !== 'window') return;
-    // Unfilled fallback paths are stroked by uPlot itself. Only a filled path
-    // defers its stroke until after our custom area composition.
-    if (!u.series[seriesIdx].fill(u, seriesIdx)) return;
-    const stroke = orderedPaints.get(u)?.get(seriesIdx)?.stroke;
-    if (!stroke) return;
-    const ctx = u.ctx,
-      bbox = u.bbox,
-      series = u.series[seriesIdx];
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
-    ctx.clip();
-    ctx.strokeStyle = series.stroke(u, seriesIdx);
-    ctx.lineWidth = series.width * plotPixelRatio();
-    ctx.globalAlpha = series.alpha;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'butt';
-    ctx.stroke(stroke);
-    ctx.restore();
-    return;
-  }
-  const geometry = orderedPaints.get(u)?.get(seriesIdx);
-  if (!geometry) return;
-  const started = performance.now();
-  const bbox = u.bbox;
-  // Bound bitmap upload and blending while the viewport is moving, not at rest.
-  const scale = rangeDragging ? Math.min(1, Math.sqrt(GESTURE_RASTER_PIXELS / (bbox.width * bbox.height))) : 1;
-  const width = Math.ceil(bbox.width * scale);
-  const height = Math.ceil(bbox.height * scale);
-  bucketRaster = scale < 1 ? gestureRaster : restingRaster;
-  if (!bucketRaster || bucketRaster.canvas.width !== height || bucketRaster.canvas.height !== width) {
-    // Transpose the scratch: each screen column becomes one contiguous row.
-    const canvas = new OffscreenCanvas(height, width);
-    // The shared scratch is rewritten by CPU pixels after every channel.
-    const ctx = /** @type {OffscreenCanvasRenderingContext2D} */ (
-      canvas.getContext('2d', { willReadFrequently: true })
-    );
-    const image = ctx.createImageData(height, width);
-    bucketRaster = {
-      canvas,
-      ctx,
-      image,
-      pixels: new Uint32Array(image.data.buffer),
-      dirtyTop: height,
-      dirtyBottom: 0,
-      dirtyLeft: width,
-      dirtyRight: 0,
-      columns: Array.from({ length: width }, () => []),
-      columnLengths: new Uint32Array(width),
-      coverage: new Float64Array((height + 1) * 3),
-      pending: false,
-      scale,
-    };
-    if (scale < 1) gestureRaster = bucketRaster;
-    else restingRaster = bucketRaster;
-  }
-  const { pixels, columns, columnLengths } = bucketRaster;
-  if (!bucketRaster.pending) {
-    if (bucketRaster.dirtyBottom > bucketRaster.dirtyTop && bucketRaster.dirtyRight > bucketRaster.dirtyLeft) {
-      for (let x = bucketRaster.dirtyLeft; x < bucketRaster.dirtyRight; x++)
-        pixels.fill(0, x * height + bucketRaster.dirtyTop, x * height + bucketRaster.dirtyBottom);
-    }
-    bucketRaster.dirtyTop = height;
-    bucketRaster.dirtyBottom = 0;
-    bucketRaster.dirtyLeft = width;
-    bucketRaster.dirtyRight = 0;
-  }
-  const series = u.series[seriesIdx],
-    hex = Number.parseInt(series.stroke(u, seriesIdx).slice(1), 16);
-  const color = packRgba(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255);
-  const fill = series.fill(u, seriesIdx);
-  const half = (series.width * plotPixelRatio() * scale) / 2;
-  const intervalStarted = performance.now();
-  if (!geometry.raster || geometry.raster.half !== half || geometry.raster.scale !== scale) {
-    columnLengths.fill(0);
-    const { points, connect } = geometry;
-    for (let i = 0; i < connect.length; i++) {
-      const x1 = (points[i * 2] - bbox.left) * scale,
-        y1 = (points[i * 2 + 1] - bbox.top) * scale;
-      if (!Number.isFinite(x1) || !Number.isFinite(y1)) continue;
-      const x0 = connect[i] ? (points[(i - 1) * 2] - bbox.left) * scale : x1;
-      const y0 = connect[i] ? (points[(i - 1) * 2 + 1] - bbox.top) * scale : y1;
-      const maxX = x0 > x1 ? x0 : x1,
-        minX = x0 < x1 ? x0 : x1;
-      if (maxX + half <= 0 || minX - half >= width) continue;
-      const maxY = y0 > y1 ? y0 : y1,
-        minY = y0 < y1 ? y0 : y1;
-      if (maxY + half <= 0 || minY - half >= height) continue;
-      const dx = x1 - x0,
-        dy = y1 - y0;
-      const left = Math.max(0, Math.floor(minX - half)),
-        right = Math.min(width, Math.ceil(maxX + half));
-      for (let x = left; x < right; x++) {
-        const ta = dx ? Math.max(0, Math.min(1, (x - half - x0) / dx)) : 0;
-        const tb = dx ? Math.max(0, Math.min(1, (x + 1 + half - x0) / dx)) : 1;
-        const a = y0 + dy * ta,
-          b = y0 + dy * tb;
-        const top = Math.max(0, Math.floor(Math.min(a, b) - half)),
-          bottom = Math.min(height, Math.ceil(Math.max(a, b) + half));
-        if (top < bottom) {
-          const n = columnLengths[x];
-          columns[x][n] = top;
-          columns[x][n + 1] = bottom;
-          columnLengths[x] = n + 2;
-        }
-      }
-    }
-    let entries = 0;
-    for (let x = 0; x < width; x++) {
-      const length = columnLengths[x];
-      if (length === 0) continue;
-      const spans = columns[x];
-      // In-place insertion sort of interval pairs; each column has a bounded candidate count.
-      for (let i = 2; i < length; i += 2) {
-        const a = spans[i],
-          b = spans[i + 1];
-        let j = i;
-        while (j > 0 && spans[j - 2] > a) {
-          spans[j] = spans[j - 2];
-          spans[j + 1] = spans[j - 1];
-          j -= 2;
-        }
-        spans[j] = a;
-        spans[j + 1] = b;
-      }
-      let top = spans[0],
-        bottom = spans[1];
-      let count = 0;
-      for (let i = 2; i <= length; i += 2) {
-        if (i < length && spans[i] <= bottom) {
-          bottom = Math.max(bottom, spans[i + 1]);
-          continue;
-        }
-        if (bottom > top) {
-          spans[count++] = top;
-          spans[count++] = bottom;
-        }
-        top = spans[i];
-        bottom = spans[i + 1];
-      }
-      columnLengths[x] = count;
-      entries += count;
-    }
-    geometry.intervalBuffer =
-      geometry.intervalBuffer?.length >= entries ? geometry.intervalBuffer : new Uint32Array(Math.max(64, entries));
-    geometry.offsetBuffer =
-      geometry.offsetBuffer?.length >= width + 1 ? geometry.offsetBuffer : new Uint32Array(width + 1);
-    const spans = geometry.intervalBuffer.subarray(0, entries),
-      offsets = geometry.offsetBuffer.subarray(0, width + 1);
-    let cursor = 0;
-    for (let x = 0; x < width; x++) {
-      offsets[x] = cursor;
-      for (let i = 0; i < columnLengths[x]; i++) spans[cursor++] = columns[x][i];
-    }
-    offsets[width] = cursor;
-    geometry.raster = { half, spans, offsets, scale };
-    recordPaintStage(u, 'intervals', intervalStarted);
-  } else recordPaintStage(u, 'intervalsCached', intervalStarted);
-  const { spans, offsets } = geometry.raster;
-  if (Number.isFinite(geometry.base) && useRasterFill(geometry, fill)) rasterBucketFill(u, geometry, fill);
-  let { dirtyTop, dirtyBottom, dirtyLeft, dirtyRight } = bucketRaster;
-  for (let x = 0; x < width; x++) {
-    const startIdx = offsets[x],
-      endIdx = offsets[x + 1];
-    if (startIdx >= endIdx) continue;
-    if (x < dirtyLeft) dirtyLeft = x;
-    dirtyRight = x + 1;
-    for (let i = startIdx; i < endIdx; i += 2) {
-      const top = spans[i],
-        bottom = spans[i + 1];
-      dirtyTop = Math.min(dirtyTop, top);
-      dirtyBottom = Math.max(dirtyBottom, bottom);
-      pixels.fill(color, x * height + top, x * height + bottom);
-    }
-  }
-  bucketRaster.dirtyTop = dirtyTop;
-  bucketRaster.dirtyBottom = dirtyBottom;
-  bucketRaster.dirtyLeft = dirtyLeft;
-  bucketRaster.dirtyRight = dirtyRight;
-  bucketRaster.pending = true;
-  recordPaintStage(u, 'raster', started);
-  for (let i = seriesIdx + 1; i < u.series.length; i++) if (u.series[i].show) return;
-  flushBucketRaster(u);
-}
-
-function flushBucketRaster(u) {
-  if (!bucketRaster?.pending) return;
-  bucketRaster.pending = false;
-  const { dirtyTop, dirtyBottom, dirtyLeft, dirtyRight, scale } = bucketRaster,
-    bbox = u.bbox,
-    width = bucketRaster.canvas.height,
-    height = bucketRaster.canvas.width;
-  if (dirtyBottom <= dirtyTop || dirtyRight <= dirtyLeft) return;
-  const uploadStarted = performance.now();
-  const scratch = bucketRaster.ctx;
-  const pad = scale < 1 ? 1 : 0;
-  const copyTop = Math.max(0, dirtyTop - pad);
-  const copyBottom = Math.min(height, dirtyBottom + pad);
-  const copyLeft = Math.max(0, dirtyLeft - pad);
-  const copyRight = Math.min(width, dirtyRight + pad);
-  scratch.putImageData(bucketRaster.image, 0, 0, copyTop, copyLeft, copyBottom - copyTop, copyRight - copyLeft);
-  const dirtyW = dirtyBottom - dirtyTop;
-  const dirtyH = dirtyRight - dirtyLeft;
-  const ctx = u.ctx;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
-  ctx.clip();
-  const factor = 1 / scale;
-  ctx.transform(0, factor, factor, 0, bbox.left, bbox.top);
-  ctx.drawImage(bucketRaster.canvas, dirtyTop, dirtyLeft, dirtyW, dirtyH, dirtyTop, dirtyLeft, dirtyW, dirtyH);
-  ctx.restore();
-  recordPaintStage(u, 'bitmap', uploadStarted);
-}
-
-/** @param {any} u @param {any} geometry @param {string} fill */
-function rasterBucketFill(u, geometry, fill) {
-  const started = performance.now();
-  const parsed = parseFillRgba(fill);
-  if (!parsed || !bucketRaster) return;
-  const { scale } = bucketRaster;
-  const width = bucketRaster.canvas.height;
-  const dirty = { left: width, right: 0 };
-  const bounds = rasterOrderedFill({
-    points: geometry.points,
-    connect: geometry.connect,
-    base: (geometry.base - u.bbox.top) * scale,
-    leftOffset: u.bbox.left,
-    topOffset: u.bbox.top,
-    scale,
-    width,
-    height: bucketRaster.canvas.width,
-    pixels: bucketRaster.pixels,
-    coverage: bucketRaster.coverage,
-    rgb: parsed.rgb,
-    opacity: parsed.opacity,
-    transposed: true,
-    opaque: geometry.raster,
-    composite: bucketRaster.pending,
-    dirty,
-  });
-  bucketRaster.dirtyTop = Math.min(bucketRaster.dirtyTop, bounds.top);
-  bucketRaster.dirtyBottom = Math.max(bucketRaster.dirtyBottom, bounds.bottom);
-  bucketRaster.dirtyLeft = Math.min(bucketRaster.dirtyLeft, dirty.left);
-  bucketRaster.dirtyRight = Math.max(bucketRaster.dirtyRight, dirty.right);
-  recordPaintStage(u, 'fill', started);
-}
-
 // ─── Data binding ────────────────────────────────────────────────────────────
 
 /**
@@ -926,8 +597,8 @@ function bindMainViews(start, end) {
 }
 
 export function syncChartSeries() {
-  stopWheelZoom?.();
-  stopChartPan?.();
+  interactions.stopWheelZoom();
+  interactions.stopChartPan();
   pauseContext = null;
   cancelNavigatorPaint();
   cancelIndexWarmup();
@@ -937,9 +608,7 @@ export function syncChartSeries() {
   recordingRenderPolicy.reset();
   reviewRenderPolicy.reset();
   sourceRevision = chartRevision();
-  bucketRaster = null;
-  restingRaster = null;
-  gestureRaster = null;
+  rasterizer.reset();
   orderedPaints = new WeakMap();
   mainGeometry = [];
   submittedSourceLen = state.chartSeries.x.length;
@@ -972,8 +641,8 @@ export function syncChartSeries() {
 /** @param {boolean} dragging @param {boolean} [fromChart] */
 export function setRangeDragging(dragging, fromChart = false) {
   if (!fromChart) {
-    stopWheelZoom?.();
-    stopChartPan?.();
+    interactions.stopWheelZoom();
+    interactions.stopChartPan();
   }
   if (dragging && !rangeDragging) {
     cancelIndexWarmup();
@@ -1617,8 +1286,9 @@ function finishChartDraw(chart) {
         (sum, paint) => sum + paint.buffer.byteLength,
         0,
       );
-      stages.coverageBytes = chart === state.mainChart ? (bucketRaster?.coverage.byteLength ?? 0) : 0;
-      stages.rasterBytes = chart === state.mainChart ? (bucketRaster?.image.data.byteLength ?? 0) : 0;
+      const rasterMem = chart === state.mainChart ? rasterizer.getMemoryBytes() : { coverageBytes: 0, rasterBytes: 0 };
+      stages.coverageBytes = rasterMem.coverageBytes;
+      stages.rasterBytes = rasterMem.rasterBytes;
       stages.intervalBytes = [...(orderedPaints.get(chart)?.values() ?? [])].reduce(
         (sum, paint) => sum + (paint.intervalBuffer?.byteLength ?? 0) + (paint.offsetBuffer?.byteLength ?? 0),
         0,
@@ -1821,7 +1491,7 @@ function applyData(opts = {}) {
     if (!sameXRange) {
       expectChartDraw(state.mainChart, request);
       applyXScale(nextXRange);
-    } else if (widthsChanged || (!rangeDragging && boundKind === 'window' && bucketRaster && bucketRaster.scale < 1)) {
+    } else if (widthsChanged || (!rangeDragging && boundKind === 'window' && rasterizer.isScaledDown())) {
       // Refresh the stroke or restore full raster resolution without rebinding data.
       expectChartDraw(state.mainChart, request);
       state.mainChart.redraw(true, false);
@@ -1899,7 +1569,7 @@ function applyData(opts = {}) {
 /** 立即刷新两个图表；隐藏时只打脏标记，不提交绘制。 */
 /** @param {ChartRefreshSource} [source='maintenance'] @param {{force?:boolean,reason?:string,requestedAt?:number}} [options] */
 export function updateCharts(source = 'maintenance', { force = true, reason = source, requestedAt } = {}) {
-  if (reason === 'release') stopWheelZoom?.();
+  if (reason === 'release') interactions.stopWheelZoom();
   chartDirty = true;
   cancelChartFrame();
   if (reason === 'pause') {
@@ -1940,8 +1610,8 @@ export function handleMonitorShown() {
 }
 
 export function handleMonitorHidden() {
-  stopWheelZoom?.();
-  stopChartPan?.();
+  interactions.stopWheelZoom();
+  interactions.stopChartPan();
   pauseContext = null;
   cancelNavigatorPaint();
   cancelIndexWarmup();
@@ -1986,8 +1656,7 @@ function flushChart(force = false) {
   flushingChart = true;
   try {
     flushResizes();
-    if (divisionSyncPending) {
-      divisionSyncPending = false;
+    if (chartAxes.consumeDivisionSyncPending()) {
       dataGen++;
       chartDirty = true;
     }
@@ -2220,483 +1889,6 @@ function xRange() {
   return [min, max];
 }
 
-/**
- * 挂靠在电压 scale 上的 series 下标集合。
- * D+/D-/CC1/CC2 叠加曲线与电压共用一个 scale：量程必须聚合所有挂靠曲线，
- * 否则隐藏电压时叠加曲线会失去量程（mkYRange 旧实现只看电压一条）。
- */
-const VOLTAGE_SCALE_SERIES = [1, 5, 6, 7, 8];
-
-/**
- * 图表纵向余量（0-1 小数）。auto = 25%（曲线保持中高位置），custom 读设置值。
- * @returns {number}
- */
-function headroomFrac() {
-  const s = state.settings;
-  if (s.chartHeadroomMode === 'custom') {
-    const p = Number(s.chartHeadroomPercent);
-    if (Number.isFinite(p)) return Math.min(100, Math.max(0, p)) / 100;
-  }
-  return 0.25;
-}
-
-/**
- * 聚合一组挂靠在同一 scale 上的可见 series 的全量 min/max。
- * @param {any} u @param {number[]} seriesIndexes
- * @returns {{min: number, max: number}|{empty: true}|null} 全部隐藏 → null（轴自动隐藏）；可见但无有限数据 → {empty:true}
- */
-function aggregateVisible(u, seriesIndexes) {
-  let anyVisible = false;
-  let max = -Infinity;
-  let min = Infinity;
-  for (const si of seriesIndexes) {
-    if (!u.series[si] || !u.series[si].show) continue;
-    anyVisible = true;
-    if (Number.isFinite(seriesMax[si]) && seriesMax[si] > max) max = seriesMax[si];
-    if (Number.isFinite(seriesMin[si]) && seriesMin[si] < min) min = seriesMin[si];
-  }
-  if (!anyVisible) return null;
-  if (!Number.isFinite(max)) return { empty: true };
-  return { min, max };
-}
-
-/**
- * 量程含余量并从 0 起算（有负值时才向负侧延伸），保证曲线位置稳定直观。
- * @param {number} min @param {number} max @param {number} h
- * @returns {[number, number]}
- */
-function paddedZeroBased(min, max, h) {
-  const lo = min < 0 ? min * (1 + h) : 0;
-  const hi = max > 0 ? max * (1 + h) : min < 0 ? 0 : 1;
-  return lo < hi ? [lo, hi] : [lo - 0.5, hi + 0.5];
-}
-
-/**
- * 全部 Y 轴共用的等分格数。
- *
- * 多轴网格对齐的关键：对齐不要求各轴数值相同，只要求刻度落在相同的高度比例上。
- * 于是取一个全局等分数 N，把每条轴的量程量化成 N 个整齐步长（quantizeRange），
- * 刻度用 min + (max-min)·i/N 生成（uniformSplits）—— 第 i 条刻度在每条轴上都是
- * 同一像素行，四条轴的网格线因此严格重合。
- *
- * 用 u.height（画布总高）而非 u.bbox.height 推算：bbox 依赖轴宽、轴宽依赖刻度
- * 文字、刻度又依赖等分数，读 bbox 会形成布局循环。70 是 X 轴 + 轴顶横向标题
- * 的大致占用，余下按约 80px/格换算——只随窗口尺寸变化，不随数据抖动。
- * @param {any} u
- * @returns {number}
- */
-function yDivisions(u) {
-  const plotHeight = Math.max(80, (Number(u?.height) || 300) - 70);
-  return Math.min(7, Math.max(3, Math.round(plotHeight / 80)));
-}
-
-/**
- * 量程量化时实际采用的等分数。
- *
- * 刻度（uniformSplits）必须复用它，而不是各自再调一次 yDivisions：
- * 量程只在 setData / setScale 时重算，而 yDivisions 随窗口高度即时变化，
- * 两者若不同步就会出现「按 7 等分量化的量程被切成 5 份」——刻度落在 5.6、11.2
- * 这种非整数上。窗口高度变化后由 syncDivisionsAfterResize 补一次量程重算。
- */
-let appliedYDivisions = 0;
-
-/** 绘图区高度变了 → 等分数可能变，与尺寸 / 数据提交共用一帧。 */
-let divisionSyncPending = false;
-function syncDivisionsAfterResize(/** @type {any} */ u) {
-  if (divisionSyncPending || yDivisions(u) === appliedYDivisions) return;
-  divisionSyncPending = true;
-  scheduleChartUpdate();
-}
-
-/** 量化步长的候选尾数。比常见的 1/2/5 更细，用于压低量化引入的额外余量。 */
-const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
-// Display-only floors for unloaded meters. Keeping an empty-load noise floor prevents
-// tiny ADC jitter from filling the plot vertically.
-const IDLE_AXIS_CEILING = { voltage: 0.05, current: 0.01, power: 0.005, temp: 0 };
-
-/**
- * 把量程量化为「整齐步长 × 等分数」，使刻度既是整数值又正好铺满绘图区。
- *
- * 代价：量化只向上取整，实际纵向余量可能比设置值多出至多一个步长（细候选表把
- * 超出压在 20% 上下，粗糙的 1/2/5 阶梯会翻倍）。这是「整齐刻度 + 严格对齐」不可
- * 避免的开销。
- * @param {number} lo @param {number} hi @param {number} divisions
- * @returns {[number, number]}
- */
-function quantizeRange(lo, hi, divisions) {
-  const span = hi - lo;
-  if (!(span > 0) || !Number.isFinite(span)) return [lo, hi];
-  const mag = 10 ** Math.floor(Math.log10(span / divisions));
-  // 起点下取整最多把跨度撑大一个步长，因此候选需覆盖到 span/(divisions-1)；
-  // divisions ≥ 3 时该值 < 1.5×原始步长，两个数量级的候选表足够。
-  for (const decade of [mag, mag * 10]) {
-    for (const step of NICE_STEPS) {
-      const incr = step * decade;
-      const start = Math.floor(lo / incr + 1e-9) * incr;
-      if (start + incr * divisions >= hi - Math.abs(hi) * 1e-9) return [start, start + incr * divisions];
-    }
-  }
-  return [lo, hi];
-}
-
-/**
- * 构造 Y 轴范围函数：聚合挂靠该 scale 的所有可见 series，可配置余量，
- * 最后量化到全局等分格（与其余 Y 轴共线）。
- * 注意：量程完全来自模块内的 seriesMax/seriesMin 增量跟踪，因此各 series 均设置
- * auto: false，跳过 uPlot 每次提交时对全量数据的 min/max 扫描（百万级点数下显著提速）。
- * @param {keyof import('./state.js').Settings['chartCurveNudge']} channel
- * @param {number[]} seriesIndexes - 挂靠在该 scale 上的 series 下标
- * @param {boolean} [symmetric=false] - 温度轴：对称余量，保留负值
- */
-function mkYRange(channel, seriesIndexes, symmetric = false) {
-  return /** @type {any} */ (
-    /** @param {any} u */
-    (u) => {
-      const agg = aggregateVisible(u, seriesIndexes);
-      const divisions = yDivisions(u);
-      appliedYDivisions = divisions;
-      if (agg === null) return [null, null];
-      if ('empty' in agg) return quantizeRange(0, 1, divisions);
-      const h = headroomFrac();
-      let lo;
-      let hi;
-      if (symmetric) {
-        const span = agg.max - agg.min;
-        const padding = span > 0 ? span * h : 1;
-        lo = agg.min - padding;
-        hi = agg.max + padding;
-      } else {
-        const idleCeiling = IDLE_AXIS_CEILING[channel];
-        if (agg.min >= 0 && agg.max <= idleCeiling) {
-          lo = 0;
-          hi = Math.max(idleCeiling, agg.max * (1 + h));
-        } else {
-          [lo, hi] = paddedZeroBased(agg.min, agg.max, h);
-        }
-      }
-      const nudge = (state.settings.chartCurveNudge?.[channel] || 0) / 100;
-      if (nudge !== 0) {
-        const shift = nudge * (hi - lo);
-        // Move curve up (+) by lowering [lo, hi], or down (−) by raising [lo, hi], without clipping samples.
-        lo = Math.min(lo - shift, agg.min);
-        hi = Math.max(hi - shift, agg.max);
-      }
-      return quantizeRange(lo, hi, divisions);
-    }
-  );
-}
-
-// ─── Axis helpers ────────────────────────────────────────────────────────────
-
-/**
- * 智能小数位刻度格式化（与旧版 Chart.js 回调一致）。
- * @param {number} value
- * @returns {string}
- */
-function smartTick(value) {
-  const absVal = Math.abs(value);
-  if (absVal > 0 && absVal < 0.001) return String(parseFloat(value.toFixed(6)));
-  if (absVal > 0 && absVal < 0.1) return String(parseFloat(value.toFixed(5)));
-  if (absVal > 0 && absVal < 1) return String(parseFloat(value.toFixed(4)));
-  return String(parseFloat(value.toFixed(3)));
-}
-
-/**
- * 生成与其余 Y 轴共线的等分刻度（配合 quantizeRange 量化后的整齐量程使用）。
- * 用 min + (max-min)·i/N，避免逐格累加造成跨轴刻度错位。
- * @param {any} u @param {string} scaleKey
- * @returns {number[]}
- */
-function uniformSplits(u, scaleKey) {
-  const scale = u.scales?.[scaleKey];
-  if (scale?.min == null || scale?.max == null) return [];
-  const min = Number(scale.min);
-  const span = Number(scale.max) - min;
-  const n = appliedYDivisions || yDivisions(u);
-  return Array.from({ length: n + 1 }, (_, i) => min + (span * i) / n);
-}
-
-/**
- * Y 轴宽度自适应：按最长刻度文字实测宽度分配，避免小数位多时被裁剪。
- * @param {any} u @param {string[]|null} values @param {number} axisIdx @param {number} cycleNum
- * @returns {number}
- */
-function axisAutoSize(u, values, axisIdx, cycleNum) {
-  const axis = u.axes[axisIdx];
-  // 第二轮布局迭代后直接复用已计算的尺寸，避免布局震荡
-  if (cycleNum > 1) return axis._size;
-  // uPlot caches the active font; measurement must not change its Canvas state behind that cache.
-  const previousFont = u.ctx.font;
-  let size = (axis.ticks?.show ? axis.ticks.size : 0) + axis.gap + 4;
-  const longest = (values ?? []).reduce((acc, v) => (String(v).length > acc.length ? String(v) : acc), '');
-  if (longest !== '') {
-    u.ctx.font = axis.font[0];
-    size += u.ctx.measureText(longest).width / (uPlot.pxRatio || devicePixelRatio || 1);
-  }
-  let titleSize = 0;
-  if (axis.axisTitle) {
-    u.ctx.font = Array.isArray(axis.labelFont) ? axis.labelFont[0] : `12px ${CHART_FONT}`;
-    titleSize = u.ctx.measureText(axis.axisTitle).width / (uPlot.pxRatio || devicePixelRatio || 1) + 8;
-  }
-  u.ctx.font = previousFont;
-  return Math.ceil(Math.max(size, titleSize, 28));
-}
-
-/**
- * 轴顶横向标题占用的上边距（CSS px）。
- * 顶刻度数字相对绘图区顶边居中，大约伸出 6px；再加标题行高与缝隙。
- * 取代 uPlot 默认 ~17px 顶垫，避免标题与顶刻度挤在一起。
- */
-const Y_AXIS_LABEL_PAD = 24;
-
-/**
- * 构造一条 Y 轴配置。
- * 颜色参数为读取 chartTheme 的闭包（uPlot 对 stroke 支持函数形式），换主题后 redraw 即生效。
- * 标题不走 uPlot 的 `label`（只能竖排贴在轴侧并额外占 labelSize），改由 drawYAxisLabels 画在轴顶。
- * @param {string} scaleKey
- * @param {string} label
- * @param {() => string} color
- * @param {number} side - 3=左 1=右
- * @returns {any}
- */
-function mkYAxis(scaleKey, label, color, side) {
-  return {
-    scale: scaleKey,
-    side,
-    stroke: color,
-    axisTitle: label,
-    labelFont: `12px ${CHART_FONT}`,
-    font: `12px ${MONO_FONT}`,
-    // 数字与竖脊之间的空隙；默认朝数字伸出的 ticks 已关闭（见 drawYAxisChrome）
-    gap: 6,
-    size: axisAutoSize,
-    // 等分刻度由 uniformSplits 决定，uPlot 基于 space / incrs 的自动选点被完全覆盖
-    splits: (/** @type {any} */ u) => uniformSplits(u, scaleKey),
-    values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map(smartTick),
-    // 四条 Y 轴画同一套主网格：量程已量化到相同的高度比例，像素级重合；
-    // 令牌是不透明色，重复描边不会叠亮（见 tokens.css 的说明）
-    grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
-    // 关掉 uPlot 朝数字伸出的横刻度：右侧会像负号。竖脊 + 朝图内的短刻度由 drawYAxisChrome 画
-    ticks: { show: false },
-  };
-}
-
-/**
- * 传统坐标轴形态：每条可见 Y 轴一条通道色竖脊；贴着绘图区边缘的轴再朝图内画短刻度。
- * 刻度在竖脊朝图一侧（右侧是 `┤ 1` 而不是 `── 1`），不会被看成负号。
- * 外侧轴（同一侧第二条）脊在轴沟里，短刻度若朝图会戳到内侧轴标题，故只画脊。
- * @param {any} u
- */
-function drawYAxisChrome(u) {
-  const { ctx, bbox } = u;
-  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
-
-  const left = bbox.left;
-  const right = bbox.left + bbox.width;
-  const top = bbox.top;
-  const bottom = bbox.top + bbox.height;
-  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  const tickLen = 5 * pxRatio;
-  const edgeEps = pxRatio * 1.5;
-
-  ctx.save();
-  ctx.lineWidth = pxRatio;
-  ctx.lineCap = 'butt';
-  const offset = (ctx.lineWidth % 2) / 2;
-  ctx.translate(offset, offset);
-
-  const axes = u.axes ?? [];
-  for (let i = 1; i < axes.length; i++) {
-    const axis = axes[i];
-    if (!axis?.show || axis._show === false || axis._pos == null) continue;
-    if (u.scales?.[axis.scale]?.min == null) continue;
-
-    const x = Math.round(axis._pos * pxRatio);
-    const stroke = typeof axis.stroke === 'function' ? axis.stroke(u, i) : axis.stroke;
-    if (!stroke) continue;
-
-    ctx.strokeStyle = stroke;
-    ctx.beginPath();
-    ctx.moveTo(x, top);
-    ctx.lineTo(x, bottom);
-
-    // side 3=左 → 刻度向右进图；side 1=右 → 刻度向左进图
-    const inward = axis.side === 3 ? 1 : axis.side === 1 ? -1 : 0;
-    const atPlotEdge =
-      inward === 1 ? Math.abs(x - left) <= edgeEps : inward === -1 ? Math.abs(x - right) <= edgeEps : false;
-    if (atPlotEdge && Array.isArray(axis._splits)) {
-      for (const v of axis._splits) {
-        const y = Math.round(u.valToPos(v, axis.scale, true));
-        if (y < top || y > bottom) continue;
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + inward * tickLen, y);
-      }
-    }
-    ctx.stroke();
-  }
-
-  ctx.strokeStyle = chartTheme.grid;
-  ctx.beginPath();
-  ctx.moveTo(left, bottom);
-  ctx.lineTo(right, bottom);
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-/**
- * 在每条可见 Y 轴顶部画横向标题。
- * 轴沟只有约 30px，标题宽约 50px，居中于列会和邻居叠字。
- * 贴着绘图区的轴：标题从竖脊朝图内伸出；外侧轴：贴画布外沿。
- * @param {any} u
- */
-function drawYAxisLabels(u) {
-  const { ctx, bbox } = u;
-  if (!bbox || bbox.width <= 0 || bbox.height <= 0) return;
-
-  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  const axes = u.axes ?? [];
-  const canvasW = ctx.canvas.width;
-  const left = bbox.left;
-  const right = bbox.left + bbox.width;
-  const gap = 4 * pxRatio;
-  const y = bbox.top - 8 * pxRatio;
-  const edgeEps = pxRatio * 1.5;
-
-  ctx.save();
-  ctx.textBaseline = 'bottom';
-
-  for (let i = 1; i < axes.length; i++) {
-    const axis = axes[i];
-    if (!axis?.show || axis._show === false || axis._pos == null) continue;
-    if (u.scales?.[axis.scale]?.min == null) continue;
-    const title = axis.axisTitle;
-    if (!title) continue;
-
-    const stroke = typeof axis.stroke === 'function' ? axis.stroke(u, i) : axis.stroke;
-    if (!stroke) continue;
-
-    const pos = axis._pos * pxRatio;
-    const atLeftEdge = axis.side === 3 && Math.abs(pos - left) <= edgeEps;
-    const atRightEdge = axis.side === 1 && Math.abs(pos - right) <= edgeEps;
-
-    let x = pos;
-    /** @type {CanvasTextAlign} */
-    let align = 'center';
-    if (axis.side === 3) {
-      align = 'left';
-      x = atLeftEdge ? pos + gap : gap;
-    } else if (axis.side === 1) {
-      align = 'right';
-      x = atRightEdge ? pos - gap : canvasW - gap;
-    }
-
-    ctx.font = Array.isArray(axis.labelFont) ? axis.labelFont[0] : `12px ${CHART_FONT}`;
-    ctx.fillStyle = stroke;
-    ctx.textAlign = align;
-    ctx.fillText(title, x, y);
-  }
-
-  ctx.restore();
-}
-
-// ─── Markers ─────────────────────────────────────────────────────────────────
-
-/** 最多叠几行标签；更多的重叠标记只画竖线，标签可在标记列表里查看。 */
-const MARKER_LABEL_ROWS = 3;
-
-/**
- * 打点：贯穿绘图区的竖线，顶部带标签。标签按行错开，靠右边缘时翻到线的左侧。
- * 录制中刚打、还没等到下一行的点不画。
- * @param {any} u
- */
-function drawMarkers(u) {
-  const cols = state.chartSeries;
-  const list = markersOf(cols);
-  const { ctx, bbox } = u;
-  if (!list.length || !bbox || bbox.width <= 0 || bbox.height <= 0) return;
-  const min = u.scales.x?.min;
-  const max = u.scales.x?.max;
-  if (!(max >= min)) return;
-  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  const left = bbox.left;
-  const right = bbox.left + bbox.width;
-  const top = bbox.top;
-  const bottom = bbox.top + bbox.height;
-  const fontPx = Math.round(11 * pxRatio);
-  const padX = Math.round(4 * pxRatio);
-  const boxH = fontPx + Math.round(6 * pxRatio);
-  const gap = Math.round(3 * pxRatio);
-  /** 每一行标签已占用到的右边缘。 */
-  const rowEnds = new Array(MARKER_LABEL_ROWS).fill(Number.NEGATIVE_INFINITY);
-  const lineWidth = Math.max(1, Math.round(pxRatio));
-  const n = cols.x.length;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(left, top, bbox.width, bbox.height);
-  ctx.clip();
-  ctx.font = `${fontPx}px ${CHART_FONT}`;
-  ctx.textBaseline = 'middle';
-  ctx.lineWidth = lineWidth;
-  for (const marker of list) {
-    if (marker.index >= n) break;
-    const x = cols.x.valueAt(marker.index);
-    if (!(x >= min && x <= max)) continue;
-    // 奇数线宽落在半像素上才是一条实线
-    const px = Math.round(u.valToPos(x, 'x', true)) + (lineWidth % 2 ? 0.5 : 0);
-    // 线用坐标轴文字色，比标签文字浅一档：标注不该比数据更抢眼
-    ctx.strokeStyle = chartTheme.axisText;
-    ctx.beginPath();
-    ctx.moveTo(px, top);
-    ctx.lineTo(px, bottom);
-    ctx.stroke();
-
-    const width = Math.ceil(ctx.measureText(marker.label).width) + padX * 2;
-    let x0 = px + gap;
-    if (x0 + width > right) x0 = px - gap - width;
-    const row = rowEnds.findIndex((end) => x0 > end);
-    if (row === -1) continue;
-    rowEnds[row] = x0 + width + gap;
-    const y0 = top + gap + row * (boxH + gap);
-    ctx.fillStyle = chartTheme.markerBg;
-    ctx.fillRect(x0, y0, width, boxH);
-    ctx.fillStyle = chartTheme.marker;
-    ctx.textAlign = 'left';
-    ctx.fillText(marker.label, x0 + padX, y0 + boxH / 2);
-  }
-  ctx.restore();
-}
-
-/**
- * 导航缩略图上的标记：只画细竖线，告诉用户哪里有点可以跳过去看。
- * @param {any} u
- */
-function drawNavigatorMarkers(u) {
-  const cols = state.chartSeries;
-  const list = markersOf(cols);
-  const { ctx, bbox } = u;
-  if (!list.length || !bbox || bbox.width <= 0 || bbox.height <= 0) return;
-  const pxRatio = uPlot.pxRatio || devicePixelRatio || 1;
-  const lineWidth = Math.max(1, Math.round(pxRatio));
-  const n = cols.x.length;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height);
-  ctx.clip();
-  ctx.strokeStyle = chartTheme.axisText;
-  ctx.lineWidth = lineWidth;
-  ctx.beginPath();
-  for (const marker of list) {
-    if (marker.index >= n) break;
-    const px = Math.round(u.valToPos(cols.x.valueAt(marker.index), 'x', true)) + (lineWidth % 2 ? 0.5 : 0);
-    ctx.moveTo(px, bbox.top);
-    ctx.lineTo(px, bbox.top + bbox.height);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
 // ─── Legend ──────────────────────────────────────────────────────────────────
 
 /** 渲染顶部图例（仅列出当前可见的曲线，与旧版 generateLabels 过滤逻辑一致）。 */
@@ -2752,405 +1944,7 @@ export function refreshChartLanguage() {
   chart.redraw?.(true, true);
 }
 
-// ─── Tooltip ─────────────────────────────────────────────────────────────────
-
-/**
- * 缺测在 Float64Array 里只能是 NaN，uPlot 只把 == null 当缺口。
- * NaN 会让 valToPos 得到 NaN，光标点 transform 无效，钉在绘图区左上角。
- * 返回 null 让 uPlot 把该 series 的 hover 点移出视口。
- * @param {any} u
- * @param {number} seriesIdx
- * @param {number|null} hoveredIdx
- * @returns {number|null}
- */
-/**
- * 桶显示时 uPlot 的 idx 是顶点下标，用 X 二分回全量列。
- * @param {any} u
- * @param {number|null} hoveredIdx
- * @returns {number|null}
- */
-function realIndexFromCursor(u, hoveredIdx) {
-  if (hoveredIdx == null || appliedMainGen !== dataGen) return null;
-  const left = u.cursor.left;
-  if (!Number.isFinite(left) || left < 0) return null;
-  const xVal = u.posToVal(left, 'x');
-  if (!Number.isFinite(xVal) || state.chartSeries.x.length === 0) return null;
-  return nearestIndex(state.chartSeries.x, state.chartSeries.x.length, xVal);
-}
-
-/** Position hover markers on the same raw sample used by the tooltip.
- * @param {any} u @param {number} seriesIdx
- */
-function cursorPointBox(u, seriesIdx) {
-  const index = realIndexFromCursor(u, u.cursor.idx);
-  const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[seriesIdx - 1]);
-  const value = index == null ? Number.NaN : state.chartSeries[field]?.valueAt(index);
-  if (index == null || !Number.isFinite(value)) return { left: -100, top: -100, width: 0, height: 0 };
-  return {
-    left: u.valToPos(state.chartSeries.x.valueAt(index), 'x') - 4,
-    top: u.valToPos(value, SERIES_SCALES[seriesIdx - 1]) - 4,
-    width: 8,
-    height: 8,
-  };
-}
-
-function cursorDataIdx(u, seriesIdx, hoveredIdx) {
-  if (hoveredIdx == null) return null;
-  const realIdx = realIndexFromCursor(u, hoveredIdx);
-  if (realIdx == null) return null;
-  if (seriesIdx === 0) return hoveredIdx;
-  const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[seriesIdx - 1]);
-  const y = state.chartSeries[field]?.valueAt(realIdx);
-  return Number.isFinite(y) ? hoveredIdx : null;
-}
-
-/**
- * 悬停 tooltip 插件：index 模式（显示最近 X 处所有可见曲线的值），
- * 标题为相对时间，各行带颜色标记与单位，贴近旧版 Chart.js tooltip 样式。
- * @returns {any}
- */
-function tooltipPlugin() {
-  /** @type {HTMLDivElement|null} */
-  let tt = null;
-  /** @type {HTMLDivElement|null} */
-  let title = null;
-  /** @type {{ row: HTMLDivElement, swatch: HTMLSpanElement, text: Text }[]} */
-  const rows = [];
-  /** @type {number|null} */
-  let frame = null;
-  /** @type {ResizeObserver|null} */
-  let observer = null;
-  let lastIndex = -1;
-  let lastGen = -1;
-  let lastMask = -1;
-  let lastTheme = -1;
-  let lastLanguage = '';
-  let visibleRows = 0;
-  let shown = false;
-  let sizeDirty = true;
-  let overDirty = true;
-  let width = 0;
-  let height = 0;
-  let overWidth = 0;
-  let overHeight = 0;
-  /** @type {(() => void)|null} */
-  let invalidate = null;
-
-  function hide() {
-    if (shown && tt) tt.style.display = 'none';
-    shown = false;
-  }
-
-  /** @param {any} u */
-  function commit(u) {
-    if (!tt || !title || !monitorVisible()) return;
-    const { idx, left, top } = u.cursor;
-    if (u.over?.classList.contains('is-panning') || idx == null || left == null || left < 0 || top == null || top < 0) {
-      hide();
-      return;
-    }
-    // 从指针时间查原始点；不使用桶中点，否则同一桶内移动会吸附到错误样本。
-    const realIdx = realIndexFromCursor(u, idx);
-    const xVal = realIdx == null ? null : state.chartSeries.x.valueAt(realIdx);
-    if (realIdx == null || xVal == null || !Number.isFinite(xVal)) {
-      hide();
-      return;
-    }
-    let mask = 0;
-    for (let i = 0; i < FIELDS.length; i++) {
-      if (u.series[i + 1]?.show) mask |= 1 << i;
-    }
-    const language = getResolvedLanguage();
-    if (
-      realIdx !== lastIndex ||
-      dataGen !== lastGen ||
-      mask !== lastMask ||
-      tooltipThemeGen !== lastTheme ||
-      language !== lastLanguage
-    ) {
-      const heading = formatRelativeHMS(Number(xVal));
-      if (title.textContent !== heading) title.textContent = heading;
-      visibleRows = 0;
-      for (let i = 0; i < rows.length; i++) {
-        const { row, swatch, text } = rows[i];
-        const field = /** @type {keyof typeof state.chartSeries} */ (FIELDS[i]);
-        const value = state.chartSeries[field]?.valueAt(realIdx);
-        const show = !!(mask & (1 << i)) && Number.isFinite(value);
-        const display = show ? '' : 'none';
-        if (row.style.display !== display) row.style.display = display;
-        if (show) {
-          const label = `${chartLabel(i)}: ${Number(value).toFixed(3)}${UNITS[i]}`;
-          if (text.nodeValue !== label) text.nodeValue = label;
-          visibleRows++;
-        }
-        if (lastTheme !== tooltipThemeGen) swatch.style.background = /** @type {any} */ (chartTheme)[FIELDS[i]];
-      }
-      lastIndex = realIdx;
-      lastGen = dataGen;
-      lastMask = mask;
-      lastTheme = tooltipThemeGen;
-      lastLanguage = language;
-      sizeDirty = true;
-    }
-    if (visibleRows === 0) {
-      hide();
-      return;
-    }
-    if (!shown) {
-      tt.style.display = 'block';
-      shown = true;
-      sizeDirty = true;
-      overDirty = true;
-    }
-    // 只在内容 / 显隐 / 主题 / 字体 / 尺寸变化后读几何；纯移动只写 transform。
-    if (overDirty) {
-      overWidth = u.over.clientWidth;
-      overHeight = u.over.clientHeight;
-      overDirty = false;
-    }
-    if (sizeDirty) {
-      width = tt.offsetWidth;
-      height = tt.offsetHeight;
-      sizeDirty = false;
-    }
-    let x = left + 12;
-    if (x + width > overWidth) x = left - width - 12;
-    let y = top + 12;
-    if (y + height > overHeight) y = top - height - 12;
-    const transform = `translate(${Math.max(0, Math.round(x))}px, ${Math.max(0, Math.round(y))}px)`;
-    if (tt.style.transform !== transform) tt.style.transform = transform;
-  }
-
-  /** @param {any} u */
-  function schedule(u) {
-    if (!tt || frame != null || !monitorVisible()) return;
-    frame = requestAnimationFrame(() => {
-      frame = null;
-      commit(u);
-    });
-  }
-
-  return {
-    hooks: {
-      init: (/** @type {any} */ u) => {
-        tt = document.createElement('div');
-        tt.className = 'chart-tooltip';
-        tt.style.display = 'none';
-        title = document.createElement('div');
-        title.className = 'chart-tooltip-title';
-        tt.appendChild(title);
-        for (let i = 0; i < FIELDS.length; i++) {
-          const row = document.createElement('div');
-          row.className = 'chart-tooltip-row';
-          const swatch = document.createElement('span');
-          swatch.className = 'chart-tooltip-swatch';
-          const text = document.createTextNode('');
-          row.appendChild(swatch);
-          row.appendChild(text);
-          tt.appendChild(row);
-          rows.push({ row, swatch, text });
-        }
-        u.over.appendChild(tt);
-        invalidate = () => {
-          sizeDirty = true;
-          overDirty = true;
-          schedule(u);
-        };
-        observer = new ResizeObserver(invalidate);
-        observer.observe(u.over);
-        observer.observe(tt);
-        document.fonts?.addEventListener('loadingdone', invalidate);
-      },
-      setCursor: schedule,
-      setData: schedule,
-      setSeries: schedule,
-      draw: schedule,
-      setSize: () => invalidate?.(),
-      destroy: () => {
-        if (frame != null) cancelAnimationFrame(frame);
-        frame = null;
-        observer?.disconnect();
-        if (invalidate) document.fonts?.removeEventListener('loadingdone', invalidate);
-        tt?.remove();
-        tt = null;
-        title = null;
-        rows.length = 0;
-      },
-    },
-  };
-}
-
 // ─── Sizing ──────────────────────────────────────────────────────────────────
-
-/** @type {(() => void)|undefined} */
-let stopWheelZoom;
-/** @type {(() => void)|undefined} */
-let stopChartPan;
-const WHEEL_SETTLE_MS = 100;
-const WHEEL_EDGE_PX = 4;
-
-/** Coalesce wheel input from the plot and overview into the same time window.
- * @param {HTMLElement|undefined} plot @param {HTMLElement|null} overview
- */
-function bindChartWheel(plot, overview) {
-  /** @type {{min:number,max:number,dataMin:number,dataMax:number,left:number,width:number,surface:HTMLElement}|null} */
-  let zoom = null;
-  /** @type {ReturnType<typeof setTimeout>|null} */
-  let settle = null;
-  stopWheelZoom = () => {
-    if (!zoom) return;
-    zoom = null;
-    if (settle !== null) clearTimeout(settle);
-    settle = null;
-    displayFrames.cancel('chart-wheel');
-    setRangeDragging(false, true);
-  };
-
-  /** @param {boolean} finished */
-  function drawZoomFrame(finished) {
-    if (!zoom || !monitorVisible()) {
-      stopWheelZoom?.();
-      return;
-    }
-    let { min, max } = zoom;
-    const { dataMin, dataMax } = zoom;
-    if (finished) {
-      // The overview domain is held during the gesture, but samples can still
-      // arrive. Rebase the chosen duration onto the actual tail before settling.
-      const latest = state.chartSeries.x.at(-1);
-      ({ min, max } = settleWheelZoomWindow({ min, max, dataMin, dataMax, latest }));
-      stopWheelZoom?.();
-    }
-    state.__applyChartXWindow?.(min, max, finished, finished ? undefined : [dataMin, dataMax]);
-    updateCharts('interaction', { force: false, reason: finished ? 'release' : 'interaction' });
-  }
-
-  /** @param {WheelEvent} event */
-  function onWheel(event) {
-    const xs = state.chartSeries.x;
-    if (xs.length < 2 || (rangeDragging && !zoom)) return;
-    const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
-    if (factor === 1) return;
-    const surface = /** @type {HTMLElement} */ (event.currentTarget);
-    const { left, width } = zoom?.surface === surface ? zoom : surface.getBoundingClientRect();
-    if (!width) return;
-    event.preventDefault();
-
-    const dataMin = zoom?.dataMin ?? xs.at(0);
-    const dataMax = zoom?.dataMax ?? xs.at(-1);
-    if (!(dataMax > dataMin)) return;
-    let [min, max] = zoom ? [zoom.min, zoom.max] : xRange();
-    if (!zoom && state.chartWindow.mode !== 'frozen') {
-      const duration = max - min;
-      max = dataMax;
-      min = state.chartWindow.mode === 'full' ? dataMin : Math.max(dataMin, max - duration);
-    }
-    const offset = event.clientX - left;
-    const edge = Math.min(WHEEL_EDGE_PX, width / 4);
-    const pivot = wheelZoomPivot({
-      ratio: offset <= edge ? 0 : offset >= width - edge ? 1 : offset / width,
-      min,
-      max,
-      dataMin,
-      dataMax,
-      overview: surface === overview,
-    });
-    const next = zoomTimeWindow({
-      min,
-      max,
-      pivot,
-      factor,
-      dataMin,
-      dataMax,
-      minSpan: minZoomSpan(state.settings.sampleRate),
-    });
-    const full = next.min === dataMin && next.max === dataMax;
-    if (next.min === min && next.max === max && !(full && !zoom && state.chartWindow.mode !== 'full')) return;
-    zoom = { ...next, dataMin, dataMax, left, width, surface };
-    setRangeDragging(true, true);
-    if (full) {
-      // Commit the live full-history state immediately. Do not publish a
-      // frozen window covering the old tail while waiting for wheel idle.
-      drawZoomFrame(true);
-      return;
-    }
-    if (settle !== null) clearTimeout(settle);
-    settle = setTimeout(() => drawZoomFrame(true), WHEEL_SETTLE_MS);
-    displayFrames.schedule('chart-wheel', () => drawZoomFrame(false), 1);
-  }
-
-  plot?.addEventListener('wheel', onWheel, { passive: false });
-  overview?.addEventListener('wheel', onWheel, { passive: false });
-}
-
-/** @param {HTMLElement|undefined} over */
-function bindChartPan(over) {
-  if (!over) return;
-  /** @type {{pointer: number, origin: number, x: number, min: number, max: number, width: number, active: boolean}|null} */
-  let pan = null;
-  over.classList.add('is-pannable');
-
-  stopChartPan = () => {
-    if (!pan) return;
-    const { pointer, active } = pan;
-    pan = null;
-    displayFrames.cancel('chart-pan');
-    over.classList.remove('is-panning');
-    if (over.hasPointerCapture(pointer)) over.releasePointerCapture(pointer);
-    if (active) setRangeDragging(false, true);
-  };
-
-  /** @param {boolean} settled */
-  function drawPan(settled) {
-    if (!pan?.active) return;
-    const { origin, x, min, max, width } = pan;
-    const xs = state.chartSeries.x;
-    const next = panTimeWindow(min, max, ((origin - x) / width) * (max - min), xs.at(0), xs.at(-1));
-    if (settled) stopChartPan?.();
-    const [previousMin, previousMax] = xRange();
-    if (!settled && next.min === previousMin && next.max === previousMax) return;
-    state.__applyChartXWindow?.(next.min, next.max, settled);
-    updateCharts('interaction', { force: false, reason: settled ? 'release' : 'interaction' });
-  }
-
-  over.addEventListener('pointerdown', (event) => {
-    const xs = state.chartSeries.x;
-    if (!event.isPrimary || event.button !== 0 || pan || xs.length < 2) return;
-    const [min, max] = xRange();
-    if (max - min >= xs.at(-1) - xs.at(0)) return;
-    const { width } = over.getBoundingClientRect();
-    if (!width) return;
-    stopWheelZoom?.();
-    if (rangeDragging) return;
-    pan = { pointer: event.pointerId, origin: event.clientX, x: event.clientX, min, max, width, active: false };
-    over.setPointerCapture(event.pointerId);
-  });
-  over.addEventListener('pointermove', (event) => {
-    if (!pan || pan.pointer !== event.pointerId) return;
-    pan.x = event.clientX;
-    if (!pan.active) {
-      if (Math.abs(pan.x - pan.origin) < 3) return;
-      stopWheelZoom?.();
-      pan.active = true;
-      over.classList.add('is-panning');
-      setRangeDragging(true, true);
-    }
-    displayFrames.schedule('chart-pan', () => drawPan(false), 1);
-  });
-  /** @param {PointerEvent} event */
-  function finish(event) {
-    if (!pan || pan.pointer !== event.pointerId) return;
-    if (pan.active) {
-      if (event.type === 'pointerup') pan.x = event.clientX;
-      drawPan(true);
-    } else {
-      stopChartPan?.();
-    }
-  }
-  over.addEventListener('pointerup', finish);
-  over.addEventListener('pointercancel', finish);
-  over.addEventListener('lostpointercapture', finish);
-}
 
 let resizeDirty = false;
 let forceResizePaint = false;
@@ -3256,15 +2050,15 @@ export function initChart() {
     cursor: {
       y: false,
       drag: { setScale: false, x: false, y: false },
-      points: { size: 8, bbox: cursorPointBox },
-      dataIdx: cursorDataIdx,
+      points: { size: 8, bbox: cursorTooltip.cursorPointBox },
+      dataIdx: cursorTooltip.cursorDataIdx,
     },
     scales: {
       x: { time: false, range: /** @type {any} */ (xRange) },
-      voltage: { range: mkYRange('voltage', VOLTAGE_SCALE_SERIES) },
-      current: { range: mkYRange('current', [2]) },
-      power: { range: mkYRange('power', [3]) },
-      temp: { range: mkYRange('temp', [4], true) },
+      voltage: { range: chartAxes.mkYRange('voltage', VOLTAGE_SCALE_SERIES) },
+      current: { range: chartAxes.mkYRange('current', [2]) },
+      power: { range: chartAxes.mkYRange('power', [3]) },
+      temp: { range: chartAxes.mkYRange('temp', [4], true) },
     },
     series: [
       {},
@@ -3297,23 +2091,23 @@ export function initChart() {
         grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
         ticks: { show: true, stroke: () => chartTheme.grid, width: 1, size: 8 },
       },
-      mkYAxis('voltage', chartAxisTitle('voltage', 'V'), () => chartTheme.voltage, 3),
-      mkYAxis('current', chartAxisTitle('current', 'A'), () => chartTheme.current, 3),
-      mkYAxis('power', chartAxisTitle('power', 'W'), () => chartTheme.power, 1),
-      mkYAxis('temp', chartAxisTitle('temperature', '°C'), () => chartTheme.tempAxis, 1),
+      chartAxes.mkYAxis('voltage', chartAxisTitle('voltage', 'V'), () => chartTheme.voltage, 3),
+      chartAxes.mkYAxis('current', chartAxisTitle('current', 'A'), () => chartTheme.current, 3),
+      chartAxes.mkYAxis('power', chartAxisTitle('power', 'W'), () => chartTheme.power, 1),
+      chartAxes.mkYAxis('temp', chartAxisTitle('temperature', '°C'), () => chartTheme.tempAxis, 1),
     ],
     hooks: {
-      drawAxes: [drawYAxisChrome, drawYAxisLabels],
-      drawSeries: [drawBucketFill, drawBucketRaster],
-      draw: [drawMarkers],
-      setSize: [syncDivisionsAfterResize],
+      drawAxes: [chartAxes.drawYAxisChrome, chartAxes.drawYAxisLabels],
+      drawSeries: [rasterizer.drawBucketFill, rasterizer.drawBucketRaster],
+      draw: [(/** @type {any} */ u) => drawMarkers(u, CHART_FONT)],
+      setSize: [chartAxes.syncDivisionsAfterResize],
     },
-    plugins: [tooltipPlugin()],
+    plugins: [cursorTooltip.tooltipPlugin()],
   };
 
   state.mainChart = new uPlot(opts, /** @type {any} */ (mainData), host);
-  bindChartWheel(state.mainChart.over, document.getElementById('timeline-track'));
-  bindChartPan(state.mainChart.over);
+  interactions.bindChartWheel(state.mainChart.over, document.getElementById('timeline-track'));
+  interactions.bindChartPan(state.mainChart.over);
   observeResize(host, state.mainChart, () => {
     cancelFrameProbe();
   });

@@ -375,3 +375,57 @@ test('diagnostics 是真机验收的读数来源：逐条计数，背压单独�
   // 刻意的取舍：连陈旧 generation 的错误也计入。中途重连过的运行应当重测，而不是让闸门替你放行。
   assert.match(String(d.lastError), /capacity exceeded/);
 });
+
+test('replace honours getPdEnabled hook and explicit pdEnabled override', async () => {
+  const h = harness({ getPdEnabled: () => true });
+  h.stream.replace();
+  await h.stream.settle();
+  const first = h.calls.find((call) => call.command === 'set_recording_segment');
+  assert.deepEqual(first?.args, { generation: 1, segment: 0, pdEnabled: true });
+
+  h.calls.length = 0;
+  h.stream.replace({ pdEnabled: false });
+  await h.stream.settle();
+  const second = h.calls.find((call) => call.command === 'set_recording_segment');
+  assert.deepEqual(second?.args, { generation: 1, segment: 0, pdEnabled: false });
+});
+
+test('in-flight ACK rejecting after abandon_device_stream does not trip terminal fail', async () => {
+  /** @type {((error: Error) => void)|null} */
+  let rejectAck = null;
+  const h = harness({
+    drainTimeoutMs: 15,
+    invoke: async (command, args) => {
+      h.calls.push({ command, args });
+      if (command === 'set_recording_segment') {
+        return {
+          generation: args.generation,
+          after_seq: h.boundary,
+          segment: args.segment,
+          received_us: h.boundary * 10000,
+          wall_anchor_ms: 1704067200000,
+          rate_ms: 10,
+        };
+      }
+      if (command === 'drain_device_stream') return h.end;
+      if (command === 'ack_device_stream') {
+        return new Promise((_resolve, reject) => {
+          rejectAck = reject;
+        });
+      }
+    },
+  });
+  await h.stream.begin(0);
+  h.end = { generation: 1, last_seq: 2 };
+  h.stream.handleBatch([sample(1)]);
+  await Promise.resolve();
+  assert.ok(rejectAck, 'an ACK should be in flight');
+
+  await assert.rejects(h.stream.drain(), /timed out/);
+  await h.stream.drain();
+  rejectAck(new Error('no stream session'));
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(h.errors.length, 0, 'abandoned session ACK rejection must not raise a spurious stream error');
+});

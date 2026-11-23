@@ -241,22 +241,29 @@ export function formatTriggerHistoryEntry(entry) {
  */
 export function trimTriggerHistory(entries) {
   const kept = [...entries];
-  const size = () => kept.map(formatTriggerHistoryEntry).join('\n\n').length;
-  while (kept.length > 1 && size() > LOG_LIMIT) {
+  if (kept.length === 0) return kept;
+  const lengths = kept.map((entry) => formatTriggerHistoryEntry(entry).length);
+  let total = lengths.reduce((sum, len) => sum + len, 0) + Math.max(0, kept.length - 1) * 2;
+  while (kept.length > 1 && total > LOG_LIMIT) {
     let index = kept.length - 1;
     while (index >= 0 && kept[index].status === 'running') index--;
     if (index === -1) break;
     kept.splice(index, 1);
+    const removed = lengths.splice(index, 1)[0];
+    total -= removed + 2;
   }
-  while (size() > LOG_LIMIT) {
+  while (total > LOG_LIMIT) {
     let index = kept.length - 1;
     while (index >= 0 && !kept[index].progress && !kept[index].reply) index--;
     if (index === -1) break;
     const entry = { ...kept[index], truncated: true };
     kept[index] = entry;
     const field = entry.progress ? 'progress' : 'reply';
-    const end = entry[field].indexOf('\n', Math.max(0, size() - LOG_LIMIT - 1));
+    const end = entry[field].indexOf('\n', Math.max(0, total - LOG_LIMIT - 1));
     entry[field] = end === -1 ? '' : entry[field].slice(end + 1);
+    const nextLength = formatTriggerHistoryEntry(entry).length;
+    total += nextLength - lengths[index];
+    lengths[index] = nextLength;
   }
   return kept;
 }

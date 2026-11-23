@@ -50,7 +50,6 @@ pub(super) fn encode(
 ) -> Result<String, String> {
     let options = &payload.options;
     let canvas = skia::Canvas::new(options, &payload.palette)?;
-    let mut rgba = vec![0u8; options.width as usize * options.height as usize * 4];
     let mut muxer: Option<mp4::Muxer> = None;
     let mut samples: Vec<Sample> = Vec::new();
     let count = payload.frames.t.len();
@@ -59,9 +58,8 @@ pub(super) fn encode(
             return Err("video encoding was cancelled".into());
         }
         canvas.draw_frame(payload, index);
-        canvas.copy_pixels(&mut rgba);
-        encoder
-            .push(&rgba, index, cancel, &mut samples)
+        canvas
+            .with_pixels(|rgba| encoder.push(rgba, index, cancel, &mut samples))
             .map_err(|error| format!("cannot encode video frame {index}: {error}"))?;
         drain(&mut muxer, options, path, &*encoder, &mut samples)?;
         progress((index + 1) as f64 / count.max(1) as f64);

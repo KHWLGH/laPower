@@ -256,6 +256,40 @@ pub(crate) async fn pd_export_pick(
     result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
+#[tauri::command]
+pub(crate) async fn text_export_pick(
+    default_name: String,
+    title: Option<String>,
+    filter_name: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<Opened>, crate::app_error::AppError> {
+    let result: Result<Option<Opened>, String> = async {
+        let Some(path) = dialog_path(app, move |builder| {
+            builder
+                .set_title(title.unwrap_or_else(|| "Export log".into()))
+                .add_filter(filter_name.unwrap_or_else(|| "Text file".into()), &["txt"])
+                .set_file_name(default_name)
+                .blocking_save_file()
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let file = File::create(&path).map_err(|error| format!("无法创建文件: {error}"))?;
+        let handle = registry(&state)?.add_writer(Writer {
+            file: BufWriter::with_capacity(WRITE_BUFFER, file),
+            path: path.clone(),
+            patchable: 0,
+            dirty: false,
+            staged_target: None,
+        })?;
+        Ok(Some(opened(handle, &path, 0)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
+}
+
 #[derive(Serialize)]
 pub(crate) struct PairedOpened {
     csv: Opened,
@@ -542,6 +576,53 @@ pub(crate) async fn csv_import_pick(
     result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
 }
 
+/// Ask which PD capture file to import and open it for backend streaming.
+#[tauri::command]
+pub(crate) async fn pd_import_pick(
+    title: Option<String>,
+    filter_name: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<Opened>, crate::app_error::AppError> {
+    let result: Result<Option<Opened>, String> = async {
+        let Some(path) = dialog_path(app, move |builder| {
+            builder
+                .set_title(title.unwrap_or_else(|| "Import PD capture".into()))
+                .add_filter(
+                    filter_name.unwrap_or_else(|| "PD capture".into()),
+                    &["json"],
+                )
+                .blocking_pick_file()
+        })
+        .await?
+        else {
+            return Ok(None);
+        };
+        let file = File::open(&path).map_err(|error| format!("无法打开文件: {error}"))?;
+        let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+        let handle = registry(&state)?.add_reader(Reader {
+            file: BufReader::with_capacity(READ_CHUNK, file),
+        })?;
+        Ok(Some(opened(handle, &path, size)))
+    }
+    .await;
+    result.map_err(|detail| crate::app_error::AppError::new("backendFailure", detail))
+}
+
+/// Transfer exclusive ownership of an open reader handle to a backend streaming task.
+pub(crate) fn take_reader(
+    state: &State<'_, AppState>,
+    handle: u32,
+) -> Result<BufReader<File>, String> {
+    let reader = registry(state)?
+        .readers
+        .remove(&handle)
+        .ok_or("读取句柄已关闭")?;
+    let mutex = Arc::try_unwrap(reader).map_err(|_| "读取句柄正忙")?;
+    let reader = mutex.into_inner().map_err(|_| "读取句柄已损坏")?;
+    Ok(reader.file)
+}
+
 /// The next slice of an import, up to 4 MiB; empty once the file is exhausted.
 #[tauri::command(async)]
 pub(crate) fn csv_read_chunk(
@@ -591,7 +672,8 @@ pub(crate) fn csv_write_chunk(
     state: State<'_, AppState>,
 ) -> Result<(), crate::app_error::AppError> {
     let result: Result<(), String> = (|| {
-        let handle = header_u64(&request, "x-handle")? as u32;
+        let handle =
+            u32::try_from(header_u64(&request, "x-handle")?).map_err(|_| "无效的文件句柄")?;
         let bytes = raw_body(&request)?;
         let writer = writer(&state, handle)?;
         let mut writer = writer.lock().map_err(|_| "写入句柄已损坏")?;
@@ -611,7 +693,8 @@ pub(crate) fn csv_write_patch(
     state: State<'_, AppState>,
 ) -> Result<(), crate::app_error::AppError> {
     let result: Result<(), String> = (|| {
-        let handle = header_u64(&request, "x-handle")? as u32;
+        let handle =
+            u32::try_from(header_u64(&request, "x-handle")?).map_err(|_| "无效的文件句柄")?;
         let offset = header_u64(&request, "x-offset")?;
         let bytes = raw_body(&request)?;
         let writer = writer(&state, handle)?;

@@ -4,6 +4,7 @@
  * For original project contributions; see COPYRIGHT.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   bitsToHexWord,
@@ -323,4 +324,18 @@ test('nextMessageIndex skips dividers', () => {
   assert.equal(nextMessageIndex(entries, indices, 1, 1), 3);
   assert.equal(nextMessageIndex(entries, indices, 3, 1), -1);
   assert.equal(nextMessageIndex(entries, indices, 3, -1), 1);
+});
+
+test('summarize and note formatters match the shared Rust/JS golden fixture', () => {
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/pd-summary-golden.json', import.meta.url), 'utf8'));
+  assert.ok(fixture.messages.length >= 8);
+  for (const item of fixture.messages) {
+    assert.deepEqual(summarize(item.meta), item.expected, `summary drifted for ${item.name}`);
+  }
+  for (const item of fixture.capNotes) {
+    assert.equal(formatCapNote(item.quicks), item.expected, `capNote drifted for ${item.name}`);
+  }
+  for (const item of fixture.requestNotes) {
+    assert.equal(formatRequestNote(item.quick), item.expected, `requestNote drifted for ${item.quick}`);
+  }
 });

@@ -170,6 +170,11 @@ impl Canvas {
         out.copy_from_slice(self.pixmap.borrow().data());
     }
 
+    #[cfg_attr(windows, allow(dead_code))]
+    pub(super) fn with_pixels<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
+        f(self.pixmap.borrow().data())
+    }
+
     pub(super) fn save_png(&self, path: &std::path::Path) -> Result<(), String> {
         self.pixmap
             .borrow()

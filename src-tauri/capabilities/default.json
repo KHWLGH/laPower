@@ -21,8 +21,6 @@
     "decorum:allow-show-snap-overlay",
     "dialog:allow-open",
     "dialog:allow-save",
-    "fs:default",
-    "fs:allow-write-text-file",
     "store:default"
   ]
 }

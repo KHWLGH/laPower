@@ -36,6 +36,17 @@ export function pickPdExportFile(defaultName) {
   return invoke('pd_export_pick', { defaultName, title: t('pdExportTitle'), filterName: t('pdFile') });
 }
 
+/**
+ * 弹出保存对话框并创建纯文本导出文件；取消时为 null。
+ * @param {string} defaultName
+ * @param {string} title
+ * @param {string} filterName
+ * @returns {Promise<OpenedFile|null>}
+ */
+export function pickTextExportFile(defaultName, title, filterName) {
+  return invoke('text_export_pick', { defaultName, title, filterName });
+}
+
 /** @param {string} defaultName @returns {Promise<OpenedFile|null>} */
 export function pickPngExportFile(defaultName) {
   return invoke('png_export_pick', {
@@ -107,6 +118,30 @@ export function videoExportCapability(options) {
 /** @returns {Promise<OpenedFile|null>} 选择要导入的 CSV；取消时为 null。 */
 export function pickImportFile() {
   return invoke('csv_import_pick', { title: t('importCsv'), filterName: t('csvFile') });
+}
+
+/** @returns {Promise<OpenedFile|null>} 选择要导入的 PD 捕获文件；取消时为 null。 */
+export function pickPdImportFile() {
+  return invoke('pd_import_pick', { title: t('pdImportTitle'), filterName: t('pdFile') });
+}
+
+/**
+ * 在后端流式解析已打开的 PD 捕获句柄并替换后端日志。
+ * @param {number} handle
+ * @returns {Promise<{ generation: number, total: number }>}
+ */
+export function importPdFromHandle(handle) {
+  return invoke('pd_log_import', { handle });
+}
+
+/**
+ * 分页拉取后端刚流式导入的 PD 事件。
+ * @param {number} generation
+ * @param {number} offset
+ * @returns {Promise<{ generation: number, offset: number, total: number, entries: unknown[] }>}
+ */
+export function readPdImportPage(generation, offset) {
+  return invoke('pd_log_import_page', { generation, offset });
 }
 
 /**

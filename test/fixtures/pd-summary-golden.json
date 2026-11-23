@@ -1,0 +1,1184 @@
+{
+  "capNotes": [
+    {
+      "expected": "Fixed: 5.0V 28.0V  Battery: 5.0‑20.0V@45W  Variable: 5.0‑15.0V@3.0A  SPR AVS: 9‑15V@3.0A 15‑20V@5.0A  EPR AVS: 15.0‑28.0V  PPS: 3.3‑21.0V",
+      "name": "mixed_spr_epr_battery_variable",
+      "quicks": [
+        "F 5.0V@3.0A",
+        "EF 28.0V@5.0A",
+        "B 5.0-20.0V@45W",
+        "V 5.0-15.0V@3.0A",
+        "SA 9-15V@3.0A 15-20V@5.0A",
+        "EA 15.0-28.0V@140W",
+        "P 3.3-21.0V@5.0A"
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "expected": {
+        "direction": "SRC←SNK",
+        "id": "0",
+        "obj": "0",
+        "rev": "V2",
+        "role": "SNK",
+        "sop": "SOP",
+        "summary": "",
+        "type": "GoodCRC"
+      },
+      "meta": {
+        "bit_loc": [0, 15],
+        "field": "PD",
+        "raw": "0100000100000000",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP",
+            "value": "SOP"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0000000001000001",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Port Power Role",
+                "raw": "0",
+                "value": "Sink"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "01",
+                "value": "Rev 2.0"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Port Data Role",
+                "raw": "0",
+                "value": "UFP"
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "00001",
+                "value": "GoodCRC"
+              }
+            ]
+          }
+        ]
+      },
+      "name": "goodcrc_sop",
+      "sop": "SOP",
+      "wire": [65, 0]
+    },
+    {
+      "expected": {
+        "direction": "SRC→SNK",
+        "id": "0",
+        "obj": "4",
+        "rev": "V3",
+        "role": "SRC",
+        "sop": "SOP",
+        "summary": "Fixed: 5.0V 9.0V  SPR AVS: 9‑15V@3.0A 15‑20V@5.0A  PPS: 3.3‑21.0V",
+        "type": "Source_Capabilities"
+      },
+      "meta": {
+        "bit_loc": [0, 143],
+        "field": "PD",
+        "raw": "101000010100000100101100100100010000000100001110001011001101000100000010000000000100000100100001101001001100000111110100101100010000010011100000",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP",
+            "value": "SOP"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0100000110100001",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "100",
+                "value": 4
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Port Power Role",
+                "raw": "1",
+                "value": "Source"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "10",
+                "value": "Rev 3.x"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Port Data Role",
+                "raw": "1",
+                "value": "DFP"
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "00001",
+                "value": "Source_Capabilities"
+              }
+            ]
+          },
+          {
+            "bit_loc": [16, 143],
+            "field": "Data Objects",
+            "raw": "00101100100100010000000100001110001011001101000100000010000000000100000100100001101001001100000111110100101100010000010011100000",
+            "value": [
+              {
+                "bit_loc": [0, 31],
+                "field": "PDO 1",
+                "quick_pdo": "F 5.0V@3.0A",
+                "raw": "00001110000000011001000100101100",
+                "value": [
+                  {
+                    "bit_loc": [31, 30],
+                    "field": "Supply Type",
+                    "raw": "00",
+                    "value": "FPDO"
+                  },
+                  {
+                    "bit_loc": [29, 29],
+                    "field": "Dual-Role Power",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [28, 28],
+                    "field": "USB Suspend Supported",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [27, 27],
+                    "field": "Unconstrained Power",
+                    "raw": "1",
+                    "value": true
+                  },
+                  {
+                    "bit_loc": [26, 26],
+                    "field": "USB Communications Capable",
+                    "raw": "1",
+                    "value": true
+                  },
+                  {
+                    "bit_loc": [25, 25],
+                    "field": "Dual-Role Data",
+                    "raw": "1",
+                    "value": true
+                  },
+                  {
+                    "bit_loc": [24, 24],
+                    "field": "Unchunked Extended Messages Supported",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [23, 23],
+                    "field": "EPR Capable",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [22, 22],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [21, 20],
+                    "field": "Peak Current",
+                    "raw": "00",
+                    "value": "00"
+                  },
+                  {
+                    "bit_loc": [19, 10],
+                    "field": "Voltage",
+                    "raw": "0001100100",
+                    "value": "5.0V"
+                  },
+                  {
+                    "bit_loc": [9, 0],
+                    "field": "Maximum Current",
+                    "raw": "0100101100",
+                    "value": "3.0A"
+                  }
+                ]
+              },
+              {
+                "bit_loc": [32, 63],
+                "field": "PDO 2",
+                "quick_pdo": "F 9.0V@3.0A",
+                "raw": "00000000000000101101000100101100",
+                "value": [
+                  {
+                    "bit_loc": [31, 30],
+                    "field": "Supply Type",
+                    "raw": "00",
+                    "value": "FPDO"
+                  },
+                  {
+                    "bit_loc": [29, 29],
+                    "field": "Dual-Role Power",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [28, 28],
+                    "field": "USB Suspend Supported",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [27, 27],
+                    "field": "Unconstrained Power",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [26, 26],
+                    "field": "USB Communications Capable",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [25, 25],
+                    "field": "Dual-Role Data",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [24, 24],
+                    "field": "Unchunked Extended Messages Supported",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [23, 23],
+                    "field": "EPR Capable",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [22, 22],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [21, 20],
+                    "field": "Peak Current",
+                    "raw": "00",
+                    "value": "00"
+                  },
+                  {
+                    "bit_loc": [19, 10],
+                    "field": "Voltage",
+                    "raw": "0010110100",
+                    "value": "9.0V"
+                  },
+                  {
+                    "bit_loc": [9, 0],
+                    "field": "Maximum Current",
+                    "raw": "0100101100",
+                    "value": "3.0A"
+                  }
+                ]
+              },
+              {
+                "bit_loc": [64, 95],
+                "field": "PDO 3",
+                "quick_pdo": "P 3.3-21.0V@3.25A",
+                "raw": "11000001101001000010000101000001",
+                "value": [
+                  {
+                    "bit_loc": [31, 30],
+                    "field": "Supply Type",
+                    "raw": "11",
+                    "value": "APDO"
+                  },
+                  {
+                    "bit_loc": [29, 28],
+                    "field": "APDO Type",
+                    "raw": "00",
+                    "value": "SPR PPS"
+                  },
+                  {
+                    "bit_loc": [27, 27],
+                    "field": "PPS Power Limited",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [26, 25],
+                    "field": "Reserved",
+                    "raw": "00",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [24, 17],
+                    "field": "Maximum Voltage",
+                    "raw": "11010010",
+                    "value": "21.0V"
+                  },
+                  {
+                    "bit_loc": [16, 16],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [15, 8],
+                    "field": "Minimum Voltage",
+                    "raw": "00100001",
+                    "value": "3.3V"
+                  },
+                  {
+                    "bit_loc": [7, 7],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [6, 0],
+                    "field": "Maximum Current",
+                    "raw": "1000001",
+                    "value": "3.25A"
+                  }
+                ]
+              },
+              {
+                "bit_loc": [96, 127],
+                "field": "PDO 4",
+                "quick_pdo": "SA 9-15V@3.0A 15-20V@5.0A",
+                "raw": "11100000000001001011000111110100",
+                "value": [
+                  {
+                    "bit_loc": [31, 30],
+                    "field": "Supply Type",
+                    "raw": "11",
+                    "value": "APDO"
+                  },
+                  {
+                    "bit_loc": [29, 28],
+                    "field": "APDO Type",
+                    "raw": "10",
+                    "value": "SPR AVS"
+                  },
+                  {
+                    "bit_loc": [27, 26],
+                    "field": "Peak Current",
+                    "raw": "00",
+                    "value": "00"
+                  },
+                  {
+                    "bit_loc": [25, 20],
+                    "field": "Reserved",
+                    "raw": "000000",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [19, 10],
+                    "field": "Maximum Current 15V",
+                    "raw": "0100101100",
+                    "value": "3.0A"
+                  },
+                  {
+                    "bit_loc": [9, 0],
+                    "field": "Maximum Current 20V",
+                    "raw": "0111110100",
+                    "value": "5.0A"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "name": "source_caps_fixed_pps_spr_avs",
+      "sop": "SOP",
+      "wire": [161, 65, 44, 145, 1, 14, 44, 209, 2, 0, 65, 33, 164, 193, 244, 177, 4, 224]
+    },
+    {
+      "expected": {
+        "direction": "SRC←SNK",
+        "id": "0",
+        "obj": "1",
+        "rev": "V2",
+        "role": "SNK",
+        "sop": "SOP",
+        "summary": "Position:2 Fixed:9.0V,3.0A",
+        "type": "Request"
+      },
+      "meta": {
+        "bit_loc": [0, 47],
+        "field": "PD",
+        "raw": "010000100001000000101100101100010000010000100000",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP",
+            "value": "SOP"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0001000001000010",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "001",
+                "value": 1
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Port Power Role",
+                "raw": "0",
+                "value": "Sink"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "01",
+                "value": "Rev 2.0"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Port Data Role",
+                "raw": "0",
+                "value": "UFP"
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "00010",
+                "value": "Request"
+              }
+            ]
+          },
+          {
+            "bit_loc": [16, 47],
+            "field": "Data Objects",
+            "raw": "00101100101100010000010000100000",
+            "value": [
+              {
+                "bit_loc": [0, 31],
+                "field": "RDO",
+                "quick_rdo": "[2] F 9.0V@3.0A",
+                "raw": "00100000000001001011000100101100",
+                "value": [
+                  {
+                    "bit_loc": [31, 28],
+                    "field": "Object Position",
+                    "raw": "0010",
+                    "value": 2
+                  },
+                  {
+                    "bit_loc": [27, 27],
+                    "field": "Giveback",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [26, 26],
+                    "field": "Capability Mismatch",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [25, 25],
+                    "field": "USB Communications Capable",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [24, 24],
+                    "field": "No USB Suspend",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [23, 23],
+                    "field": "Unchunked Extended Messages Supported",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [22, 22],
+                    "field": "EPR Capable",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [21, 20],
+                    "field": "Reserved",
+                    "raw": "00",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [19, 10],
+                    "field": "Operating Current",
+                    "raw": "0100101100",
+                    "value": "3.0A"
+                  },
+                  {
+                    "bit_loc": [9, 0],
+                    "field": "Maximum Operating Current",
+                    "raw": "0100101100",
+                    "value": "3.0A"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "name": "request_fixed_pdo2",
+      "sop": "SOP",
+      "wire": [66, 16, 44, 177, 4, 32]
+    },
+    {
+      "expected": {
+        "direction": "SRC←SNK",
+        "id": "1",
+        "obj": "1",
+        "rev": "V2",
+        "role": "SNK",
+        "sop": "SOP",
+        "summary": "Position:3 PPS:15.0V,3.0A",
+        "type": "Request"
+      },
+      "meta": {
+        "bit_loc": [0, 47],
+        "field": "PD",
+        "raw": "010000100001001000111100110111000000010100110010",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP",
+            "value": "SOP"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0001001001000010",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "001",
+                "value": 1
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "001",
+                "value": 1
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Port Power Role",
+                "raw": "0",
+                "value": "Sink"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "01",
+                "value": "Rev 2.0"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Port Data Role",
+                "raw": "0",
+                "value": "UFP"
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "00010",
+                "value": "Request"
+              }
+            ]
+          },
+          {
+            "bit_loc": [16, 47],
+            "field": "Data Objects",
+            "raw": "00111100110111000000010100110010",
+            "value": [
+              {
+                "bit_loc": [0, 31],
+                "field": "RDO",
+                "quick_rdo": "[3] P 15.0V@3.0A",
+                "raw": "00110010000001011101110000111100",
+                "value": [
+                  {
+                    "bit_loc": [31, 28],
+                    "field": "Object Position",
+                    "raw": "0011",
+                    "value": 3
+                  },
+                  {
+                    "bit_loc": [27, 27],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [26, 26],
+                    "field": "Capability Mismatch",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [25, 25],
+                    "field": "USB Communications Capable",
+                    "raw": "1",
+                    "value": true
+                  },
+                  {
+                    "bit_loc": [24, 24],
+                    "field": "No USB Suspend",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [23, 23],
+                    "field": "Unchunked Extended Messages Supported",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [22, 22],
+                    "field": "EPR Capable",
+                    "raw": "0",
+                    "value": false
+                  },
+                  {
+                    "bit_loc": [21, 21],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [20, 9],
+                    "field": "Output Voltage",
+                    "raw": "001011101110",
+                    "value": "15.0V"
+                  },
+                  {
+                    "bit_loc": [8, 7],
+                    "field": "Reserved",
+                    "raw": "00",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [6, 0],
+                    "field": "Operating Current",
+                    "raw": "0111100",
+                    "value": "3.0A"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "name": "request_pps_pdo3",
+      "sop": "SOP",
+      "wire": [66, 18, 60, 220, 5, 50]
+    },
+    {
+      "expected": {
+        "direction": "SRC→SNK",
+        "id": "0",
+        "obj": "1",
+        "rev": "V3",
+        "role": "SRC",
+        "sop": "SOP",
+        "summary": "0xFF00 Discover Identity REQ",
+        "type": "Vendor_Defined"
+      },
+      "meta": {
+        "bit_loc": [0, 47],
+        "field": "PD",
+        "raw": "101011110001000100000001100000000000000011111111",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP",
+            "value": "SOP"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0001000110101111",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "001",
+                "value": 1
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Port Power Role",
+                "raw": "1",
+                "value": "Source"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "10",
+                "value": "Rev 3.x"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Port Data Role",
+                "raw": "1",
+                "value": "DFP"
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "01111",
+                "value": "Vendor_Defined"
+              }
+            ]
+          },
+          {
+            "bit_loc": [16, 47],
+            "field": "Data Objects",
+            "raw": "00000001100000000000000011111111",
+            "value": [
+              {
+                "bit_loc": [0, 31],
+                "field": "VDM Header",
+                "raw": "11111111000000001000000000000001",
+                "value": [
+                  {
+                    "bit_loc": [31, 16],
+                    "field": "SVID",
+                    "raw": "1111111100000000",
+                    "value": "0xFF00"
+                  },
+                  {
+                    "bit_loc": [15, 15],
+                    "field": "VDM Type",
+                    "raw": "1",
+                    "value": "Structured"
+                  },
+                  {
+                    "bit_loc": [14, 13],
+                    "field": "Structured VDM Version",
+                    "raw": "00",
+                    "value": "Version 1.0"
+                  },
+                  {
+                    "bit_loc": [12, 11],
+                    "field": "Reserved",
+                    "raw": "00",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [10, 8],
+                    "field": "Object Position",
+                    "raw": "000",
+                    "value": 0
+                  },
+                  {
+                    "bit_loc": [7, 6],
+                    "field": "Command Type",
+                    "raw": "00",
+                    "value": "REQ"
+                  },
+                  {
+                    "bit_loc": [5, 5],
+                    "field": "Reserved",
+                    "raw": "0",
+                    "value": null
+                  },
+                  {
+                    "bit_loc": [4, 0],
+                    "field": "Command",
+                    "raw": "00001",
+                    "value": "Discover Identity"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "name": "vdm_structured_discover_id",
+      "sop": "SOP",
+      "wire": [175, 17, 1, 128, 0, 255]
+    },
+    {
+      "expected": {
+        "direction": "SRC→SNK",
+        "id": "0",
+        "obj": "1",
+        "rev": "V3",
+        "role": "SRC",
+        "sop": "SOP",
+        "summary": "Unstructured 0x05AC [Apple]",
+        "type": "Vendor_Defined"
+      },
+      "meta": {
+        "bit_loc": [0, 47],
+        "field": "PD",
+        "raw": "101011110001000100000000000000001010110000000101",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP",
+            "value": "SOP"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0001000110101111",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "001",
+                "value": 1
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Port Power Role",
+                "raw": "1",
+                "value": "Source"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "10",
+                "value": "Rev 3.x"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Port Data Role",
+                "raw": "1",
+                "value": "DFP"
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "01111",
+                "value": "Vendor_Defined"
+              }
+            ]
+          },
+          {
+            "bit_loc": [16, 47],
+            "field": "Data Objects",
+            "raw": "00000000000000001010110000000101",
+            "value": [
+              {
+                "bit_loc": [0, 31],
+                "field": "VDM Header",
+                "raw": "00000101101011000000000000000000",
+                "value": [
+                  {
+                    "bit_loc": [31, 16],
+                    "field": "VID",
+                    "raw": "0000010110101100",
+                    "value": "0x05AC [Apple]"
+                  },
+                  {
+                    "bit_loc": [15, 15],
+                    "field": "VDM Type",
+                    "raw": "0",
+                    "value": "Unstructured"
+                  },
+                  {
+                    "bit_loc": [14, 0],
+                    "field": "Vendor Defined",
+                    "raw": "000000000000000",
+                    "value": "0x0000"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "name": "vdm_unstructured_apple",
+      "sop": "SOP",
+      "wire": [175, 17, 0, 0, 172, 5]
+    },
+    {
+      "expected": {
+        "direction": "SRC|SNK→Plug",
+        "id": "0",
+        "obj": "0",
+        "rev": "V2",
+        "role": "CBL",
+        "sop": "SOP'",
+        "summary": "",
+        "type": "GoodCRC"
+      },
+      "meta": {
+        "bit_loc": [0, 15],
+        "field": "PD",
+        "raw": "0100000100000000",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP'",
+            "value": "SOP'"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0000000001000001",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Cable Plug",
+                "raw": "0",
+                "value": "DFP or UFP"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "01",
+                "value": "Rev 2.0"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Reserved",
+                "raw": "0",
+                "value": null
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "00001",
+                "value": "GoodCRC"
+              }
+            ]
+          }
+        ]
+      },
+      "name": "cable_plug_to_plug",
+      "sop": "SOP'",
+      "wire": [65, 0]
+    },
+    {
+      "expected": {
+        "direction": "SRC|SNK←Plug",
+        "id": "0",
+        "obj": "0",
+        "rev": "V2",
+        "role": "CBL",
+        "sop": "SOP'",
+        "summary": "",
+        "type": "GoodCRC"
+      },
+      "meta": {
+        "bit_loc": [0, 15],
+        "field": "PD",
+        "raw": "0100000100000001",
+        "value": [
+          {
+            "bit_loc": null,
+            "field": "SOP*",
+            "raw": "SOP'",
+            "value": "SOP'"
+          },
+          {
+            "bit_loc": [0, 15],
+            "field": "Message Header",
+            "raw": "0000000101000001",
+            "value": [
+              {
+                "bit_loc": [15, 15],
+                "field": "Extended",
+                "raw": "0",
+                "value": false
+              },
+              {
+                "bit_loc": [14, 12],
+                "field": "Number of Data Objects",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [11, 9],
+                "field": "MessageID",
+                "raw": "000",
+                "value": 0
+              },
+              {
+                "bit_loc": [8, 8],
+                "field": "Cable Plug",
+                "raw": "1",
+                "value": "Cable Plug or VPD"
+              },
+              {
+                "bit_loc": [7, 6],
+                "field": "Specification Revision",
+                "raw": "01",
+                "value": "Rev 2.0"
+              },
+              {
+                "bit_loc": [5, 5],
+                "field": "Reserved",
+                "raw": "0",
+                "value": null
+              },
+              {
+                "bit_loc": [4, 0],
+                "field": "Message Type",
+                "raw": "00001",
+                "value": "GoodCRC"
+              }
+            ]
+          }
+        ]
+      },
+      "name": "cable_plug_from_plug",
+      "sop": "SOP'",
+      "wire": [65, 1]
+    }
+  ],
+  "requestNotes": [
+    {
+      "expected": "Position:2 Fixed:9.0V,3.0A",
+      "quick": "[2] F 9.0V@3.0A"
+    },
+    {
+      "expected": "Position:8 EPR Fixed:28.0V,5.0A",
+      "quick": "[8] EF 28.0V@5.0A"
+    },
+    {
+      "expected": "Position:6 PPS:15.0V,3.0A",
+      "quick": "[6] P 15.0V@3.0A"
+    },
+    {
+      "expected": "Position:7 SPR AVS:12.0V,3.0A",
+      "quick": "[7] SA 12.0V@3.0A"
+    },
+    {
+      "expected": "Position:9 EPR AVS:24.0V,5.0A",
+      "quick": "[9] EA 24.0V@5.0A"
+    },
+    {
+      "expected": "Position:4 Battery:5.0‑20.0V,45W",
+      "quick": "[4] B 5.0-20.0V@45W"
+    }
+  ]
+}

@@ -7,7 +7,13 @@
 //! 取出，不再重放 Parser。会话上下文（RDO 相对 PDO）在捕获当下已经解析好。
 //! 入库前给 VID / USB Vendor ID 叶子补 USB-IF 厂商名，列表 Note 与详情共用。
 
-use serde::{Deserialize, Serialize};
+use crate::app_error::AppError;
+use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+#[cfg(test)]
+use serde::Deserialize;
+use serde::{Deserializer, Serialize};
+use std::fmt;
+use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 use witrn_hid::usbpd_parser::fields;
 use witrn_hid::{decode_pd_report, Metadata, Parser};
@@ -46,7 +52,8 @@ pub struct PdEvent {
     pub gen: u64,
 }
 
-/// 导入时的一条原始记录（前端 v2 捕获文件 / 替换命令）。
+/// 导入时的一条原始记录（测试辅助）。
+#[cfg(test)]
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct PdLoadEntry {
     pub t: u64,
@@ -58,6 +65,36 @@ pub struct PdLoadEntry {
     pub vbus: Option<f32>,
     #[serde(default)]
     pub ibus: Option<f32>,
+}
+
+/// 每次 `pd_log_import_page` 返回的最大条目数，保持前端分批摄入不阻塞主线程。
+pub const PD_IMPORT_PAGE_SIZE: usize = 2048;
+
+/// 流式导入后分页回传给前端的一条事件（兼容 v2 紧凑事件、分隔行和 v1/混合遗留 meta）。
+#[derive(Clone, Debug, Serialize)]
+pub struct PdImportEvent {
+    #[serde(flatten)]
+    pub event: PdEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
+}
+
+/// 流式导入完成的元数据摘要。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdImportSummary {
+    pub generation: u64,
+    pub total: usize,
+}
+
+/// 流式导入后的一页事件。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdImportPage {
+    pub generation: u64,
+    pub offset: usize,
+    pub total: usize,
+    pub entries: Vec<PdImportEvent>,
 }
 
 /// A bounded recovery page; dividers never consume sequence numbers.
@@ -92,6 +129,8 @@ struct PdMessage {
 pub struct PdLog {
     messages: Vec<PdMessage>,
     generation: u64,
+    /// 最近一次流式导入的分页缓冲；前端读完最后一页或清空/再次导入后立即释放。
+    staged_import: Vec<PdImportEvent>,
 }
 
 /// 超过该条数停止入库，避免无界增长把进程吃满。
@@ -111,6 +150,8 @@ pub fn now_ms() -> u64 {
 impl PdLog {
     pub fn clear(&mut self) -> u64 {
         self.messages.clear();
+        self.staged_import.clear();
+        self.staged_import.shrink_to_fit();
         self.generation = self.generation.wrapping_add(1);
         self.generation
     }
@@ -186,7 +227,57 @@ impl PdLog {
         })
     }
 
+    /// 用流式解析出的日志与时间线替换自身，盖上新的 generation 并暂存供分页拉取。
+    pub fn install_import(
+        &mut self,
+        mut next: PdLog,
+        mut events: Vec<PdImportEvent>,
+    ) -> PdImportSummary {
+        next.generation = self.generation.wrapping_add(1);
+        for item in &mut events {
+            item.event.gen = next.generation;
+        }
+        for message in &mut next.messages {
+            message.event.gen = next.generation;
+        }
+        let total = events.len();
+        next.staged_import = events;
+        let generation = next.generation;
+        *self = next;
+        PdImportSummary { generation, total }
+    }
+
+    /// 按偏移分页读取流式导入事件；最后一页读完后释放后端暂存列表。
+    pub fn take_import_page(
+        &mut self,
+        generation: u64,
+        offset: usize,
+    ) -> Result<PdImportPage, String> {
+        if generation != self.generation {
+            return Err("PD 日志代次已变更".to_string());
+        }
+        let total = self.staged_import.len();
+        let start = offset.min(total);
+        let end = start.saturating_add(PD_IMPORT_PAGE_SIZE).min(total);
+        let entries = if start < end {
+            self.staged_import[start..end].to_vec()
+        } else {
+            Vec::new()
+        };
+        if end >= total {
+            self.staged_import.clear();
+            self.staged_import.shrink_to_fit();
+        }
+        Ok(PdImportPage {
+            generation: self.generation,
+            offset: start,
+            total,
+            entries,
+        })
+    }
+
     /// 解析导入帧，不碰现有日志。调用方持锁后再 [`install`](Self::install)。
+    #[cfg(test)]
     pub fn build(entries: Vec<PdLoadEntry>) -> Result<(Self, Vec<PdEvent>), String> {
         let mut next = PdLog::default();
         let mut parser = Parser::new();
@@ -210,6 +301,7 @@ impl PdLog {
     }
 
     /// 用已解析的日志替换自身，并给事件盖上新的 generation。
+    #[cfg(test)]
     pub fn install(&mut self, mut next: PdLog, mut events: Vec<PdEvent>) -> Vec<PdEvent> {
         next.generation = self.generation.wrapping_add(1);
         for event in &mut events {
@@ -228,6 +320,404 @@ impl PdLog {
         let (next, events) = Self::build(entries)?;
         Ok(self.install(next, events))
     }
+}
+
+const META_MAX_DEPTH: usize = 32;
+
+fn is_valid_meta(value: &serde_json::Value, depth: usize) -> bool {
+    if depth > META_MAX_DEPTH {
+        return false;
+    }
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    if !map.get("raw").is_some_and(serde_json::Value::is_string)
+        || !map.get("field").is_some_and(serde_json::Value::is_string)
+    {
+        return false;
+    }
+    if let Some(loc) = map.get("bit_loc") {
+        if !loc.is_null() {
+            let valid_loc = loc.as_array().is_some_and(|arr| {
+                arr.len() == 2 && arr.iter().all(|n| n.as_f64().is_some_and(f64::is_finite))
+            });
+            if !valid_loc {
+                return false;
+            }
+        }
+    }
+    for key in ["quick_pdo", "quick_rdo", "full_raw"] {
+        if let Some(val) = map.get(key) {
+            if !val.is_string() {
+                return false;
+            }
+        }
+    }
+    match map.get("value") {
+        Some(serde_json::Value::Null)
+        | Some(serde_json::Value::Bool(_))
+        | Some(serde_json::Value::Number(_))
+        | Some(serde_json::Value::String(_)) => true,
+        Some(serde_json::Value::Array(children)) => {
+            children.iter().all(|child| is_valid_meta(child, depth + 1))
+        }
+        _ => false,
+    }
+}
+
+fn parse_bytes_field(value: &serde_json::Value) -> Option<Vec<u8>> {
+    if value.is_null() {
+        return None;
+    }
+    let arr = value.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let n = item.as_u64()?;
+        if n > 255 {
+            return None;
+        }
+        out.push(n as u8);
+    }
+    Some(out)
+}
+
+fn optional_f32(map: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<f32> {
+    map.get(key)
+        .and_then(serde_json::Value::as_f64)
+        .filter(|v| v.is_finite())
+        .map(|v| v as f32)
+}
+
+fn optional_col(map: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
+    match map.get(key)? {
+        serde_json::Value::String(s) => nonempty(s.clone()),
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .filter(|v| v.is_finite())
+            .map(|_| n.to_string())
+            .and_then(nonempty),
+        _ => None,
+    }
+}
+
+fn parse_capture_entry(
+    raw: serde_json::Value,
+    next: &mut PdLog,
+    parser: &mut Parser,
+    saw_no_meta: &mut bool,
+) -> Result<PdImportEvent, AppError> {
+    let Some(mut map) = (match raw {
+        serde_json::Value::Object(map) => Some(map),
+        _ => None,
+    }) else {
+        return Err(AppError::message("pdInvalidEntry", std::iter::empty()));
+    };
+    let Some(t) = map
+        .get("t")
+        .and_then(serde_json::Value::as_f64)
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .map(|v| v.trunc() as u64)
+    else {
+        return Err(AppError::message("pdMissingTime", std::iter::empty()));
+    };
+    if map.get("divider") == Some(&serde_json::Value::Bool(true)) {
+        return Ok(PdImportEvent {
+            event: PdEvent::divider(t),
+            meta: None,
+        });
+    }
+
+    let vbus = optional_f32(&map, "vbus");
+    let ibus = optional_f32(&map, "ibus");
+    let bytes = match map.get("bytes") {
+        None => None,
+        Some(value) if value.is_null() => None,
+        Some(value) => match parse_bytes_field(value) {
+            Some(bytes) => Some(bytes),
+            None => return Err(AppError::message("pdInvalidFrame", std::iter::empty())),
+        },
+    };
+
+    if let Some(meta_val) = map.remove("meta") {
+        if !is_valid_meta(&meta_val, 0) {
+            return Err(AppError::message("pdInvalidStructure", std::iter::empty()));
+        }
+        if let Some(bytes) = bytes.filter(|b| !b.is_empty()) {
+            let decoded = decode_pd_report(parser, &bytes)
+                .map_err(|e| AppError::new("backendFailure", format!("导入的报文无法解析: {e}")))?;
+            let event = next
+                .push_message(t, bytes, decoded, vbus, ibus)
+                .ok_or_else(|| AppError::new("backendFailure", "导入超过日志上限"))?;
+            return Ok(PdImportEvent {
+                event,
+                meta: Some(meta_val),
+            });
+        }
+        return Ok(PdImportEvent {
+            event: PdEvent {
+                t,
+                divider: false,
+                seq: None,
+                sop: None,
+                msg_type: None,
+                role: None,
+                summary: None,
+                id: None,
+                obj: None,
+                rev: None,
+                direction: None,
+                vbus,
+                ibus,
+                bytes: None,
+                gen: 0,
+            },
+            meta: Some(meta_val),
+        });
+    }
+
+    *saw_no_meta = true;
+    let Some(sop) = map.get("sop").and_then(serde_json::Value::as_str) else {
+        return Err(AppError::message("pdMissingSummary", std::iter::empty()));
+    };
+    let Some(msg_type) = map.get("type").and_then(serde_json::Value::as_str) else {
+        return Err(AppError::message("pdMissingSummary", std::iter::empty()));
+    };
+    if let Some(bytes) = bytes.filter(|b| !b.is_empty()) {
+        let decoded = decode_pd_report(parser, &bytes)
+            .map_err(|e| AppError::new("backendFailure", format!("导入的报文无法解析: {e}")))?;
+        let event = next
+            .push_message(t, bytes, decoded, vbus, ibus)
+            .ok_or_else(|| AppError::new("backendFailure", "导入超过日志上限"))?;
+        return Ok(PdImportEvent { event, meta: None });
+    }
+    Ok(PdImportEvent {
+        event: PdEvent {
+            t,
+            divider: false,
+            seq: None,
+            sop: Some(sop.to_string()),
+            msg_type: Some(msg_type.to_string()),
+            role: Some(
+                map.get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            summary: map
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .and_then(nonempty),
+            id: optional_col(&map, "id"),
+            obj: optional_col(&map, "obj"),
+            rev: optional_col(&map, "rev"),
+            direction: optional_col(&map, "direction"),
+            vbus,
+            ibus,
+            bytes: None,
+            gen: 0,
+        },
+        meta: None,
+    })
+}
+
+struct EntriesSeed<'a> {
+    next: &'a mut PdLog,
+    parser: &'a mut Parser,
+    events: &'a mut Vec<PdImportEvent>,
+    saw_no_meta: &'a mut bool,
+    error: &'a mut Option<AppError>,
+}
+
+impl<'de> DeserializeSeed<'de> for EntriesSeed<'_> {
+    type Value = bool;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        struct SeqVisitor<'a>(EntriesSeed<'a>);
+        impl<'de> Visitor<'de> for SeqVisitor<'_> {
+            type Value = bool;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a PD capture entries array")
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while let Some(raw) = seq.next_element::<serde_json::Value>()? {
+                    if self.0.error.is_some() {
+                        continue;
+                    }
+                    match parse_capture_entry(raw, self.0.next, self.0.parser, self.0.saw_no_meta) {
+                        Ok(item) => self.0.events.push(item),
+                        Err(err) => *self.0.error = Some(err),
+                    }
+                }
+                Ok(true)
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_none<E: serde::de::Error>(self) -> Result<bool, E> {
+                Ok(false)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<bool, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(false)
+            }
+        }
+        deserializer.deserialize_any(SeqVisitor(self))
+    }
+}
+
+/// 流式解析 PD 捕获 JSON 文件（v1 / v2），避免在 WebView 或 Rust 中同时持有一整份原始 JSON DOM。
+pub fn import_from_reader<R: Read>(reader: R) -> Result<(PdLog, Vec<PdImportEvent>), AppError> {
+    struct FileVisitor;
+
+    struct ParsedRoot {
+        kind: Option<serde_json::Value>,
+        version: Option<serde_json::Value>,
+        entries_valid: bool,
+        saw_no_meta: bool,
+        entry_error: Option<AppError>,
+        next: PdLog,
+        events: Vec<PdImportEvent>,
+    }
+
+    impl<'de> Visitor<'de> for FileVisitor {
+        type Value = Option<Box<ParsedRoot>>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a PD capture JSON object")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut kind = None;
+            let mut version = None;
+            let mut entries_valid = false;
+            let mut saw_no_meta = false;
+            let mut entry_error = None;
+            let mut next = PdLog::default();
+            let mut parser = Parser::new();
+            let mut events = Vec::new();
+            while let Some(key) = map.next_key::<String>()? {
+                match key.as_str() {
+                    "kind" => kind = Some(map.next_value::<serde_json::Value>()?),
+                    "version" => version = Some(map.next_value::<serde_json::Value>()?),
+                    "entries" => {
+                        entries_valid = map.next_value_seed(EntriesSeed {
+                            next: &mut next,
+                            parser: &mut parser,
+                            events: &mut events,
+                            saw_no_meta: &mut saw_no_meta,
+                            error: &mut entry_error,
+                        })?;
+                    }
+                    _ => {
+                        let _ = map.next_value::<IgnoredAny>()?;
+                    }
+                }
+            }
+            Ok(Some(Box::new(ParsedRoot {
+                kind,
+                version,
+                entries_valid,
+                saw_no_meta,
+                entry_error,
+                next,
+                events,
+            })))
+        }
+
+        fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(None)
+        }
+    }
+
+    let mut de = serde_json::Deserializer::from_reader(reader);
+    let parsed = de
+        .deserialize_any(FileVisitor)
+        .map_err(|err| AppError::new("backendFailure", err.to_string()))?;
+    de.end()
+        .map_err(|err| AppError::new("backendFailure", err.to_string()))?;
+
+    let Some(parsed) = parsed else {
+        return Err(AppError::message("pdInvalidFile", std::iter::empty()));
+    };
+    let ParsedRoot {
+        kind,
+        version,
+        entries_valid,
+        saw_no_meta,
+        entry_error,
+        next,
+        events,
+    } = *parsed;
+
+    if kind.as_ref().and_then(serde_json::Value::as_str) != Some("pd-capture") {
+        return Err(AppError::message("pdInvalidKind", std::iter::empty()));
+    }
+    let version_num = version.as_ref().and_then(|v| {
+        if v.is_i64() || v.is_u64() {
+            v.as_u64()
+        } else {
+            None
+        }
+    });
+    if !matches!(version_num, Some(1 | 2)) {
+        let label = match version {
+            None => "undefined".to_string(),
+            Some(serde_json::Value::String(s)) => s,
+            Some(other) => other.to_string(),
+        };
+        return Err(AppError::message("pdInvalidVersion", [("version", label)]));
+    }
+    if !entries_valid {
+        return Err(AppError::message("pdMissingEntries", std::iter::empty()));
+    }
+    if let Some(err) = entry_error {
+        return Err(err);
+    }
+    if version_num == Some(1) && saw_no_meta {
+        return Err(AppError::message("pdInvalidStructure", std::iter::empty()));
+    }
+    Ok((next, events))
 }
 
 impl PdEvent {
@@ -758,5 +1248,193 @@ mod tests {
             ]),
             "Fixed: 5.0V  SPR AVS: 9\u{2011}15V@3.0A 15\u{2011}20V@5.0A  PPS: 5.0\u{2011}21.0V"
         );
+    }
+
+    #[test]
+    fn streaming_import_parses_v2_v1_dividers_and_pages_cleanly() {
+        let caps = pd_frame(
+            &[0xA1, 0x21, 0x2C, 0x91, 0x01, 0x08, 0x2C, 0xD1, 0x02, 0x00],
+            224,
+        );
+        let req = pd_frame(&[0x42, 0x10, 0x2C, 0xB1, 0x04, 0x20], 224);
+        let json = serde_json::json!({
+            "app": "laPower",
+            "kind": "pd-capture",
+            "version": 2,
+            "entries": [
+                { "t": 100, "sop": "SOP", "type": "Source_Capabilities", "bytes": caps, "vbus": 5.097, "ibus": 0.044 },
+                { "t": 101, "divider": true },
+                { "t": 102, "sop": "SOP", "type": "Request", "bytes": req },
+                {
+                    "t": 103,
+                    "meta": { "raw": "0", "bit_loc": null, "field": "PD", "value": [] }
+                }
+            ]
+        })
+        .to_string();
+
+        let (next, events) = import_from_reader(json.as_bytes()).unwrap();
+        let mut log = PdLog::default();
+        let summary = log.install_import(next, events);
+        assert_eq!(summary.generation, 1);
+        assert_eq!(summary.total, 4);
+        assert!(log.meta_at(1).is_some());
+
+        let page = log.take_import_page(summary.generation, 0).unwrap();
+        assert_eq!(page.entries.len(), 4);
+        assert_eq!(page.entries[0].event.seq, Some(0));
+        assert!(page.entries[1].event.divider);
+        assert_eq!(page.entries[2].event.seq, Some(1));
+        assert!(page.entries[3].meta.is_some());
+        // Final page releases staged buffer.
+        assert!(log.staged_import.is_empty());
+    }
+
+    #[test]
+    fn streaming_import_rejects_bad_kind_version_and_deep_meta() {
+        let bad_kind = r#"{"kind":"other","version":2,"entries":[]}"#;
+        assert_eq!(
+            import_from_reader(bad_kind.as_bytes())
+                .err()
+                .expect("expected error")
+                .code,
+            "pdInvalidKind"
+        );
+        let bad_ver = r#"{"kind":"pd-capture","version":3,"entries":[]}"#;
+        assert_eq!(
+            import_from_reader(bad_ver.as_bytes())
+                .err()
+                .expect("expected error")
+                .code,
+            "pdInvalidVersion"
+        );
+        let mut deep =
+            serde_json::json!({"raw": "0", "bit_loc": null, "field": "leaf", "value": null});
+        for i in 0..40 {
+            deep = serde_json::json!({"raw": "0", "bit_loc": null, "field": format!("n{i}"), "value": [deep]});
+        }
+        let deep_file = serde_json::json!({
+            "kind": "pd-capture",
+            "version": 1,
+            "entries": [{ "t": 1, "meta": deep }]
+        })
+        .to_string();
+        assert_eq!(
+            import_from_reader(deep_file.as_bytes())
+                .err()
+                .expect("expected error")
+                .code,
+            "pdInvalidStructure"
+        );
+    }
+
+    #[test]
+    fn golden_summary_parity_with_frontend() {
+        #[derive(Deserialize)]
+        struct ExpectedSummary {
+            sop: String,
+            #[serde(rename = "type")]
+            msg_type: String,
+            role: String,
+            summary: String,
+            id: String,
+            obj: String,
+            rev: String,
+            direction: String,
+        }
+        #[derive(Deserialize)]
+        struct GoldenMessage {
+            name: String,
+            sop: String,
+            wire: Vec<u8>,
+            meta: serde_json::Value,
+            expected: ExpectedSummary,
+        }
+        #[derive(Deserialize)]
+        struct GoldenCapNote {
+            name: String,
+            quicks: Vec<String>,
+            expected: String,
+        }
+        #[derive(Deserialize)]
+        struct GoldenRequestNote {
+            quick: String,
+            expected: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct GoldenFixture {
+            messages: Vec<GoldenMessage>,
+            cap_notes: Vec<GoldenCapNote>,
+            request_notes: Vec<GoldenRequestNote>,
+        }
+
+        let fixture: GoldenFixture =
+            serde_json::from_str(include_str!("../../test/fixtures/pd-summary-golden.json"))
+                .expect("valid PD summary golden fixture");
+        let mut parser = Parser::new();
+        for case in &fixture.messages {
+            let sop = match case.sop.as_str() {
+                "SOP" => Sop::Sop,
+                "SOP'" => Sop::SopPrime,
+                "SOP''" => Sop::SopDoublePrime,
+                other => panic!("unexpected sop {other}"),
+            };
+            let mut meta = parser.parse(
+                &case.wire,
+                ParseOptions {
+                    sop,
+                    ..Default::default()
+                },
+            );
+            meta.annotate_vendor_names();
+            assert_eq!(
+                serde_json::to_value(&meta).unwrap(),
+                case.meta,
+                "serialized metadata drifted for {}",
+                case.name
+            );
+            let s = summarize(&meta);
+            assert_eq!(s.sop, case.expected.sop, "sop mismatch for {}", case.name);
+            assert_eq!(
+                s.msg_type, case.expected.msg_type,
+                "type mismatch for {}",
+                case.name
+            );
+            assert_eq!(
+                s.role, case.expected.role,
+                "role mismatch for {}",
+                case.name
+            );
+            assert_eq!(
+                s.summary, case.expected.summary,
+                "summary mismatch for {}",
+                case.name
+            );
+            assert_eq!(s.id, case.expected.id, "id mismatch for {}", case.name);
+            assert_eq!(s.obj, case.expected.obj, "obj mismatch for {}", case.name);
+            assert_eq!(s.rev, case.expected.rev, "rev mismatch for {}", case.name);
+            assert_eq!(
+                s.direction, case.expected.direction,
+                "direction mismatch for {}",
+                case.name
+            );
+        }
+        for case in &fixture.cap_notes {
+            assert_eq!(
+                format_cap_note(&case.quicks),
+                case.expected,
+                "capNote mismatch for {}",
+                case.name
+            );
+        }
+        for case in &fixture.request_notes {
+            assert_eq!(
+                format_request_note(&case.quick),
+                case.expected,
+                "requestNote mismatch for {}",
+                case.quick
+            );
+        }
     }
 }

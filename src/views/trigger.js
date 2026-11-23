@@ -20,22 +20,13 @@ import {
   clampPdm,
   cleanHex,
   commandNeedsPdm,
-  describePdo,
   detectionCanSelect,
-  detectionReason,
-  detectionStateLabel,
-  detectionSummary,
-  detectionVoltages,
   deviceSupportsControl,
-  exportTriggerHistory,
-  filterTriggerHistory,
   outcomeHistoryStatus,
   pdoToRequestFields,
-  pdVersionLabel,
   protocolFields,
   reconcileTriggerTranscript,
   selectedFixedPdo,
-  summarizeTriggerCommand,
   triggerTimeoutMs,
   trimTriggerHistory,
   validatePdData,
@@ -44,6 +35,8 @@ import { openProtocolReport } from '../protocol-report-ui.js';
 import { debouncedSaveSettings } from '../settings.js';
 import { state } from '../state.js';
 import { toast } from '../ui/toast.js';
+import { createTriggerDetectionView, verificationText } from './trigger-detection.js';
+import { createTriggerHistoryView } from './trigger-history.js';
 
 /** @typedef {import('../km003c-model.js').TriggerCommand} TriggerCommand */
 /** @typedef {import('../km003c-model.js').TriggerOutcome} TriggerOutcome */
@@ -59,8 +52,7 @@ let triggerContext = {};
 let pendingReqId = null;
 /** @type {import('../km003c-model.js').TriggerHistoryEntry[]} */
 let historyEntries = [];
-/** @type {Map<string, ReturnType<typeof createHistoryItem>>} */
-const historyNodes = new Map();
+/** @type {string|null} */
 let activeHistoryId = null;
 let cancelRequested = false;
 let timedOut = false;
@@ -81,10 +73,6 @@ let watchdog = null;
 /** @type {ReturnType<typeof setInterval>|null} */
 let liveTimer = null;
 let progressFrame = 0;
-/** @type {Map<string,{key:string,row:HTMLElement}>} */
-const detectionRows = new Map();
-/** @type {WeakMap<HTMLElement,unknown[]>} */
-const historyRenderKeys = new WeakMap();
 
 /** @param {string} id */
 const el = (id) => document.getElementById(id);
@@ -98,6 +86,36 @@ function input(id) {
 function select(id) {
   return /** @type {HTMLSelectElement|null} */ (el(id));
 }
+
+const historyView = createTriggerHistoryView({
+  el,
+  input,
+  select,
+  getHistoryEntries: () => historyEntries,
+  getActiveHistoryId: () => activeHistoryId,
+  isBusy: () => busy,
+  historyCommandCanFill,
+  fillFromHistory,
+});
+
+const detectionView = createTriggerDetectionView({
+  el,
+  isBusy: () => busy,
+  isScanning: () => scanning,
+  getPdos: () => pdos,
+  getDetection: () => detection,
+  getDetectionHistoryId: () => detectionHistoryId,
+  getHistoryEntries: () => historyEntries,
+  fillFromPdo,
+  fillDetectedProtocol,
+});
+
+const renderHistory = historyView.renderHistory;
+const renderLog = historyView.renderLog;
+const copyLog = historyView.copyLog;
+const exportLog = historyView.exportLog;
+const renderPdos = detectionView.renderPdos;
+const renderDetection = detectionView.renderDetection;
 
 /** 当前连接支持协议控制，且流仍然在。 */
 function controllable() {
@@ -119,174 +137,6 @@ function scheduleProgressRender() {
 }
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
-
-/** @param {TriggerHistoryStatus} status */
-function historyStatusKey(status) {
-  return {
-    running: 'triggerHistoryRunning',
-    success: 'triggerHistorySuccess',
-    partial: 'triggerHistoryPartial',
-    failure: 'triggerHistoryFailure',
-    cancelled: 'triggerHistoryCancelled',
-  }[status];
-}
-
-/** @param {import('../km003c-model.js').TriggerHistoryEntry} entry */
-function createHistoryItem(entry) {
-  const item = document.createElement('details');
-  item.dataset.historyId = entry.id;
-  item.open = entry.status === 'running' || entry.id === activeHistoryId;
-  const summary = document.createElement('summary');
-  const time = document.createElement('span');
-  time.className = 'trigger-history-meta';
-  const status = document.createElement('span');
-  status.className = 'trigger-history-result';
-  const command = document.createElement('span');
-  command.className = 'trigger-history-command';
-  const duration = document.createElement('span');
-  duration.className = 'trigger-history-meta';
-  summary.append(time, status, command, duration);
-  const body = document.createElement('div');
-  body.className = 'trigger-history-body';
-  const actions = document.createElement('div');
-  actions.className = 'trigger-history-actions';
-  const copyCommand = document.createElement('button');
-  copyCommand.type = 'button';
-  copyCommand.className = 'cmd-btn';
-  copyCommand.addEventListener('click', () => void copyText(summarizeTriggerCommand(entry.command)));
-  const fill = document.createElement('button');
-  fill.type = 'button';
-  fill.className = 'cmd-btn';
-  fill.addEventListener('click', () => fillFromHistory(entry.command));
-  actions.append(copyCommand, fill);
-  const notice = document.createElement('div');
-  notice.className = 'trigger-history-truncated';
-  const progress = document.createElement('pre');
-  progress.className = 'trigger-history-progress';
-  const reply = document.createElement('pre');
-  body.append(actions, notice, progress, reply);
-  item.append(summary, body);
-  return { item, time, status, command, duration, copyCommand, fill, notice, progress, reply };
-}
-
-/** Avoid replacing text nodes (and their selections/scroll) for unchanged fields.
- * @param {HTMLElement} node @param {string} text */
-function setHistoryText(node, text) {
-  if (node.textContent !== text) node.textContent = text;
-}
-
-function renderHistory() {
-  const list = el('km-history-list');
-  const empty = el('km-history-empty');
-  const commandFilter = select('km-log-command-filter');
-  const statusFilter = select('km-log-status-filter');
-  if (!list || !empty || !commandFilter || !statusFilter) return;
-  historyEntries = trimTriggerHistory(historyEntries);
-  const scrollTop = list.scrollTop;
-  const ids = new Set(historyEntries.map((entry) => entry.id));
-  for (const [id, nodes] of historyNodes) {
-    if (!ids.has(id)) {
-      nodes.item.remove();
-      historyNodes.delete(id);
-    }
-  }
-
-  const selectedCommand = commandFilter.value;
-  const commandTypes = [...new Set(historyEntries.map((entry) => entry.command.type))].sort();
-  const options = [['', t('triggerHistoryCommandFilter')], ...commandTypes.map((type) => [type, type])];
-  if (
-    commandFilter.options.length !== options.length ||
-    options.some(
-      ([value, label], i) => commandFilter.options[i]?.value !== value || commandFilter.options[i]?.text !== label,
-    )
-  ) {
-    commandFilter.replaceChildren(...options.map(([value, label]) => new Option(label, value)));
-    commandFilter.value = commandTypes.includes(selectedCommand) ? selectedCommand : '';
-  }
-
-  const matches = filterTriggerHistory(historyEntries, {
-    command: commandFilter.value,
-    status: statusFilter.value,
-    text: input('km-log-text-filter')?.value ?? '',
-  });
-  const visibleIds = new Set(matches.map((entry) => entry.id));
-  for (const [id, nodes] of historyNodes) {
-    if (!visibleIds.has(id)) nodes.item.remove();
-  }
-  matches.forEach((entry, index) => {
-    let nodes = historyNodes.get(entry.id);
-    if (!nodes) {
-      nodes = createHistoryItem(entry);
-      historyNodes.set(entry.id, nodes);
-    }
-    const key = [
-      entry.startedAt,
-      entry.command,
-      entry.elapsedMs,
-      entry.status,
-      entry.progress,
-      entry.reply,
-      entry.truncated,
-      busy,
-      t('triggerHistoryProgress'),
-    ];
-    const previous = historyRenderKeys.get(nodes.item);
-    if (previous && key.every((value, i) => Object.is(value, previous[i]))) {
-      if (list.children[index] !== nodes.item) list.insertBefore(nodes.item, list.children[index] ?? null);
-      return;
-    }
-    historyRenderKeys.set(nodes.item, key);
-    nodes.item.className = `trigger-history-item is-${entry.status}`;
-    setHistoryText(nodes.time, new Date(entry.startedAt).toLocaleTimeString(undefined, { hour12: false }));
-    setHistoryText(nodes.status, t(historyStatusKey(entry.status)));
-    setHistoryText(nodes.command, summarizeTriggerCommand(entry.command));
-    setHistoryText(nodes.duration, entry.elapsedMs === null ? '' : `${entry.elapsedMs} ms`);
-    setHistoryText(nodes.copyCommand, t('triggerHistoryCopyCommand'));
-    nodes.copyCommand.title = t('triggerHistoryCopyCommand');
-    setHistoryText(nodes.fill, t('triggerHistoryFillForm'));
-    nodes.fill.title = t('triggerHistoryFillForm');
-    nodes.fill.disabled = busy || !historyCommandCanFill(entry.command);
-    nodes.notice.hidden = !entry.truncated;
-    setHistoryText(nodes.notice, entry.truncated ? t('triggerHistoryTruncated') : '');
-    nodes.progress.hidden = !entry.progress;
-    setHistoryText(nodes.progress, entry.progress ? `${t('triggerHistoryProgress')}:\n${entry.progress}` : '');
-    nodes.reply.className = `trigger-history-reply${entry.status === 'failure' ? ' is-error' : ''}`;
-    setHistoryText(
-      nodes.reply,
-      entry.reply ? `${t('triggerHistoryReply')}:\n${entry.reply}` : t('triggerHistoryNoReply'),
-    );
-    if (list.children[index] !== nodes.item) list.insertBefore(nodes.item, list.children[index] ?? null);
-  });
-  list.scrollTop = scrollTop;
-  empty.hidden = matches.length > 0;
-  empty.textContent = historyEntries.length ? t('triggerHistoryNoMatch') : t('triggerHistoryEmpty');
-}
-
-function renderLog() {
-  const pane = el('km-log-pane');
-  const activity = el('km-log-activity');
-  const stateLabel = el('km-log-state');
-  const copy = /** @type {HTMLButtonElement|null} */ (el('btn-km-log-copy'));
-  const exportButton = /** @type {HTMLButtonElement|null} */ (el('btn-km-log-export'));
-  const clear = /** @type {HTMLButtonElement|null} */ (el('btn-km-log-clear'));
-  if (!pane) return;
-  pane.hidden = false;
-  if (activity) {
-    activity.hidden = !busy;
-    activity.classList.toggle('is-running', busy);
-    activity.setAttribute('aria-label', busy ? t('triggerHistoryRunning') : '');
-  }
-  if (stateLabel) {
-    stateLabel.textContent = busy
-      ? t('triggerHistoryRunning')
-      : t('triggerHistoryCount', { count: historyEntries.length });
-    stateLabel.classList.toggle('is-running', busy);
-  }
-  if (copy) copy.disabled = historyEntries.length === 0;
-  if (exportButton) exportButton.disabled = historyEntries.length === 0;
-  if (clear) clear.disabled = historyEntries.length === 0 || busy;
-  renderHistory();
-}
 
 function renderPdmStatus() {
   const pill = el('km-pdm-status');
@@ -413,213 +263,6 @@ function renderFields() {
     }
     volt.value = fields.voltChoices.includes(current) ? current : '9V';
   }
-}
-
-function renderPdos() {
-  const list = el('km-pdo-list');
-  if (!list) return;
-  if (pdos.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'trigger-empty';
-    empty.textContent = t('triggerPdoEmpty');
-    list.replaceChildren(empty);
-    return;
-  }
-  list.replaceChildren(
-    ...pdos.map((pdo) => {
-      const text = describePdo(pdo);
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'trigger-pdo-row';
-      row.setAttribute('role', 'listitem');
-      row.title = pdo.label;
-      for (const [cls, value] of [
-        ['trigger-pdo-pos', text.position],
-        ['trigger-pdo-kind', text.kind],
-        ['trigger-pdo-volt', text.voltage],
-        ['trigger-pdo-cur', text.current],
-      ]) {
-        const cell = document.createElement('span');
-        cell.className = cls;
-        cell.textContent = value;
-        row.appendChild(cell);
-      }
-      row.addEventListener('click', () => fillFromPdo(pdo));
-      return row;
-    }),
-  );
-}
-
-function renderDetection() {
-  const exportButton = /** @type {HTMLButtonElement|null} */ (el('btn-km-export-report'));
-  if (exportButton) exportButton.disabled = busy || scanning || !detection?.completion || !detection?.results.length;
-  const summary = el('km-detection-summary');
-  const box = el('km-detection-results');
-  if (!summary || !box) return;
-  const diagnostics = el('km-detection-diagnostics');
-  const diagnosticsDetails = el('km-detection-diagnostics-details');
-  const scanEntry = historyEntries.find((entry) => entry.id === detectionHistoryId);
-  summary.textContent = detection
-    ? detectionSummary(detection)
-    : scanning
-      ? t('scanPhaseStandard')
-      : scanEntry
-        ? t(historyStatusKey(scanEntry.status))
-        : '';
-  summary.hidden = !summary.textContent;
-  const expanded = new Set(
-    [...box.querySelectorAll('.trigger-detection-detail:not([hidden])')].map(
-      (node) => /** @type {HTMLElement} */ (node).dataset.protocol,
-    ),
-  );
-  if (!detection) {
-    box.replaceChildren();
-    detectionRows.clear();
-    if (diagnostics) diagnostics.textContent = '';
-    if (diagnosticsDetails) diagnosticsDetails.hidden = true;
-    return;
-  }
-  const report = detection;
-  /** @param {string} id */
-  const groupId = (id) => (id === 'pd' ? 'pd' : ['qc', 'qc3', 'bc', 'apple'].includes(id) ? 'standard' : 'vendor');
-  const groups = [
-    ['pd', 'triggerGroupPd'],
-    ['standard', 'triggerGroupStandard'],
-    ['vendor', 'triggerGroupVendor'],
-  ];
-  for (const [id, labelKey] of groups) {
-    const groupResults = report.results.filter((result) => groupId(result.id) === id);
-    if (!groupResults.length) continue;
-    let group = /** @type {HTMLElement|null} */ (box.querySelector(`.trigger-detection-group.is-${id}`));
-    if (!group) {
-      group = document.createElement('section');
-      group.appendChild(document.createElement('h3'));
-      box.appendChild(group);
-    }
-    group.className = `trigger-detection-group is-${id}`;
-    if (group.firstElementChild) setHistoryText(/** @type {HTMLElement} */ (group.firstElementChild), t(labelKey));
-    let position = 1;
-    for (const result of groupResults) {
-      const before = group.children[position++] ?? null;
-      const key = JSON.stringify([result, report.completion, report.active === result.id, busy, t('scanEvidence')]);
-      const cached = detectionRows.get(result.id);
-      if (cached?.key === key) {
-        if (before !== cached.row) group.insertBefore(cached.row, before);
-        continue;
-      }
-      const row = document.createElement('div');
-      row.className = `trigger-detection-result is-${result.state}`;
-      row.dataset.protocol = result.id;
-      row.classList.toggle('is-pd', result.id === 'pd');
-      row.classList.toggle('is-checking', !report.completion && report.active === result.id);
-      const heading = document.createElement('div');
-      heading.className = 'trigger-detection-heading';
-      const name = document.createElement('span');
-      name.className = 'trigger-protocol-name';
-      name.textContent = result.label;
-      const status = document.createElement('span');
-      status.className = 'trigger-detection-state';
-      status.textContent =
-        !report.completion && report.active === result.id ? t('scanChecking') : detectionStateLabel(result);
-      heading.append(name, status);
-      row.appendChild(heading);
-      const values = detectionVoltages(result);
-      if (values.length || result.state === 'supported') {
-        const voltage = document.createElement('div');
-        voltage.className = 'trigger-detection-voltages';
-        voltage.setAttribute('aria-label', t('scanVoltages'));
-        for (const value of values) {
-          const chip = document.createElement('span');
-          chip.className = 'trigger-voltage-chip';
-          chip.textContent = value;
-          voltage.append(chip);
-        }
-        if (!values.length) {
-          voltage.classList.add('is-empty');
-          voltage.textContent = t('scanVoltageUnknown');
-        }
-        row.appendChild(voltage);
-      }
-      if (
-        result.id === 'pd' &&
-        (result.pd_revision || result.pd_reported_version || result.pd_version_inference || report.completion)
-      ) {
-        const version = document.createElement('div');
-        version.className = 'trigger-detection-version';
-        version.textContent = pdVersionLabel(result);
-        row.appendChild(version);
-      }
-      const actions = document.createElement('div');
-      actions.className = 'trigger-detection-actions';
-      const reason = detectionReason(result.reason);
-      if (reason || result.detail) {
-        const detail = document.createElement('div');
-        detail.className = 'trigger-detection-detail';
-        detail.dataset.protocol = result.id;
-        detail.id = `km-detection-evidence-${result.id}`;
-        detail.hidden = !expanded.has(result.id);
-        const source = t(
-          result.source === 'probe'
-            ? result.id === 'pd'
-              ? 'scanSourcePdo'
-              : 'scanSourceProbe'
-            : result.source === 'scan'
-              ? 'scanSourceDevice'
-              : 'scanSourceNone',
-        );
-        detail.textContent = [source, reason, result.detail].filter(Boolean).join('\n');
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'cmd-btn trigger-evidence-toggle';
-        toggle.textContent = t('scanEvidence');
-        toggle.setAttribute('aria-controls', detail.id);
-        toggle.setAttribute('aria-expanded', String(!detail.hidden));
-        toggle.addEventListener('click', () => {
-          detail.hidden = !detail.hidden;
-          toggle.setAttribute('aria-expanded', String(!detail.hidden));
-        });
-        actions.appendChild(toggle);
-        row.appendChild(detail);
-      }
-      if (detectionCanSelect(result)) {
-        const use = document.createElement('button');
-        use.type = 'button';
-        use.className = 'cmd-btn trigger-use-protocol';
-        use.textContent = t('triggerUseProtocol');
-        use.disabled = busy;
-        use.title = t('scanSelectProtocol');
-        use.addEventListener('click', () => fillDetectedProtocol(result));
-        actions.appendChild(use);
-      }
-      if (actions.childElementCount) row.insertBefore(actions, row.querySelector('.trigger-detection-detail'));
-      if (cached?.row.parentElement === group) cached.row.replaceWith(row);
-      else group.insertBefore(row, before);
-      detectionRows.set(result.id, { key, row });
-    }
-  }
-  const ids = new Set(report.results.map((result) => result.id));
-  for (const [id, cached] of detectionRows) {
-    if (!ids.has(id)) {
-      cached.row.remove();
-      detectionRows.delete(id);
-    }
-  }
-  for (const group of box.querySelectorAll('.trigger-detection-group')) {
-    if (!group.querySelector('.trigger-detection-result')) group.remove();
-  }
-  if (diagnostics) {
-    diagnostics.textContent = [
-      `${t('triggerFirmware')} ${report.context?.firmware_version ?? t('unknown')}`,
-      report.context?.firmware_diagnostic ?? '',
-      report.pdm_version ? `PDM ${report.pdm_version}` : '',
-      report.context?.applied_pdm ? JSON.stringify(report.context.applied_pdm) : t('triggerConfigUnknown'),
-      report.reset_verification ? verificationText(report.reset_verification) : '',
-      ...report.diagnostics,
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
-  if (diagnosticsDetails) diagnosticsDetails.hidden = !diagnostics?.textContent;
 }
 
 /** @param {'detection'|'trigger'} mode */
@@ -1002,55 +645,6 @@ async function cancel() {
   }
 }
 
-/** @param {string} text */
-async function copyText(text) {
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success(() => t('triggerCopied'));
-  } catch {
-    const fallback = document.createElement('textarea');
-    fallback.value = text;
-    fallback.readOnly = true;
-    fallback.style.position = 'fixed';
-    fallback.style.opacity = '0';
-    document.body.appendChild(fallback);
-    fallback.select();
-    let copied = false;
-    try {
-      copied = document.execCommand('copy');
-    } catch {
-      copied = false;
-    }
-    fallback.remove();
-    if (copied) toast.success(() => t('triggerCopied'));
-    else toast.error(() => t('triggerHistoryCopyFailed'));
-  }
-}
-
-async function copyLog() {
-  const content = exportTriggerHistory(historyEntries);
-  if (!content) return;
-  await copyText(content);
-}
-
-async function exportLog() {
-  const content = exportTriggerHistory(historyEntries);
-  if (!content) return;
-  try {
-    const path = await window.__TAURI__.dialog.save({
-      title: t('triggerHistoryExport'),
-      defaultPath: `lapower-command-history-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`,
-      filters: [{ name: t('textFile'), extensions: ['txt'] }],
-    });
-    if (!path) return;
-    await window.__TAURI__.fs.writeTextFile(path, content);
-    toast.success(() => t('triggerHistoryExported'));
-  } catch (error) {
-    toast.error(() => t('triggerHistoryExportFailed', { detail: errorText(error) }));
-  }
-}
-
 // ─── Events from the backend ─────────────────────────────────────────────────
 
 /**
@@ -1243,11 +837,4 @@ export function suspendTriggerView() {
   progressFrame = 0;
   if (liveTimer !== null) clearInterval(liveTimer);
   liveTimer = null;
-}
-
-/** @param {import('../km003c-model.js').VoltageVerification} verification */
-function verificationText(verification) {
-  const key = verification.status === 'verified' ? 'triggerResetVerified' : 'triggerResetUnconfirmed';
-  const measured = verification.measured_mv == null ? '—' : `${verification.measured_mv} mV`;
-  return `${t(key)} · ${measured} · ${verification.detail}`;
 }

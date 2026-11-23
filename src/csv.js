@@ -27,6 +27,7 @@ import {
   updateRemainingDisplay,
   updateStatsDisplay,
 } from './data.js';
+import { deviceStream } from './device-stream.js';
 import { runExportSession } from './export-session.js';
 import {
   closeReader,
@@ -269,9 +270,10 @@ async function importOpenedFile(
 
     await stopRecording();
     if (generation !== importGeneration) return false;
-    clearAndResetStats();
+    clearAndResetStats({ replaceStream: false });
     state.lastRecordingStartTime = imported.startTime;
     setChartColumns(cols);
+    deviceStream.replace({ pdEnabled: !state.settings.pdFollowRecording });
     setMarkers(cols, Array.isArray(imported.markers) ? imported.markers : null, n);
     noteImportedSource(cols, imported.source);
     state.dataIntervalMs = imported.intervalMs;

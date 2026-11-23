@@ -25,7 +25,14 @@ test('dialog capability is open+save only', () => {
   assert.ok(Array.isArray(permissions), 'capabilities.permissions 必须是数组');
   assert.ok(permissions.includes('dialog:allow-open'), '缺少 dialog:allow-open');
   assert.ok(permissions.includes('dialog:allow-save'), '缺少 dialog:allow-save');
-  for (const forbidden of ['dialog:default', 'dialog:allow-message', 'dialog:allow-ask']) {
+  for (const forbidden of [
+    'dialog:default',
+    'dialog:allow-message',
+    'dialog:allow-ask',
+    'fs:default',
+    'fs:allow-write-text-file',
+    'fs:allow-read-text-file',
+  ]) {
     assert.ok(!permissions.includes(forbidden), `不应再授予 ${forbidden}`);
   }
 });

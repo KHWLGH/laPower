@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { addMarker, markersOf } from '../src/markers.js';
-import { calculateEnergy } from '../src/measurement.js';
+import { calculateEnergyInRange } from '../src/measurement.js';
 import { F64Col } from '../src/state.js';
 import {
   defaultVideoExportOptions,
@@ -408,7 +408,10 @@ test('cooperative report matches synchronous output with gaps, mixed rates, segm
     if (i % 19 === 0) cols.temp.setAt(i, Number.NaN);
     if (i % 23 === 0) cols.power.setAt(i, Number.NaN);
   }
-  cols.timestamps.setAt(4096, cols.timestamps.valueAt(4095) + 3000);
+  for (let i = 4096; i < cols.x.length; i++) {
+    cols.x.setAt(i, cols.x.valueAt(i) + 3);
+    cols.timestamps.setAt(i, cols.timestamps.valueAt(i) + 3000);
+  }
   const input = {
     columns: snapshots(cols),
     length: cols.x.length,
@@ -418,10 +421,12 @@ test('cooperative report matches synchronous output with gaps, mixed rates, segm
     markerLimit: Number.POSITIVE_INFINITY,
   };
   const expected = projectVideo(input);
-  const energy = calculateEnergy(
-    input.columns.timestamps,
+  const energy = calculateEnergyInRange(
+    input.columns.x,
     input.columns.current,
     input.columns.power,
+    0,
+    cols.x.length - 1,
     input.columns.recordingSegments,
     null,
     input.columns.sampleIntervals,
@@ -494,4 +499,42 @@ test('report cancellation abandons preparation before publishing a payload', asy
   const cancelled = new AbortController();
   cancelled.abort();
   await assert.rejects(projectVideoAsync(input, { signal: cancelled.signal }), { name: 'AbortError' });
+});
+
+test('summary energy follows monotonic x rather than wall-clock jumps and averages skip segment boundaries', () => {
+  // Segment 1: 0..1 s at 10 V / 10 W; Segment 2: 2..3 s at 20 V / 20 W.
+  // The 1 s step across segments (1 -> 2) is within maxAgeS but crosses a recording boundary.
+  const cols = columns([
+    [0, 10, 1, 10, Number.NaN],
+    [1, 100, 10, 100, Number.NaN],
+    [2, 20, 1, 20, Number.NaN],
+    [3, 20, 1, 20, Number.NaN],
+  ]);
+  cols.recordingSegments.set([1, 1, 2, 2]);
+  // Inject a large backwards NTP wall-clock jump that must not affect monotonic x integration.
+  cols.timestamps.setAt(3, cols.timestamps.valueAt(2) - 60_000);
+
+  const projection = projectVideo({
+    columns: snapshots(cols),
+    length: cols.x.length,
+    frameCount: 4,
+    intervalMs: 1000,
+  });
+  const expectedEnergy = calculateEnergyInRange(
+    cols.x,
+    cols.current,
+    cols.power,
+    0,
+    cols.x.length - 1,
+    cols.recordingSegments,
+    1000,
+    cols.sampleIntervals,
+    cols.currentMagnitudes,
+  );
+  assert.equal(projection.summary.energyWh, expectedEnergy.wh);
+  assert.equal(projection.summary.capacityMah, expectedEnergy.mah);
+  // Segment 1 integrates left endpoint 10 W / 10 V for 1 s; boundary step (100 W / 100 V) is skipped;
+  // Segment 2 integrates left endpoint 20 W / 20 V for 1 s -> exact average is 15 W / 15 V.
+  assert.equal(projection.summary.averagePowerW, 15);
+  assert.equal(projection.summary.averageVoltageV, 15);
 });

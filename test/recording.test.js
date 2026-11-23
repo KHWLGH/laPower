@@ -905,3 +905,36 @@ test('large follow statistics coalesce appends, label completed bounds and avoid
     F64Col.prototype.snapshot = originalSnapshot;
   }
 });
+
+test('clearChart updates columns before replacing the stream and preserves independent PD capture', async () => {
+  const { clearChart } = await import('../src/data.js');
+  openNativeStream();
+  state.settings.pdFollowRecording = false;
+  const segmentCalls = [];
+  window.__TAURI__.core.invoke = async (command, args) => {
+    if (command === 'set_recording_segment') {
+      segmentCalls.push(args);
+      return { generation, after_seq: boundary, segment: args.segment };
+    }
+    if (command === 'drain_device_stream') return { generation, last_seq: deviceStream.lastSeq };
+  };
+  deviceStream.handleBatch([nativeSample(1, 0)]);
+  segmentCalls.length = 0;
+  boundary = 1;
+
+  clearChart();
+  await deviceStream.settle();
+  // Next batch arrives with the newly installed columns: must NOT fire a second replace().
+  deviceStream.handleBatch([nativeSample(2, 0)]);
+  await deviceStream.settle();
+
+  assert.ok(segmentCalls.length >= 1);
+  assert.ok(
+    segmentCalls.every((call) => call.pdEnabled === true),
+    'clearing chart with pdFollowRecording=false must keep backend PD capture enabled',
+  );
+  const afterClearCalls = segmentCalls.length;
+  deviceStream.handleBatch([nativeSample(3, 0)]);
+  await deviceStream.settle();
+  assert.equal(segmentCalls.length, afterClearCalls, 'subsequent batches must not trigger redundant replacement');
+});
