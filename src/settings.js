@@ -121,9 +121,16 @@ function normalizeSettings(saved) {
     merged.rangeEnd = swap;
   }
   merged.sampleRate = Math.round(clamp(merged.sampleRate, 1, 60_000, defaultSettings.sampleRate));
-  merged.backgroundTransparency = Math.round(
-    clamp(merged.backgroundTransparency, 0, 100, defaultSettings.backgroundTransparency),
-  );
+  const legacyBackgroundTransparency = /** @type {{ backgroundTransparency?: unknown }} */ (source)
+    .backgroundTransparency;
+  if (typeof source.backgroundOpacity === 'number' && Number.isFinite(source.backgroundOpacity)) {
+    merged.backgroundOpacity = Math.round(clamp(source.backgroundOpacity, 0, 100, defaultSettings.backgroundOpacity));
+  } else if (typeof legacyBackgroundTransparency === 'number' && Number.isFinite(legacyBackgroundTransparency)) {
+    merged.backgroundOpacity = Math.round(100 - clamp(legacyBackgroundTransparency, 0, 100, 0));
+  } else {
+    merged.backgroundOpacity = defaultSettings.backgroundOpacity;
+  }
+  merged.backgroundBlur = Math.round(clamp(merged.backgroundBlur, 0, 40, defaultSettings.backgroundBlur));
   // 纵向余量参与 Y 轴量程计算，坏值会直接污染 scale
   if (merged.chartHeadroomMode !== 'auto' && merged.chartHeadroomMode !== 'custom') {
     merged.chartHeadroomMode = defaultSettings.chartHeadroomMode;
@@ -153,6 +160,7 @@ function normalizeSettings(saved) {
   delete legacyMerged.chartAxisSpacing;
   delete legacyMerged.chartCurveOffset;
   delete legacyMerged.chartCurveShift;
+  delete legacyMerged.backgroundTransparency;
   merged.realtimePanelWidth = Math.round(
     clamp(merged.realtimePanelWidth, 200, 360, defaultSettings.realtimePanelWidth),
   );
@@ -209,16 +217,30 @@ export function echoApUnit() {
   else apUnit.textContent = '';
 }
 
-export function applyBackgroundTransparency() {
-  const percent = state.settings.backgroundTransparency;
+export function applyBackgroundOpacity() {
+  const percent = state.settings.backgroundOpacity;
   const label = `${percent}%`;
-  document.documentElement.style.setProperty('--wallpaper-image-opacity', String(1 - percent / 100));
-  const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('background-transparency'));
+  document.documentElement.style.setProperty('--wallpaper-image-opacity', String(percent / 100));
+  const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('background-opacity'));
   if (slider) {
     slider.value = String(percent);
     slider.setAttribute('aria-valuetext', label);
   }
-  const value = document.getElementById('background-transparency-value');
+  const value = document.getElementById('background-opacity-value');
+  if (value) value.textContent = label;
+}
+
+export function applyBackgroundBlur() {
+  const radius = state.settings.backgroundBlur;
+  const label = `${radius} px`;
+  document.documentElement.style.setProperty('--wallpaper-blur-radius', `${radius}px`);
+  document.documentElement.style.setProperty('--wallpaper-blur-filter', radius > 0 ? `blur(${radius}px)` : 'none');
+  const slider = /** @type {HTMLInputElement|null} */ (document.getElementById('background-blur'));
+  if (slider) {
+    slider.value = String(radius);
+    slider.setAttribute('aria-valuetext', label);
+  }
+  const value = document.getElementById('background-blur-value');
   if (value) value.textContent = label;
 }
 
@@ -247,7 +269,8 @@ function echoSettingsUI() {
   setChecked('immediate-marker', state.settings.immediateMarker);
   setChecked('pd-follow-recording', state.settings.pdFollowRecording);
   echoHeadroomUI();
-  applyBackgroundTransparency();
+  applyBackgroundOpacity();
+  applyBackgroundBlur();
 
   const tempIp = /** @type {HTMLInputElement|null} */ (document.getElementById('temp-ip'));
   if (tempIp) tempIp.value = state.settings.tempIp || '127.0.0.1';

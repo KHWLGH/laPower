@@ -250,7 +250,8 @@ Open via the title-bar gear (`⌘,` or Settings… on macOS). Wide windows pin n
 | `Theme` | `Follow system` (default), `Light`, `Dark` |
 | `Language` | `Follow system` (default), 简体中文, 繁體中文, English, 日本語 |
 | `Custom background` | Select a local PNG, JPG, or WebP image (≤ 25 MB) to persist as backdrop, or `Clear` to reset (no bundled wallpaper) |
-| `Background image transparency` | 0–100%, default 0% |
+| `Background image opacity` | 0–100%, default 100% (0% hidden, 100% full) |
+| `Background image blur` | 0–40 px, default 14 px (0 px sharp) |
 | `UI scale` | 50–200%, default 100%, applied on release; lower if controls feel crowded |
 
 Language switches take effect immediately without losing recordings or connections; see [Language selection](DEVELOPMENT.md#language-selection) for locale rules and Linux launch examples.

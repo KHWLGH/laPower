@@ -673,11 +673,22 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
-                        <label class="settings-row-title" for="background-transparency"><span data-i18n="backgroundTransparency">Background image transparency</span></label>
+                        <label class="settings-row-title" for="background-opacity"><span data-i18n="backgroundOpacity">Background image opacity</span></label>
+                        <div class="settings-row-desc"><span data-i18n="backgroundOpacityHint">0% hides the background image; 100% shows it at full opacity.</span></div>
                       </div>
                       <div class="settings-row-control settings-scale">
-                        <input type="range" id="background-transparency" class="scale-slider" min="0" max="100" step="1" value="0" aria-valuetext="0%" />
-                        <span id="background-transparency-value" class="scale-value">0%</span>
+                        <input type="range" id="background-opacity" class="scale-slider" min="0" max="100" step="1" value="100" aria-valuetext="100%" />
+                        <span id="background-opacity-value" class="scale-value">100%</span>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="background-blur"><span data-i18n="backgroundBlur">Background image blur</span></label>
+                        <div class="settings-row-desc"><span data-i18n="backgroundBlurHint">Adjust the blur radius of the custom background image (0 px keeps it sharp).</span></div>
+                      </div>
+                      <div class="settings-row-control settings-scale">
+                        <input type="range" id="background-blur" class="scale-slider" min="0" max="40" step="1" value="14" aria-valuetext="14 px" />
+                        <span id="background-blur-value" class="scale-value">14 px</span>
                       </div>
                     </div>
                     <div class="settings-row">

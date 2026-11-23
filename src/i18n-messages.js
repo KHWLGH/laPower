@@ -327,7 +327,20 @@ export const messages = {
   settingsNavigation: ['Settings navigation', '设置目录', '設定目錄', '設定の目次'],
   appearanceAndLanguage: ['Appearance & language', '外观与语言', '外觀與語言', '外観と言語'],
   customBackground: ['Custom background', '自定义背景图片', '自訂背景圖片', 'カスタム背景画像'],
-  backgroundTransparency: ['Background image transparency', '背景图片透明度', '背景圖片透明度', '背景画像の透明度'],
+  backgroundOpacity: ['Background image opacity', '背景图片不透明度', '背景圖片不透明度', '背景画像の不透明度'],
+  backgroundOpacityHint: [
+    '0% hides the background image; 100% shows it at full opacity.',
+    '0% 为完全透明，100% 为完全显示。',
+    '0% 為完全透明，100% 為完全顯示。',
+    '0% で完全に透明、100% で完全に表示されます。',
+  ],
+  backgroundBlur: ['Background image blur', '背景图片模糊程度', '背景圖片模糊程度', '背景画像のぼかし'],
+  backgroundBlurHint: [
+    'Adjust the blur radius of the custom background image (0 px keeps it sharp).',
+    '调整背景图片的模糊半径（0 px 为不模糊）。',
+    '調整背景圖片的模糊半徑（0 px 為不模糊）。',
+    'カスタム背景画像のぼかし半径を調整します（0 px でぼかしなし）。',
+  ],
   customBackgroundHint: [
     'Choose a PNG, JPG or WebP image. It is saved on this device and restored when the app starts.',
     '选择 PNG、JPG 或 WebP 图片。图片保存在此设备，并在应用启动时自动恢复。',

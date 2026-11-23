@@ -17,6 +17,7 @@ import { t } from '../src/i18n.js';
 globalThis.window = { __TAURI__: { core: { invoke: async () => null } } };
 
 const elements = new Map();
+const cssProps = new Map();
 /** @param {string} id */
 function el(id) {
   if (!elements.has(id)) {
@@ -41,7 +42,12 @@ function el(id) {
 globalThis.document = {
   getElementById: el,
   documentElement: {
-    style: { setProperty() {} },
+    style: {
+      /** @param {string} name @param {string} value */
+      setProperty(name, value) {
+        cssProps.set(name, String(value));
+      },
+    },
     setAttribute() {},
     getAttribute: () => null,
     classList: { toggle() {} },
@@ -73,6 +79,7 @@ function installStoreStub() {
   calls = [];
   failures = new Map();
   errorToasts = [];
+  cssProps.clear();
   toast.error = (message) => errorToasts.push(String(typeof message === 'function' ? message() : message));
   toast.success = () => {};
   toast.warning = () => {};
@@ -180,32 +187,87 @@ test('a healthy store produces no failure toasts', async () => {
   assert.deepEqual(errorToasts, [], '干净路径不该出现任何错误提示');
 });
 
-test('background transparency and automatic stroke width survive reload and reset', async () => {
+test('background opacity, blur, legacy transparency migration and automatic stroke width survive reload and reset', async () => {
   installStoreStub();
   const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
   const hadElement = 'HTMLElement' in globalThis;
   if (!hadElement) globalThis.HTMLElement = class {};
   try {
-    state.settings = { ...defaultSettings, backgroundTransparency: 64, chartAutoLineWidth: false };
+    state.settings = { ...defaultSettings, backgroundOpacity: 36, backgroundBlur: 22, chartAutoLineWidth: false };
     assert.equal(await saveSettings(), true);
     state.settings = { ...defaultSettings };
     await loadSettings();
-    assert.equal(state.settings.backgroundTransparency, 64);
-    assert.equal(el('background-transparency').value, '64');
-    assert.equal(el('background-transparency-value').textContent, '64%');
+    assert.equal(state.settings.backgroundOpacity, 36);
+    assert.equal(el('background-opacity').value, '36');
+    assert.equal(el('background-opacity-value').textContent, '36%');
+    assert.equal(cssProps.get('--wallpaper-image-opacity'), '0.36');
+    assert.equal(state.settings.backgroundBlur, 22);
+    assert.equal(el('background-blur').value, '22');
+    assert.equal(el('background-blur-value').textContent, '22 px');
+    assert.equal(cssProps.get('--wallpaper-blur-radius'), '22px');
+    assert.equal(cssProps.get('--wallpaper-blur-filter'), 'blur(22px)');
     assert.equal(state.settings.chartAutoLineWidth, false);
     assert.equal(el('chart-auto-line-width').checked, false);
 
-    state.settings.backgroundTransparency = 250;
+    state.settings.backgroundOpacity = 250;
+    state.settings.backgroundBlur = 99;
     assert.equal(await saveSettings(), true);
     await loadSettings();
-    assert.equal(state.settings.backgroundTransparency, 100);
+    assert.equal(state.settings.backgroundOpacity, 100);
+    assert.equal(cssProps.get('--wallpaper-image-opacity'), '1');
+    assert.equal(state.settings.backgroundBlur, 40);
+    assert.equal(cssProps.get('--wallpaper-blur-radius'), '40px');
+    assert.equal(cssProps.get('--wallpaper-blur-filter'), 'blur(40px)');
+
+    state.settings.backgroundOpacity = -10;
+    state.settings.backgroundBlur = -5;
+    assert.equal(await saveSettings(), true);
+    await loadSettings();
+    assert.equal(state.settings.backgroundOpacity, 0);
+    assert.equal(cssProps.get('--wallpaper-image-opacity'), '0');
+    assert.equal(state.settings.backgroundBlur, 0);
+    assert.equal(cssProps.get('--wallpaper-blur-radius'), '0px');
+    assert.equal(cssProps.get('--wallpaper-blur-filter'), 'none');
+
+    for (const [legacy, expectedOpacity, expectedCss] of [
+      [{ backgroundTransparency: 0 }, 100, '1'],
+      [{ backgroundTransparency: 64 }, 36, '0.36'],
+      [{ backgroundTransparency: 250 }, 0, '0'],
+      [{ backgroundOpacity: 80, backgroundTransparency: 64 }, 80, '0.8'],
+    ]) {
+      window.__TAURI__.core.invoke = async (command, args = {}) => {
+        if (command === 'plugin:store|get' && args.key === 'appSettings') return [legacy, true];
+        return invoke(command, args);
+      };
+      state.settings = { ...defaultSettings };
+      await loadSettings();
+      assert.equal(state.settings.backgroundOpacity, expectedOpacity);
+      assert.equal(cssProps.get('--wallpaper-image-opacity'), expectedCss);
+      assert.equal(Object.hasOwn(state.settings, 'backgroundTransparency'), false);
+    }
+
+    window.__TAURI__.core.invoke = invoke;
+    assert.equal(await saveSettings(), true);
+    const saved = calls.findLast(({ command }) => command === 'plugin:store|set');
+    assert.ok(saved);
+    assert.equal(Object.hasOwn(saved.args.value, 'backgroundTransparency'), false);
+    assert.equal(saved.args.value.backgroundOpacity, 80);
 
     assert.equal(await resetSettings(), true);
-    assert.equal(el('background-transparency-value').textContent, '0%');
+    assert.equal(state.settings.backgroundOpacity, 100);
+    assert.equal(el('background-opacity').value, '100');
+    assert.equal(el('background-opacity-value').textContent, '100%');
+    assert.equal(cssProps.get('--wallpaper-image-opacity'), '1');
+    assert.equal(state.settings.backgroundBlur, 14);
+    assert.equal(el('background-blur').value, '14');
+    assert.equal(el('background-blur-value').textContent, '14 px');
+    assert.equal(cssProps.get('--wallpaper-blur-radius'), '14px');
+    assert.equal(cssProps.get('--wallpaper-blur-filter'), 'blur(14px)');
     assert.equal(el('chart-auto-line-width').checked, true);
   } finally {
     state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
     if (!hadElement) delete globalThis.HTMLElement;
   }
 });

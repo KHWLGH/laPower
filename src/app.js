@@ -64,7 +64,8 @@ import { clampLimitMb } from './recording-limit.js';
 import { refreshRecoveryLanguage, scanRecoveries } from './recording-recovery.js';
 import { finalizeSpool, spoolRecordingStarted } from './recording-spool.js';
 import {
-  applyBackgroundTransparency,
+  applyBackgroundBlur,
+  applyBackgroundOpacity,
   applyRealtimePanelWidth,
   applySampleRate,
   debouncedSaveSettings,
@@ -552,12 +553,20 @@ function setupControls() {
 
   // 主题（设置页 外观 卡）
   initCustomBackgroundControls();
-  const backgroundTransparency = /** @type {HTMLInputElement|null} */ (
-    document.getElementById('background-transparency')
-  );
-  backgroundTransparency?.addEventListener('input', () => {
-    state.settings.backgroundTransparency = backgroundTransparency.valueAsNumber;
-    applyBackgroundTransparency();
+  const backgroundOpacity = /** @type {HTMLInputElement|null} */ (document.getElementById('background-opacity'));
+  backgroundOpacity?.addEventListener('input', () => {
+    const next = backgroundOpacity.valueAsNumber;
+    if (!Number.isFinite(next)) return;
+    state.settings.backgroundOpacity = Math.round(Math.min(100, Math.max(0, next)));
+    applyBackgroundOpacity();
+    debouncedSaveSettings();
+  });
+  const backgroundBlur = /** @type {HTMLInputElement|null} */ (document.getElementById('background-blur'));
+  backgroundBlur?.addEventListener('input', () => {
+    const next = backgroundBlur.valueAsNumber;
+    if (!Number.isFinite(next)) return;
+    state.settings.backgroundBlur = Math.round(Math.min(40, Math.max(0, next)));
+    applyBackgroundBlur();
     debouncedSaveSettings();
   });
   const autoLineWidth = /** @type {HTMLInputElement|null} */ (document.getElementById('chart-auto-line-width'));
