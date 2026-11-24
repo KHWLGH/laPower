@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 KHWLGH
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-only
 // For original project contributions; see COPYRIGHT.
 //! AdcQueue 1 kHz clock expansion, replay verification and fixed-grid poll timing.
 

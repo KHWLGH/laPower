@@ -531,7 +531,6 @@ export const messages = {
   componentIcons: ['Interface icons', '界面图标', '介面圖示', 'インターフェースのアイコン'],
   componentDesktop: ['Desktop application framework', '桌面应用框架', '桌面應用程式框架', 'デスクトップアプリの基盤'],
   componentDialogs: ['Native file dialogs', '原生文件对话框', '原生檔案對話方塊', 'ネイティブのファイルダイアログ'],
-  componentFiles: ['File access', '文件访问', '檔案存取', 'ファイルアクセス'],
   componentSettings: ['Settings storage', '设置存储', '設定儲存', '設定の保存'],
   componentWindow: ['Native window integration', '原生窗口集成', '原生視窗整合', 'ネイティブウィンドウとの連携'],
   componentBrowser: [

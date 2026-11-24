@@ -19,7 +19,6 @@ export const TARGETS = [
 const MAIN = {
   tauri: 'componentDesktop',
   'tauri-plugin-dialog': 'componentDialogs',
-  'tauri-plugin-fs': 'componentFiles',
   'tauri-plugin-store': 'componentSettings',
   'tauri-plugin-decorum': 'componentWindow',
   'tauri-plugin-opener': 'componentBrowser',

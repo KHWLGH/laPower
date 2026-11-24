@@ -393,14 +393,19 @@ html[data-ui-scale-css] .app-shell {
 }
 
 .chart-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   min-width: 0;
 }
 .chart-header .chart-legend {
-  flex: 1;
+  grid-column: 2;
   min-width: 0;
+}
+.chart-header #marker-actions {
+  grid-column: 3;
+  justify-self: end;
 }
 .cmd-action-group.split-button {
   gap: 0;

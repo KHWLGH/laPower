@@ -2524,7 +2524,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-decorum",
  "tauri-plugin-dialog",
- "tauri-plugin-fs",
  "tauri-plugin-opener",
  "tauri-plugin-store",
  "tiny-skia",

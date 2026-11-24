@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 KHWLGH
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-only
 // For original project contributions; see COPYRIGHT.
 use super::clock::*;
 use super::mapper::*;
