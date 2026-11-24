@@ -96,7 +96,7 @@ Rendered report samples from the same 120-second simulated recording. Landscape 
 ### Interface
 
 - Tabbed workspaces (Monitor / PD analysis / Protocol control / Settings) with title-bar device connection available everywhere; Protocol control stays visible and activates on supported POWER-Z connections.
-- **Follow system / Light / Dark** themes with Fluent UI-aligned frosted-glass surfaces, smooth transitions, optional persistent **custom background image** (local PNG/JPEG/WebP, no bundled default wallpaper), and adjustable backdrop transparency.
+- **Follow system / Light / Dark** themes with Fluent UI-aligned frosted-glass surfaces, smooth transitions, optional persistent **custom background image** (local PNG/JPEG/WebP, no bundled default wallpaper), and adjustable backdrop opacity and blur.
 - Live **English, 简体中文, 繁體中文, 日本語** UI switching without dropping connections, recordings, or chart state, with automatic system locale detection (see [Language selection](docs/en/DEVELOPMENT.md#language-selection)).
 - **UI scale 50–200%**; macOS uses native window controls, Windows keeps Win11 Snap Layouts support, and Windows/Linux place window controls on the right.
 

@@ -19,31 +19,59 @@
 
 Cargo workspace 包含四个成员 crate 与原生 JavaScript 前端源码目录；发布构建由 esbuild 生成 `out/`。
 
-```text
-laPower/
-├── src-tauri/            Tauri v2 应用（后端）
-│   ├── src/lib.rs        应用状态、Tauri 命令注册与生命周期管理
-│   ├── src/acquire.rs    采集循环、节拍网格分窗与时间戳回推
-│   ├── src/stream.rs     流会话管理、有界通道、背压与末包回执
-│   ├── src/pd_capture.rs USB-PD 捕获会话（seq / generation / 按需解码）
-│   ├── src/km003c_session.rs POWER-Z Bulk / AdcQueue 与 CDC 控制会话
-│   ├── src/video_export.rs 静态图片与视频报告导出及其平台渲染编码子模块
-│   ├── src/usb_port.rs   分平台 USB 拓扑端口解析
-│   ├── src/updates.rs    手动 GitHub 更新检查与受限浏览器跳转
-│   ├── capabilities/     Tauri ACL 能力声明
-│   └── tauri.conf.json   窗口、CSP 与打包配置
-├── crates/
-│   ├── usbpd-parser/     USB-PD 报文解码库
-│   ├── km003c/           POWER-Z Bulk 协议、AdcQueue、CDC 与协议检测
-│   └── witrn-hid/        WITRN HID 设备封装
-├── src/                  前端源码（原生 ES Modules）
-├── out/                  构建产物 frontendDist（不入库）
-├── tools/showcase/       虚拟设备与截图开发工具（不随应用发货）
-├── test/                 前端核心测试（node --test）
-├── bench/                算法、存储、内存与渲染基准
-├── temperature-example/  外部温度服务 Python 示例
-└── docs/                 文档目录
+```mermaid
+flowchart TB
+  subgraph FE["前端与构建"]
+    SRC["src/<br/>原生 ES Modules"] --> OUT["out/<br/>esbuild 产物 frontendDist"]
+  end
+
+  subgraph BE["Tauri v2 后端 · src-tauri/"]
+    LIB["src/lib.rs<br/>状态 / 命令 / 生命周期"]
+    STREAM["acquire.rs · stream.rs · pd_capture.rs<br/>采集分窗 / 流控 / PD 会话"]
+    KM_SESS["km003c_session/<br/>Bulk / AdcQueue / CDC"]
+    EXPORT["video_export.rs · usb_port.rs · updates.rs<br/>报告导出 / USB 拓扑 / 更新"]
+    CONF["tauri.conf.json · capabilities/<br/>窗口 / CSP / ACL 权限"]
+    LIB --> STREAM
+    LIB --> KM_SESS
+    LIB --> EXPORT
+    CONF -.-> LIB
+  end
+
+  subgraph CRATES["独立协议库 · crates/"]
+    WITRN["witrn-hid<br/>WITRN HID 设备封装"]
+    USBPD["usbpd-parser<br/>USB-PD 报文解码"]
+    KM["km003c<br/>POWER-Z Bulk / AdcQueue / CDC"]
+  end
+
+  OUT <-->|"Tauri IPC / 静态内嵌"| LIB
+  STREAM --> WITRN
+  STREAM --> USBPD
+  KM_SESS --> KM
+  KM_SESS --> USBPD
 ```
+
+| 路径 | 职责 |
+| --- | --- |
+| `src-tauri/src/lib.rs` | 应用状态、Tauri 命令注册与生命周期管理 |
+| `src-tauri/src/acquire.rs` | 采集循环、节拍网格分窗与时间戳回推 |
+| `src-tauri/src/stream.rs` | 流会话管理、有界通道、背压与末包回执 |
+| `src-tauri/src/pd_capture.rs` | USB-PD 捕获会话（`seq` / `generation` / 按需解码） |
+| `src-tauri/src/km003c_session/` | POWER-Z Bulk / AdcQueue 与 CDC 控制会话 |
+| `src-tauri/src/video_export.rs` | 静态图片与视频报告导出及其平台渲染编码子模块 |
+| `src-tauri/src/usb_port.rs` | 分平台 USB 拓扑端口解析 |
+| `src-tauri/src/updates.rs` | 手动 GitHub 更新检查与受限浏览器跳转 |
+| `src-tauri/capabilities/` | Tauri ACL 能力声明 |
+| `src-tauri/tauri.conf.json` | 窗口、CSP 与打包配置 |
+| `crates/usbpd-parser/` | USB-PD 报文解码库 |
+| `crates/km003c/` | POWER-Z Bulk 协议、AdcQueue、CDC 与协议检测 |
+| `crates/witrn-hid/` | WITRN HID 设备封装 |
+| `src/` | 前端源码（原生 ES Modules） |
+| `out/` | 构建产物 `frontendDist`（不入库） |
+| `tools/showcase/` | 虚拟设备与截图开发工具（不随应用发货） |
+| `test/` | 前端核心测试（`node --test`） |
+| `bench/` | 算法、存储、内存与渲染基准 |
+| `temperature-example/` | 外部温度服务 Python 示例 |
+| `docs/` | 文档目录 |
 
 根目录 `Cargo.toml` 统一管理 `version`、`edition = 2021`、`rust-version = 1.85` 及公共依赖（`serde`、`serde_json`、`hidapi 2.6`、`chrono 0.4`）。
 
@@ -60,10 +88,20 @@ laPower/
 
 每个设备连接拥有读线程与 IPC 发射线程；POWER-Z 额外拥有独立 CDC 协议控制线程：
 
-```text
-HID / Bulk 读线程 ──── 有界 channel ────> IPC 发射线程 ──── emit ────> WebView
-  只解码与分窗，不 emit                    合批 / 转发 / ACK 追踪
-                                      ↘ POWER-Z CDC 控制线程
+```mermaid
+flowchart LR
+  READER["采集读线程<br/>HID / Bulk 解码与分窗"]
+  QUEUE["有界通道 cap=4096<br/>PD pending 256 / 后端日志"]
+  EMITTER["IPC 发射线程<br/>合批转发 / 末包回执"]
+  CDC["POWER-Z CDC 控制线程<br/>协议触发与检测"]
+  WV["WebView 前端<br/>渲染 / 统计 / 恢复文件"]
+
+  READER -->|"采样窗口 / PD 帧"| QUEUE
+  QUEUE --> EMITTER
+  EMITTER -->|"device-data-batch<br/>pd-data-batch"| WV
+  WV -->|"ack_device_stream<br/>abandon_device_stream"| EMITTER
+  READER -.->|"VoltageCache / PdoCache"| CDC
+  CDC <-->|"km003c_trigger<br/>km003c-trigger-progress"| WV
 ```
 
 - **采集读线程**：WITRN 阻塞读 HID 报告后再非阻塞排空主机队列；POWER-Z 读取 Vendor Bulk / AdcQueue（非队列轮询路径使用 `vbus_instant_v()` 与 `ibus_instant_a()` 瞬时字段并计算 `voltage × current`）。解码后按采样间隔节拍分窗求平均（电压、电流、功率、D+/D− 取窗口均值，同时保留逐帧电流幅值均值；时间、CC 与温度取窗口末帧），写入容量 4096 的有界通道。PD 事件在通道满时进入最多 256 条的 pending，完整报文保留在后端日志。未确认测量样本达 8192 时停止采集并报错。
@@ -81,14 +119,15 @@ HID / Bulk 读线程 ──── 有界 channel ────> IPC 发射线程 
 | `get_current_device_info` | 返回当前连接设备信息 |
 | `set_sample_rate` | 设置采样间隔（1–60000 ms，按设备下限钳制） |
 | `set_pd_capture_enabled` | 开关 PD 报文采集 |
-| `pd_log_clear` / `pd_log_after` / `pd_log_replace` / `decode_pd_at` | PD 日志清空、分页补洞（≤ 512 条/页）、导入替换与 O(1) 详情查询 |
+| `pd_log_clear` / `pd_log_after` / `pd_log_import` / `pd_log_import_page` / `decode_pd_at` | PD 日志清空、分页补洞（≤ 512 条/页）、受控文件流式导入与 O(1) 详情查询 |
 | `drain_device_stream` / `ack_device_stream` / `set_recording_segment` / `abandon_device_stream` | 流停止排空、消费确认、录制段边界与终态会话退休 |
 | `connect_temp_service` / `disconnect_temp_service` | 外部 TCP 温度源连接管理 |
 | `check_for_updates` / `open_project_page` | 手动请求 GitHub Releases（10 s 超时）与受限仓库页面跳转 |
 | `shutdown` | 停止全部后台线程并销毁主窗口 |
 | `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制与检测命令 |
-| `png_export_pick` | 选择协议检测报告 PNG 保存路径（受控单次文件写入） |
-| `video_export_capabilities` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | 报告图片/视频导出探测、一次性目标 ticket、后台单槽任务控制与进度查询 |
+| `choose_custom_background` / `load_custom_background` / `clear_custom_background` | 本地自定义背景图片选择、加载与清除 |
+| `csv_export_pick` / `pd_export_pick` / `text_export_pick` / `png_export_pick` / `paired_export_pick` / `csv_import_pick` / `pd_import_pick` | 选择文件并签发受控后端读写句柄（CSV/PD/文本日志/协议检测 PNG） |
+| `video_export_capability` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | 报告图片/视频导出探测、一次性目标 ticket、后台单槽任务控制与进度查询 |
 
 ### `src-tauri/src/pd_capture.rs`
 
@@ -147,11 +186,11 @@ Interface 0 Vendor Bulk 与 CDC 串口控制：`protocol::auth`（AES-128-ECB）
 | --- | --- | --- |
 | 装配与基础 | `app.js`、`shell.js`、`state.js`、`utils.js`、`dropdown.js`、`event-listeners.js`、`boot-timing.js` | 应用装配、Tab 路由、共享状态/类型与冷启动打点 |
 | 国际化 | `i18n.js`、`i18n-messages.js` | 四语词典、locale 解析与无刷新切换订阅 |
-| 图表 | `chart.js`、`chart-buckets.js`、`chart-extrema.js`、`chart-fill.js`、`chart-pacing.js`、`chart-window.js`、`performance-diagnostics.js`、`theme.js` | uPlot 调度、像素桶与 `OffscreenCanvas` 栅格化、极值索引、解析填充、帧压反馈、时间窗与诊断 |
-| 数据与文件 | `data.js`、`measurement.js`、`provenance.js`、`device-stream.js`、`recording-spool.js`、`recording-recovery.js`、`recording-limit.js`、`file-io.js`、`cooperative.js` | 采集、纯函数积分、来源记录、流控制、按秒恢复文件、容量上限、分块文件句柄与协作调度 |
+| 图表 | `chart.js`、`chart-axes.js`、`chart-buckets.js`、`chart-extrema.js`、`chart-fill.js`、`chart-pacing.js`、`chart-plugins.js`、`chart-raster.js`、`chart-window.js`、`performance-diagnostics.js`、`theme.js` | uPlot 调度、坐标轴量化与绘制、像素桶与 `OffscreenCanvas` 栅格化、极值索引、解析填充、交互插件、帧压反馈、时间窗与诊断 |
+| 数据与文件 | `data.js`、`data-display.js`、`data-range-ui.js`、`measurement.js`、`provenance.js`、`device-stream.js`、`recording-spool.js`、`recording-recovery.js`、`recording-limit.js`、`file-io.js`、`cooperative.js` | 采集、读数展示与时间窗 UI、纯函数积分、来源记录、流控制、按秒恢复文件、容量上限、分块文件句柄与协作调度 |
 | 导出与报告 | `csv.js`、`csv-codec.js`、`csv-export.js`、`csv-export-worker.js`、`csv-import-core.js`、`csv-import-worker.js`、`export-options.js`、`export-session.js`、`export-ui.js`、`paired-export.js`、`range-stats*.js`、`video-export*.js`、`video-palette.js`、`video-projection.js`、`protocol-report*.js` | CSV/PD/联合导出、分块 Worker、统计 Worker、报告冻结与协作投影、协议图片报告 |
 | 打点与快捷键 | `markers.js`、`marker-ui.js`、`shortcuts-core.js`、`shortcuts.js`、`shortcut-hints.js` | 数据集标记管理（纯函数）与全局快捷键绑定 |
-| PD 与协议控制 | `pd-model.js`、`pd-export*.js`、`views/pd.js`、`km003c-model.js`、`views/trigger.js` | PD 摘要/过滤/导出、KM003C 模型与触发/检测视图 |
+| PD 与协议控制 | `pd-model.js`、`pd-export*.js`、`views/pd.js`、`views/pd-list.js`、`views/pd-transfer.js`、`km003c-model.js`、`views/trigger.js`、`views/trigger-detection.js`、`views/trigger-history.js` | PD 摘要/过滤/列表/导入导出、KM003C 模型与触发/检测/历史视图 |
 | 设备与温度 | `device.js`、`temperature.js` | 设备连接生命周期、信息浮层与 TCP 温度状态 |
 | 设置、外观与关于 | `settings.js`、`views/settings-view.js`、`custom-background.js`、`ui-scale.js`、`theme-boot.js`、`views/about-view.js` | 持久化设置、自定义本地壁纸、50–200% 缩放、首帧主题、组件清单与更新检查 |
 | 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `display-stepper` `windowcontrols` |
@@ -166,6 +205,22 @@ Interface 0 Vendor Bulk 与 CDC 串口控制：`protocol::auth`（AES-128-ECB）
 
 ### 图表渲染
 
+```mermaid
+flowchart LR
+  COL["F64Col 分块列存储<br/>4096 点/块 · 常量块共享"]
+  IDX["ExactExtremaIndex<br/>256 节点/页 · 协作分片"]
+  FAST["OffscreenCanvas 光栅化<br/>Uint32Array 转置位图 + 2D 脏矩形"]
+  FILL["chart-fill.js<br/>解析面积覆盖合成"]
+  FALLBACK["Canvas 2D 回退<br/>半透明描边 / 无 OffscreenCanvas"]
+  NAV["导航缩略图<br/>独立 uPlot + 功率极值索引"]
+
+  COL --> IDX
+  IDX -->|"纯色不透明主曲线"| FAST
+  FAST --> FILL
+  IDX -->|"回退路径"| FALLBACK
+  COL --> NAV
+```
+
 - **分块列存储**：`F64Col` 按 4096 点分块，完整常量块在列内共享最近相同常量块（`Object.is` 区分正负零并保留缺失值），尾块独占缓冲，历史修改按块写时复制。
 - **增量极值与协作切片**：`ExactExtremaIndex`（每页 256 节点保存 8 通道极值下标，24 KiB/页）复用已完成前缀，窗口缩短或回看无需全量扫描；已索引投影按每步 32 桶查询并先在 ~4 ms 内尝试完成，其余工作与冷建按 ~1.5 ms 协作分片。
 - **Canvas 2D / `OffscreenCanvas` 管线**：密集主图在具备 `OffscreenCanvas` 且主曲线为纯色不透明描边时，把各通道有序极值段按设备像素列光栅化至转置位图（`Uint32Array`），跟踪二维脏矩形边界实现局部 `putImageData` / `drawImage` 并只清空上一帧脏区；3 点仿射探针跳过大部分样本投影调用；开启曲线阴影时使用 `chart-fill.js` 的解析面积覆盖在同一次上传中合成填充。非 `OffscreenCanvas` 或半透明颜色回退标准 Canvas 2D；导航缩略图维持独立的 uPlot 描边与单通道功率极值索引。
@@ -176,6 +231,34 @@ Interface 0 Vendor Bulk 与 CDC 串口控制：`protocol::auth`（AES-128-ECB）
 范围统计串行复用单个可复用 Worker（转移最多 4096 行 scratch 缓冲并归还，取消不发布部分结果）；PD 过滤与隐藏恢复合并投影并在页面不可见时取消 DOM 提交；图片/视频报告共用 `video-projection.js` 的 ~1.5 ms 协作分片内核，并在首次让出前冻结快照。
 
 ## 数据流
+
+```mermaid
+sequenceDiagram
+  participant FE as WebView 前端
+  participant BE as Tauri 后端
+  participant DEV as USB 仪表 · WITRN / POWER-Z
+
+  FE->>BE: enumerate_devices
+  BE-->>FE: 合并 WITRN HID 与 POWER-Z Bulk 设备列表
+
+  FE->>BE: connect_device_by_path
+  BE->>DEV: 打开接口，POWER-Z 完成 Bulk 握手并启动 CDC 线程
+
+  alt POWER-Z 1 ms 采样
+    BE->>DEV: HardwareID / StreamingAuth / StartGraph(3)
+    Note over BE,DEV: 每 20 ms 轮询 AdcQueue，认证失败回退 10 ms
+  else WITRN HID 或常规轮询
+    BE->>DEV: 阻塞读 HID 并排空队列 / 轮询瞬时 ADC
+  end
+
+  loop 实时采集与流控
+    DEV-->>BE: 原始测量帧 / PD 报文
+    BE->>BE: 按采样间隔节拍分窗聚合
+    BE-->>FE: device-data-batch / pd-data-batch
+    FE->>FE: 更新读数卡片、图表、统计与 1 s 恢复文件
+    FE->>BE: ack_device_stream
+  end
+```
 
 1. 前端调用 `enumerate_devices` 合并 WITRN HID 与 POWER-Z Bulk 设备。
 2. `connect_device_by_path` 建立连接（POWER-Z 先完成 Bulk 握手并启动独立 CDC 线程）。
@@ -208,16 +291,14 @@ WITRN 报告固定 **64 字节**（小端编码），第 0 字节为报告类型
 
 `npm test`（`node --test`）覆盖纯逻辑、数据处理、协议/文件契约、安全 CSP、发布同步与核心回归（实际数量与运行细节见 `npm test` 输出；新增测试边界见 [测试与回归边界](DEVELOPMENT.md#测试与回归边界)）：
 
-```text
-bench-gate        chart-binding     chart-buckets    chart-columns     chart-cooperative
-chart-cursor      chart-extrema     chart-feedback   chart-fill        chart-pacing
-chart-window      clean             csv-codec        csv-import        device-stream
-export-workflows  frame-scheduler   i18n             ingest            km003c-model
-macos-menu        marker-ui         markers          measurement       pd-capture-file
-pd-model          provenance        range-stats      recording         recording-spool
-release           security-csp      settings-persistence shortcuts     tauri-config
-temp-disconnect   third-party-components version-sync video-export
-```
+| 领域 | 测试模块（`test/*.test.js`） |
+| --- | --- |
+| 图表渲染与帧调度 | `chart-binding`、`chart-buckets`、`chart-columns`、`chart-cooperative`、`chart-cursor`、`chart-extrema`、`chart-feedback`、`chart-fill`、`chart-pacing`、`chart-window`、`frame-scheduler` |
+| 采集流、录制与统计 | `device-stream`、`ingest`、`markers`、`measurement`、`provenance`、`range-stats`、`recording`、`recording-spool`、`temp-disconnect` |
+| 导入、导出与报告 | `csv-codec`、`csv-import`、`export-workflows`、`pd-capture-file`、`video-export` |
+| PD 与协议控制 | `km003c-model`、`pd-model` |
+| 界面、国际化与设置 | `i18n`、`macos-menu`、`marker-ui`、`settings-persistence`、`shortcuts` |
+| 安全、基准、构建与发布 | `bench-gate`、`clean`、`release`、`security-csp`、`tauri-config`、`third-party-components`、`version-sync` |
 
 ### Rust workspace
 
@@ -234,6 +315,6 @@ temp-disconnect   third-party-components version-sync video-export
 
 ## 安全边界
 
-- **CSP**：`img-src` 仅允许 `self`、`asset:`、`blob:`；`connect-src` 仅允许 `self` 与 IPC；`script-src` / `style-src` 为 `'self'` 且无 `'unsafe-inline'`（Tauri 编译期补 script hash 与 style nonce）。
-- **最小对话与文件权限**：`capabilities/default.json` 仅授予 `dialog:allow-open` / `dialog:allow-save`、`fs:default` / `fs:allow-write-text-file` 与自定义无边框窗口所需 `core:window:allow-*`；应用确认框使用 `<dialog>`，CSV/PD/报告读写全部经过受控 Rust 句柄与一次性票据（路径不经过前端任意打开，单块上限 4 MiB）。
+- **CSP**：`img-src` 仅允许 `'self'`、`data:`（本地校验后的自定义背景图）、`asset:`、`https://asset.localhost`、`blob:`；`connect-src` 仅允许 `'self'` 与 IPC；`script-src` / `style-src` 为 `'self'` 且无 `'unsafe-inline'`（Tauri 编译期补 script hash 与 style nonce）。
+- **最小对话与文件权限**：`capabilities/default.json` 仅授予 `dialog:allow-open` / `dialog:allow-save`、`store:default` 与自定义无边框窗口所需 `core:window:allow-*` / `decorum:allow-show-snap-overlay`（不授予前端 `fs:*` 能力）；应用确认框使用 `<dialog>`，CSV/PD/文本日志/报告读写全部经过受控 Rust 句柄与一次性票据（路径不经过前端任意打开，单块上限 4 MiB）。
 - **本地资源与网络**：所有前端运行依赖内置于 `src/vendor/`，无外部 CDN；出站网络仅限后端发起的用户配置 TCP 温度连接及手动点击触发的 `KHWLGH/laPower` GitHub Releases 检查与仓库链接打开。

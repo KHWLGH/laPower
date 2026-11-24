@@ -19,31 +19,59 @@ This document describes laPower's internal architecture. See the [User guide](US
 
 The Cargo workspace contains four crates plus a plain ES Module frontend directory; release builds generate `out/` via esbuild.
 
-```text
-laPower/
-├── src-tauri/            Tauri v2 application (backend)
-│   ├── src/lib.rs        App state, Tauri command registry, and lifecycle
-│   ├── src/acquire.rs    Acquisition loop, cadence grid windowing, and timestamp back-projection
-│   ├── src/stream.rs     Stream sessions, bounded channels, backpressure, and final receipts
-│   ├── src/pd_capture.rs USB-PD capture log (seq / generation / lazy decoding)
-│   ├── src/km003c_session.rs POWER-Z Bulk/AdcQueue and CDC control session
-│   ├── src/video_export.rs Image/video report export and platform rendering/encoding backends
-│   ├── src/usb_port.rs   Platform-specific USB topology port resolution
-│   ├── src/updates.rs    Manual GitHub release check and validated browser links
-│   ├── capabilities/     Tauri ACL capability declarations
-│   └── tauri.conf.json   Window, CSP, and bundling configuration
-├── crates/
-│   ├── usbpd-parser/     USB-PD message decoding
-│   ├── km003c/           POWER-Z Bulk, AdcQueue, CDC, and protocol detection
-│   └── witrn-hid/        WITRN HID device wrapper
-├── src/                  Frontend sources (native ES modules)
-├── out/                  Generated frontendDist (untracked)
-├── tools/showcase/       Virtual devices and screenshot tooling (not shipped)
-├── test/                 Frontend unit tests (node --test)
-├── bench/                Algorithm, storage, memory, and rendering benchmarks
-├── temperature-example/  External TCP temperature server examples in Python
-└── docs/                 Documentation
+```mermaid
+flowchart TB
+  subgraph FE["Frontend & Build"]
+    SRC["src/<br/>Native ES Modules"] --> OUT["out/<br/>esbuild frontendDist"]
+  end
+
+  subgraph BE["Tauri v2 Backend · src-tauri/"]
+    LIB["src/lib.rs<br/>State / Commands / Lifecycle"]
+    STREAM["acquire.rs · stream.rs · pd_capture.rs<br/>Acquisition / Flow / PD Log"]
+    KM_SESS["km003c_session/<br/>Bulk / AdcQueue / CDC"]
+    EXPORT["video_export.rs · usb_port.rs · updates.rs<br/>Reports / USB Topology / Updates"]
+    CONF["tauri.conf.json · capabilities/<br/>Window / CSP / ACL"]
+    LIB --> STREAM
+    LIB --> KM_SESS
+    LIB --> EXPORT
+    CONF -.-> LIB
+  end
+
+  subgraph CRATES["Standalone Protocol Crates · crates/"]
+    WITRN["witrn-hid<br/>WITRN HID Device Wrapper"]
+    USBPD["usbpd-parser<br/>USB-PD Packet Decoder"]
+    KM["km003c<br/>POWER-Z Bulk / AdcQueue / CDC"]
+  end
+
+  OUT <-->|"Tauri IPC / Embedded Dist"| LIB
+  STREAM --> WITRN
+  STREAM --> USBPD
+  KM_SESS --> KM
+  KM_SESS --> USBPD
 ```
+
+| Path | Purpose |
+| --- | --- |
+| `src-tauri/src/lib.rs` | App state, Tauri command registry, and lifecycle |
+| `src-tauri/src/acquire.rs` | Acquisition loop, cadence grid windowing, and timestamp back-projection |
+| `src-tauri/src/stream.rs` | Stream sessions, bounded channels, backpressure, and final receipts |
+| `src-tauri/src/pd_capture.rs` | USB-PD capture log (`seq` / `generation` / lazy decoding) |
+| `src-tauri/src/km003c_session/` | POWER-Z Bulk/AdcQueue and CDC control session |
+| `src-tauri/src/video_export.rs` | Image/video report export and platform rendering/encoding backends |
+| `src-tauri/src/usb_port.rs` | Platform-specific USB topology port resolution |
+| `src-tauri/src/updates.rs` | Manual GitHub release check and validated browser links |
+| `src-tauri/capabilities/` | Tauri ACL capability declarations |
+| `src-tauri/tauri.conf.json` | Window, CSP, and bundling configuration |
+| `crates/usbpd-parser/` | USB-PD message decoding |
+| `crates/km003c/` | POWER-Z Bulk, AdcQueue, CDC, and protocol detection |
+| `crates/witrn-hid/` | WITRN HID device wrapper |
+| `src/` | Frontend sources (native ES modules) |
+| `out/` | Generated `frontendDist` (untracked) |
+| `tools/showcase/` | Virtual devices and screenshot tooling (not shipped) |
+| `test/` | Frontend unit tests (`node --test`) |
+| `bench/` | Algorithm, storage, memory, and rendering benchmarks |
+| `temperature-example/` | External TCP temperature server examples in Python |
+| `docs/` | Documentation |
 
 Root `Cargo.toml` centralizes `version`, `edition = 2021`, `rust-version = 1.85`, and shared dependencies (`serde`, `serde_json`, `hidapi 2.6`, `chrono 0.4`).
 
@@ -60,10 +88,20 @@ Hosts application state and device/module command registration under a **lock on
 
 Each device connection owns an acquisition reader and an IPC sender; POWER-Z adds a dedicated CDC control thread:
 
-```text
-HID / Bulk reader ──── bounded channel ────> IPC sender ──── emit ────> WebView
-  decode & window only, no emit               batch / forward / ACK tracking
-                                          ↘ POWER-Z CDC control thread
+```mermaid
+flowchart LR
+  READER["Acquisition reader<br/>HID / Bulk decode & window"]
+  QUEUE["Bounded channel cap=4096<br/>PD pending 256 / backend log"]
+  EMITTER["IPC sender<br/>Batch forward / final receipt"]
+  CDC["POWER-Z CDC control thread<br/>Trigger & protocol detection"]
+  WV["WebView frontend<br/>Charts / stats / recovery spool"]
+
+  READER -->|"Sample window / PD frames"| QUEUE
+  QUEUE --> EMITTER
+  EMITTER -->|"device-data-batch<br/>pd-data-batch"| WV
+  WV -->|"ack_device_stream<br/>abandon_device_stream"| EMITTER
+  READER -.->|"VoltageCache / PdoCache"| CDC
+  CDC <-->|"km003c_trigger<br/>km003c-trigger-progress"| WV
 ```
 
 - **Acquisition reader**: WITRN blocks on HID reports and drains host-queued reports nonblockingly; POWER-Z reads Vendor Bulk / AdcQueue (polled ADC uses `vbus_instant_v()` and `ibus_instant_a()` and computes `voltage × current`). Frames are averaged per cadence grid window (mean voltage, current, power, D+/D−, retaining per-frame current magnitude means; newest timestamp, CC, and temperature) into a 4096-item bounded channel. PD events use a 256-entry pending buffer when full while remaining in the backend log. Acquisition stops with an error at 8192 unacknowledged samples.
@@ -81,14 +119,15 @@ HID / Bulk reader ──── bounded channel ────> IPC sender ──�
 | `get_current_device_info` | Return connected-device metadata |
 | `set_sample_rate` | Set sampling interval (1–60000 ms, clamped to device limits) |
 | `set_pd_capture_enabled` | Toggle PD packet capture |
-| `pd_log_clear` / `pd_log_after` / `pd_log_replace` / `decode_pd_at` | Clear PD log, recover paged gaps (≤ 512/page), replace on import, and O(1) decode lookup |
+| `pd_log_clear` / `pd_log_after` / `pd_log_import` / `pd_log_import_page` / `decode_pd_at` | Clear PD log, recover paged gaps (≤ 512/page), stream controlled import, and O(1) decode lookup |
 | `drain_device_stream` / `ack_device_stream` / `set_recording_segment` / `abandon_device_stream` | Stop/drain stream, ACK consumed seqs, set recording segments, and retire terminal sessions |
 | `connect_temp_service` / `disconnect_temp_service` | External TCP temperature connection lifecycle |
 | `check_for_updates` / `open_project_page` | Manual GitHub Releases query (10 s timeout) and validated repository URL launch |
 | `shutdown` | Stop all workers and destroy the main window |
 | `km003c_trigger` / `km003c_cancel_trigger` | Execute or cancel POWER-Z protocol control and detection |
-| `png_export_pick` | Pick destination for protocol-detection PNG export via controlled single-shot write |
-| `video_export_capabilities` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | Probe image/video encoding, issue single-use destination ticket, and manage single-slot background report export |
+| `choose_custom_background` / `load_custom_background` / `clear_custom_background` | Select, load, and clear local custom background image |
+| `csv_export_pick` / `pd_export_pick` / `text_export_pick` / `png_export_pick` / `paired_export_pick` / `csv_import_pick` / `pd_import_pick` | Pick files and issue controlled backend read/write handles (CSV/PD/text log/protocol PNG) |
+| `video_export_capability` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | Probe image/video encoding, issue single-use destination ticket, and manage single-slot background report export |
 
 ### `src-tauri/src/pd_capture.rs`
 
@@ -143,11 +182,11 @@ POWER-Z Interface 0 Vendor Bulk + CDC control: `protocol::auth` (AES-128-ECB), `
 | --- | --- | --- |
 | Assembly & core | `app.js`, `shell.js`, `state.js`, `utils.js`, `dropdown.js`, `event-listeners.js`, `boot-timing.js` | Startup wiring, Tab routing, shared state/types, and cold-start markers |
 | Localization | `i18n.js`, `i18n-messages.js` | Four-language dictionaries, locale resolution, and live language updates |
-| Charts | `chart.js`, `chart-buckets.js`, `chart-extrema.js`, `chart-fill.js`, `chart-pacing.js`, `chart-window.js`, `performance-diagnostics.js`, `theme.js` | uPlot scheduling, pixel buckets & `OffscreenCanvas` rasterizer, extrema index, analytic fill, pacing, windows, and Canvas theme |
-| Data & storage | `data.js`, `measurement.js`, `provenance.js`, `device-stream.js`, `recording-spool.js`, `recording-recovery.js`, `recording-limit.js`, `file-io.js`, `cooperative.js` | Acquisition, pure integration, provenance, stream ACKs, crash spooling, limits, chunked file I/O, and cooperative slices |
+| Charts | `chart.js`, `chart-axes.js`, `chart-buckets.js`, `chart-extrema.js`, `chart-fill.js`, `chart-pacing.js`, `chart-plugins.js`, `chart-raster.js`, `chart-window.js`, `performance-diagnostics.js`, `theme.js` | uPlot scheduling, axis quantization/drawing, pixel buckets & `OffscreenCanvas` rasterizer, extrema index, analytic fill, interaction plugins, pacing, windows, and Canvas theme |
+| Data & storage | `data.js`, `data-display.js`, `data-range-ui.js`, `measurement.js`, `provenance.js`, `device-stream.js`, `recording-spool.js`, `recording-recovery.js`, `recording-limit.js`, `file-io.js`, `cooperative.js` | Acquisition, reading display & range UI, pure integration, provenance, stream ACKs, crash spooling, limits, chunked file I/O, and cooperative slices |
 | Exports & reports | `csv.js`, `csv-codec.js`, `csv-export.js`, `csv-export-worker.js`, `csv-import-core.js`, `csv-import-worker.js`, `export-options.js`, `export-session.js`, `export-ui.js`, `paired-export.js`, `range-stats*.js`, `video-export*.js`, `video-palette.js`, `video-projection.js`, `protocol-report*.js` | CSV/PD/joint export, chunked/stats Workers, report snapshot/projection, and protocol detection PNG export |
 | Markers & shortcuts | `markers.js`, `marker-ui.js`, `shortcuts-core.js`, `shortcuts.js`, `shortcut-hints.js` | Pure dataset marker management and global keybindings |
-| PD & protocol control | `pd-model.js`, `pd-export*.js`, `views/pd.js`, `km003c-model.js`, `views/trigger.js` | PD summaries/filtering/export, KM003C models, and trigger/detection UI |
+| PD & protocol control | `pd-model.js`, `pd-export*.js`, `views/pd.js`, `views/pd-list.js`, `views/pd-transfer.js`, `km003c-model.js`, `views/trigger.js`, `views/trigger-detection.js`, `views/trigger-history.js` | PD summaries/filtering/list/transfer, KM003C models, and trigger/detection/history UI |
 | Devices & temp | `device.js`, `temperature.js` | Connection lifecycle, info flyout, and TCP temperature state |
 | Settings, UI & About | `settings.js`, `views/settings-view.js`, `custom-background.js`, `ui-scale.js`, `theme-boot.js`, `views/about-view.js` | Persisted settings, custom wallpapers, 50–200% scale, first-frame theme, licenses, and update checks |
 | UI primitives | `ui/` | `dialog`, `toast`, `menu`, `flyout`, `tabbar`, `controlbar`, `display-stepper`, `windowcontrols` |
@@ -162,6 +201,22 @@ Pure modules (`measurement.js`, `pd-model.js`, `chart-window.js`, `markers.js`, 
 
 ### Chart rendering
 
+```mermaid
+flowchart LR
+  COL["F64Col chunked columns<br/>4096 pts/chunk · shared constants"]
+  IDX["ExactExtremaIndex<br/>256 nodes/page · cooperative slices"]
+  FAST["OffscreenCanvas rasterizer<br/>Transposed Uint32Array + 2D dirty rects"]
+  FILL["chart-fill.js<br/>Analytic area coverage composite"]
+  FALLBACK["Canvas 2D fallback<br/>Translucent stroke / no OffscreenCanvas"]
+  NAV["Navigator overview<br/>Independent uPlot + power extrema"]
+
+  COL --> IDX
+  IDX -->|"Opaque solid main traces"| FAST
+  FAST --> FILL
+  IDX -->|"Fallback path"| FALLBACK
+  COL --> NAV
+```
+
 - **Chunked column store**: `F64Col` uses 4096-point chunks; identical full constant chunks reuse the latest constant chunk (`Object.is` preserves signed zero and missing values), while tails own mutable buffers and historical edits copy-on-write per chunk.
 - **Extrema index & cooperative slicing**: `ExactExtremaIndex` (256-node pages, 24 KiB/page) reuses completed prefixes so shortening or panning skips full scans; indexed projections step 32 buckets at a time (~4 ms initial attempt, ~1.5 ms cooperative continuation).
 - **Canvas 2D / `OffscreenCanvas` pipeline**: dense main-chart views with opaque solid strokes and `OffscreenCanvas` rasterize ordered per-channel extrema columns into a transposed `Uint32Array` bitmap, clearing only prior dirty bounds, uploading 2D dirty rectangles via `putImageData` / `drawImage`, applying a 3-point affine projection check, and compositing analytic area coverage via `chart-fill.js`. Translucent or non-`OffscreenCanvas` paths fall back to standard Canvas 2D; the navigator keeps independent uPlot strokes and its single-channel power extrema index.
@@ -172,6 +227,34 @@ Pure modules (`measurement.js`, `pd-model.js`, `chart-window.js`, `markers.js`, 
 Range statistics serialize on one reusable Worker (transferring and returning ≤ 4096-row scratch chunks without moving source columns); PD filtering/recovery coalesce and cancel DOM commits while hidden; image/video reports share `video-projection.js`'s ~1.5 ms cooperative kernel over frozen snapshots.
 
 ## Data flow
+
+```mermaid
+sequenceDiagram
+  participant FE as WebView frontend
+  participant BE as Tauri backend
+  participant DEV as USB meter · WITRN / POWER-Z
+
+  FE->>BE: enumerate_devices
+  BE-->>FE: Combined WITRN HID and POWER-Z Bulk device list
+
+  FE->>BE: connect_device_by_path
+  BE->>DEV: Open interface, complete Bulk handshake, start CDC thread
+
+  alt POWER-Z 1 ms sampling
+    BE->>DEV: HardwareID / StreamingAuth / StartGraph(3)
+    Note over BE,DEV: Poll AdcQueue every 20 ms, fallback 10 ms on auth failure
+  else WITRN HID or polled ADC
+    BE->>DEV: Block on HID reports and drain queue / poll instant ADC
+  end
+
+  loop Live acquisition & flow control
+    DEV-->>BE: Measurement frames / PD packets
+    BE->>BE: Aggregate per cadence grid window
+    BE-->>FE: device-data-batch / pd-data-batch
+    FE->>FE: Update cards, charts, stats, and 1 s recovery spool
+    FE->>BE: ack_device_stream
+  end
+```
 
 1. Frontend calls `enumerate_devices` to combine WITRN HID and POWER-Z Bulk devices.
 2. `connect_device_by_path` connects the selected interface (completing POWER-Z Bulk handshake and starting its CDC thread).
@@ -204,16 +287,14 @@ Power is computed as `voltage × current`; ±20 A accommodates overshoot, out-of
 
 `npm test` (`node --test`) verifies pure logic, data pipelines, protocol/file contracts, CSP, release sync, and critical regressions (see `npm test` output for exact counts and [Testing and regression boundaries](DEVELOPMENT.md#testing-and-regression-boundaries) for test policy):
 
-```text
-bench-gate        chart-binding     chart-buckets    chart-columns     chart-cooperative
-chart-cursor      chart-extrema     chart-feedback   chart-fill        chart-pacing
-chart-window      clean             csv-codec        csv-import        device-stream
-export-workflows  frame-scheduler   i18n             ingest            km003c-model
-macos-menu        marker-ui         markers          measurement       pd-capture-file
-pd-model          provenance        range-stats      recording         recording-spool
-release           security-csp      settings-persistence shortcuts     tauri-config
-temp-disconnect   third-party-components version-sync video-export
-```
+| Area | Test modules (`test/*.test.js`) |
+| --- | --- |
+| Chart rendering & frame scheduling | `chart-binding`, `chart-buckets`, `chart-columns`, `chart-cooperative`, `chart-cursor`, `chart-extrema`, `chart-feedback`, `chart-fill`, `chart-pacing`, `chart-window`, `frame-scheduler` |
+| Streaming, recording & metrics | `device-stream`, `ingest`, `markers`, `measurement`, `provenance`, `range-stats`, `recording`, `recording-spool`, `temp-disconnect` |
+| Import, export & reports | `csv-codec`, `csv-import`, `export-workflows`, `pd-capture-file`, `video-export` |
+| PD & protocol control | `km003c-model`, `pd-model` |
+| UI, i18n & settings | `i18n`, `macos-menu`, `marker-ui`, `settings-persistence`, `shortcuts` |
+| Security, benchmarks, build & release | `bench-gate`, `clean`, `release`, `security-csp`, `tauri-config`, `third-party-components`, `version-sync` |
 
 ### Rust workspace
 
@@ -230,6 +311,6 @@ Physical HID/Bulk meters and external TCP temperature servers require manual ver
 
 ## Security boundaries
 
-- **CSP**: `img-src` allows `self`, `asset:`, and `blob:`; `connect-src` allows `self` and IPC; `script-src`/`style-src` are `'self'` without `'unsafe-inline'` (Tauri injects script hashes and style nonces at compile time).
-- **Minimal dialog and filesystem permissions**: `capabilities/default.json` grants `dialog:allow-open`, `dialog:allow-save`, `fs:default`, `fs:allow-write-text-file`, and needed `core:window:allow-*` permissions for the custom title bar. Confirmations use `<dialog>`, and CSV/PD/report writes use Rust file handles or single-use backend tickets (4 MiB chunk cap, no arbitrary path opens).
+- **CSP**: `img-src` allows `'self'`, `data:` (for locally validated custom backgrounds), `asset:`, `https://asset.localhost`, and `blob:`; `connect-src` allows `'self'` and IPC; `script-src`/`style-src` are `'self'` without `'unsafe-inline'` (Tauri injects script hashes and style nonces at compile time).
+- **Minimal dialog and filesystem permissions**: `capabilities/default.json` grants only `dialog:allow-open`, `dialog:allow-save`, `store:default`, and needed `core:window:allow-*` / `decorum:allow-show-snap-overlay` permissions for the custom title bar (no frontend `fs:*` capabilities). Confirmations use `<dialog>`, and CSV/PD/text/report reads and writes use Rust file handles or single-use backend tickets (4 MiB chunk cap, no arbitrary path opens).
 - **Local assets and network**: frontend runtime dependencies are vendored in `src/vendor/` with no CDN requests; outbound network access is limited to user-configured TCP temperature servers and manual update checks/links targeting `KHWLGH/laPower` on GitHub.
