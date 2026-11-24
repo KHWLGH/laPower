@@ -165,7 +165,7 @@ impl Canvas {
         scene::render(self, &self.palette, payload, index);
     }
 
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg(test)]
     pub(super) fn copy_pixels(&self, out: &mut [u8]) {
         out.copy_from_slice(self.pixmap.borrow().data());
     }
