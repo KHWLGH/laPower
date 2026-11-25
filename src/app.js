@@ -13,9 +13,11 @@ import {
   handleMonitorHidden,
   handleMonitorShown,
   initChart,
+  refreshChartFonts,
   refreshChartLanguage,
   refreshChartLineWidths,
   refreshChartScales,
+  refreshChartTimeAxis,
   setChartFillEnabled,
   setRangeDragging,
   setSeriesFill,
@@ -55,9 +57,17 @@ import {
 import { enhanceSelects } from './dropdown.js';
 import { registerListeners } from './event-listeners.js';
 import { initExportUI } from './export-ui.js';
+import {
+  applyFontPreferences,
+  echoFontUI,
+  refreshFontSelectorLanguage,
+  resetActiveFontSettings,
+  setPrimaryFontSetting,
+  setSecondaryFontSetting,
+} from './fonts.js';
 import { displayFrames } from './frame-scheduler.js';
 import { applyLanguage, errorText, initI18n, normalizeLanguagePreference, onLanguageChange, t } from './i18n.js';
-import { addMarkerFromShortcut, initMarkerUI } from './marker-ui.js';
+import { addMarkerFromShortcut, initMarkerUI, refreshMarkerList } from './marker-ui.js';
 import { canExportBoth, exportBoth } from './paired-export.js';
 import { setSoftwareVersion } from './provenance.js';
 import { clampLimitMb } from './recording-limit.js';
@@ -607,7 +617,10 @@ function setupControls() {
   // the views whose text is derived from current state.
   onLanguageChange(() => {
     fillUiScaleHint();
+    applyFontPreferences();
+    refreshFontSelectorLanguage();
     refreshChartLanguage();
+    refreshMarkerList();
     updateSampleRateStatus();
     updateDurationDisplay();
     refreshRecordButton();
@@ -623,6 +636,28 @@ function setupControls() {
     syncTriggerView();
     refreshPdLanguage();
     document.dispatchEvent(new CustomEvent('witrn:language-changed'));
+  });
+
+  // 字体选择（设置页 外观 卡）
+  const cjkFontSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('font-cjk-select'));
+  const latinFontSelect = /** @type {HTMLSelectElement|null} */ (document.getElementById('font-latin-select'));
+  document.addEventListener('lapower:fonts-changed', () => refreshChartFonts());
+  const applyFontSelection = () => {
+    applyFontPreferences();
+    echoFontUI();
+    debouncedSaveSettings();
+  };
+  cjkFontSelect?.addEventListener('change', () => {
+    setPrimaryFontSetting(cjkFontSelect.value);
+    applyFontSelection();
+  });
+  latinFontSelect?.addEventListener('change', () => {
+    setSecondaryFontSetting(latinFontSelect.value);
+    applyFontSelection();
+  });
+  btn('btn-font-reset', () => {
+    resetActiveFontSettings();
+    applyFontSelection();
   });
 
   // 界面缩放（设置页 外观 卡）
@@ -671,6 +706,16 @@ function setupControls() {
   const immediateMarkerEl = /** @type {HTMLInputElement|null} */ (document.getElementById('immediate-marker'));
   immediateMarkerEl?.addEventListener('change', () => {
     state.settings.immediateMarker = immediateMarkerEl.checked;
+    debouncedSaveSettings();
+  });
+
+  const useSystemTimeEl = /** @type {HTMLInputElement|null} */ (document.getElementById('use-system-time'));
+  useSystemTimeEl?.addEventListener('change', () => {
+    state.settings.useSystemTime = useSystemTimeEl.checked;
+    refreshChartTimeAxis();
+    updateChartRange();
+    updateStatsDisplay();
+    refreshMarkerList();
     debouncedSaveSettings();
   });
 
@@ -1107,6 +1152,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   await Promise.all([platformReady, settingsReady, languageReady, backgroundReady]);
+  applyFontPreferences();
+  refreshFontSelectorLanguage();
   // Native selects retain loaded values; enhance them only after locale resolution.
   enhanceSelects();
   initChart();

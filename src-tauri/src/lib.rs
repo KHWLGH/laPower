@@ -10,6 +10,7 @@ mod app_nap;
 pub mod boot_timing;
 mod custom_background;
 mod file_io;
+mod fonts;
 mod hid_source;
 mod km003c_session;
 mod locale;
@@ -258,6 +259,7 @@ pub fn run() {
             custom_background::choose_custom_background,
             custom_background::load_custom_background,
             custom_background::clear_custom_background,
+            fonts::list_system_fonts,
             titlebar::titlebar_double_click,
             stream_commands::connect_device_by_path,
             stream_commands::disconnect_device,

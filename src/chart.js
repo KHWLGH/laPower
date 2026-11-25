@@ -39,7 +39,7 @@ import { onMarkersChange } from './markers.js';
 import { performanceDiagnostics } from './performance-diagnostics.js';
 import { state } from './state.js';
 import { chartTheme, onThemeChange } from './theme.js';
-import { formatRelativeHMS, hexToRgba } from './utils.js';
+import { formatRecordingTime, hexToRgba, recordingOriginMs } from './utils.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ let MONO_FONT = MONO_FONT_FALLBACK;
  * 让 uPlot 的坐标轴与应用界面保持一致。
  */
 function syncChartFonts() {
-  if (typeof document === 'undefined') return;
+  if (typeof getComputedStyle !== 'function' || typeof document === 'undefined' || !document.documentElement) return;
   const styles = getComputedStyle(document.documentElement);
   const uiFont = styles.getPropertyValue('--font-ui').trim();
   const monoFont = styles.getPropertyValue('--font-mono').trim();
@@ -1912,15 +1912,9 @@ function renderLegend() {
   el.replaceChildren(fragment);
 }
 
-/** Refresh chart labels after a language change without replacing chart data or state. */
-export function refreshChartLanguage() {
-  syncChartFonts();
-  const chart = state.mainChart;
-  if (!chart) return;
-  for (let i = 0; i < FIELDS.length; i++) {
-    if (chart.series[i + 1]) chart.series[i + 1].label = chartLabel(i);
-  }
-  const axes = chart.axes ?? [];
+/** @param {any} chart */
+function applyChartAxisFonts(chart) {
+  const axes = chart?.axes ?? [];
   for (let i = 0; i < axes.length; i++) {
     // uPlot normalises fonts to [scaled CSS font, scaled size, original size].
     // Preserve its DPI bookkeeping when replacing the family of an existing axis.
@@ -1931,6 +1925,41 @@ export function refreshChartLanguage() {
       else axes[i].labelFont = `12px ${CHART_FONT}`;
     }
   }
+}
+
+/** 字体偏好变更后刷新图表坐标轴字体及重绘。 */
+export function refreshChartFonts() {
+  syncChartFonts();
+  const chart = state.mainChart;
+  if (!chart) return;
+  applyChartAxisFonts(chart);
+  chart.redraw?.(true, true);
+  state.navigatorChart?.redraw?.();
+  if (typeof document !== 'undefined' && document.fonts?.load) {
+    Promise.all([document.fonts.load(`12px ${CHART_FONT}`), document.fonts.load(`12px ${MONO_FONT}`)])
+      .then(() => {
+        state.mainChart?.redraw?.(true, true);
+        state.navigatorChart?.redraw?.();
+      })
+      .catch(() => {});
+  }
+}
+
+/** 切换系统时间 / 相对时间显示后刷新主图 X 轴刻度。 */
+export function refreshChartTimeAxis() {
+  state.mainChart?.redraw?.(false, true);
+}
+
+/** Refresh chart labels after a language change without replacing chart data or state. */
+export function refreshChartLanguage() {
+  syncChartFonts();
+  const chart = state.mainChart;
+  if (!chart) return;
+  for (let i = 0; i < FIELDS.length; i++) {
+    if (chart.series[i + 1]) chart.series[i + 1].label = chartLabel(i);
+  }
+  applyChartAxisFonts(chart);
+  const axes = chart.axes ?? [];
   const titles = [
     chartAxisTitle('voltage', 'V'),
     chartAxisTitle('current', 'A'),
@@ -2086,8 +2115,11 @@ export function initChart() {
         // 80：给 12px 的 HH:MM:SS.d 时间标签留足空间，64 会在任意宽度下互相碰撞
         space: 80,
         incrs: TIME_INCRS,
-        values: (/** @type {any} */ _u, /** @type {number[]} */ splits) =>
-          splits.map((v) => formatRelativeHMS(Number(v))),
+        values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => {
+          const useSystemTime = state.settings.useSystemTime;
+          const originMs = useSystemTime ? recordingOriginMs(state.chartSeries, state.lastRecordingStartTime) : null;
+          return splits.map((v) => formatRecordingTime(Number(v), { useSystemTime, originMs }));
+        },
         grid: { show: true, stroke: () => chartTheme.grid, width: 1 },
         ticks: { show: true, stroke: () => chartTheme.grid, width: 1, size: 8 },
       },

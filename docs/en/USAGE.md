@@ -249,6 +249,7 @@ Open via the title-bar gear (`⌘,` or Settings… on macOS). Wide windows pin n
 | --- | --- |
 | `Theme` | `Follow system` (default), `Light`, `Dark` |
 | `Language` | `Follow system` (default), 简体中文, 繁體中文, English, 日本語 |
+| `Interface font` / `Monospace & numeric font` | Independently pick installed system fonts for UI text vs. monospace readings, timestamps, chart ticks, and tables (localized to language-specific CJK/Latin controls in Chinese and Japanese; changing one leaves system defaults intact, with the default font name shown, live preview, and `Reset fonts`) |
 | `Custom background` | Select a local PNG, JPG, or WebP image (≤ 25 MB) to persist as backdrop, or `Clear` to reset (no bundled wallpaper) |
 | `Background image opacity` | 0–100%, default 100% (0% hidden, 100% full) |
 | `Background image blur` | 0–40 px, default 14 px (0 px sharp) |
@@ -264,6 +265,7 @@ Language switches take effect immediately without losing recordings or connectio
 | `Adjust line thickness on zoom` | On by default; automatically scales line width with zoom level |
 | `Record current direction` | Off by default; preserves signed current for new recordings/imports while integrating magnitudes |
 | `Mark immediately` | Off by default; skips the label prompt when adding markers |
+| `Start recording with system time` | Off by default; displays chart X-axis, timeline bounds, tooltips, and marker times as system clock time from recording start (duration and CSV format stay unchanged) |
 | `Recording limit` | 64–8192 MB, default 512 MB; covers all current chart data (including existing/imported) and pauses when reached |
 
 ### Keyboard shortcuts
@@ -297,20 +299,20 @@ Monitor reads and writes CSV with summary metadata rows before column headers, o
 
 ```csv
 SUM,1
-TotalTime,="00:00:00.250"
+TotalTime,00:00:00.250
 SampTime(ms),250
 DateTime,2026-10-17 12:00:00
 Software,laPower 0.3.0
 Device,WITRN K2 (0716:5060)
 Points,mean
 
-Time(D.hh:mm:ss.ms),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms),RecordingSegment,SampleInterval(ms),Marker,
-="00:00:00.250",5,0.5,2.5,25,0.6,0.1,1.6,0.3,0.25,1792209600250,1,250,Start,
+SystemTime,SoftwareTime(s),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),CC1(V),CC2(V),RecordingSegment,SampleInterval(ms),Marker,
+2026-10-17 12:00:00.250,0.25,5,0.5,2.5,25,0.6,0.1,1.6,0.3,1,250,Start,
 ```
 
-- `="HH:MM:SS.mmm"` preserves spreadsheet text formatting (adding day prefixes past 24 h); `RelativeTime(s)` and `Timestamp(ms)` store exact timing.
+- `SystemTime` records local wall-clock timestamps (`YYYY-MM-DD HH:MM:SS.mmm`) and `SoftwareTime(s)` records exact relative software seconds (standard plain CSV without `="..."` wrappers).
 - `RecordingSegment` separates pause segments, `SampleInterval(ms)` records per-point intervals, and optional `CurrentMagnitude(A)` preserves unsigned magnitudes for consistent capacity recalculation.
-- Imports match columns by header name, accepting older CSV layouts without temperature, signals, or trailing columns; missing provenance remains unknown.
+- Imports match columns by header name, remaining backward compatible with legacy CSV layouts (`Time(D.hh:mm:ss.ms)`, `RelativeTime(s)`, `Timestamp(ms)`) as well as files without temperature, signals, or trailing columns; missing provenance remains unknown.
 
 ### PD capture
 

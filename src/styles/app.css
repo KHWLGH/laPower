@@ -1149,6 +1149,139 @@ html[data-ui-scale-css] .flyout-panel {
   max-width: none;
 }
 
+.ribbon-select.font-select,
+.cs-button.font-select {
+  width: 280px;
+  min-width: 200px;
+  max-width: 340px;
+}
+
+.font-preview-row {
+  padding-top: 6px;
+}
+
+.font-preview-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--stroke-divider);
+  border-radius: var(--radius-surface);
+  background: var(--fill-recess);
+}
+
+.font-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--stroke-divider);
+}
+
+.font-preview-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.font-preview-brand {
+  font: var(--type-body-strong);
+  color: var(--text-primary);
+}
+
+.font-preview-sep {
+  color: var(--text-tertiary);
+}
+
+.font-preview-ui {
+  font: var(--type-body);
+  color: var(--text-secondary);
+}
+
+.font-preview-reset {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.font-preview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.font-preview-metric {
+  --preview-accent: var(--accent-fill);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--stroke-divider);
+  border-left: 3px solid var(--preview-accent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--preview-accent) 10%, var(--surface-card));
+}
+
+.font-preview-metric.is-voltage {
+  --preview-accent: var(--ch-voltage);
+}
+
+.font-preview-metric.is-current {
+  --preview-accent: var(--ch-current);
+}
+
+.font-preview-metric.is-power {
+  --preview-accent: var(--ch-power);
+}
+
+.font-preview-metric-label {
+  font: var(--type-caption);
+  color: var(--text-secondary);
+}
+
+.font-preview-metric-value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.font-preview-metric-unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.font-preview-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--stroke-divider);
+}
+
+.font-preview-caption {
+  font: var(--type-caption);
+  color: var(--text-tertiary);
+}
+
+.font-preview-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
 /* 分段选择：主题 / 余量；原生 radio 藏起来，用相邻 span 当段 */
 .seg {
   display: inline-flex;
@@ -1594,10 +1727,16 @@ html[data-ui-scale-css] .about-legal-dialog {
   }
 
   .settings-row-control,
-  .settings-scale {
+  .settings-scale,
+  .ribbon-select.font-select,
+  .cs-button.font-select {
     width: 100%;
     max-width: none;
     justify-content: flex-start;
+  }
+
+  .font-preview-metrics {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

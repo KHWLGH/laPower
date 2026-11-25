@@ -367,6 +367,23 @@
     "Noto Sans SC", "Source Han Sans SC", monospace;
 }
 
+:root[data-os="windows"][lang="ja"] {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", "Microsoft YaHei UI", sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Yu Gothic UI", "Meiryo UI", "Microsoft YaHei UI", monospace;
+}
+
+:root[data-os="macos"][lang="ja"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "PingFang SC", sans-serif;
+  --font-mono: "SF Mono", Menlo, Monaco, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "PingFang SC", monospace;
+}
+
+:root[data-os="linux"][lang="ja"] {
+  --font-ui: system-ui, "Noto Sans CJK JP", "Noto Sans JP", "Noto Sans CJK SC", sans-serif;
+  --font-mono:
+    ui-monospace, "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono", "Noto Sans CJK JP",
+    "Noto Sans JP", "Noto Sans CJK SC", monospace;
+}
+
 /* 亮色：只重赋语义层。通道 / PD 徽章改走 Foreground2 / Background2 浅色侧。 */
 :root[data-theme="light"] {
   --surface-base: var(--grey-98);

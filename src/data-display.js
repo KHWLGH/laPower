@@ -13,7 +13,7 @@ import { niceCeiling } from './measurement.js';
 import { describeLimit, pointsForLimit, remainingInfo } from './recording-limit.js';
 import { state } from './state.js';
 import { setTempReadingAvailable } from './temperature.js';
-import { formatRelativeHMS, formatSampleRateLabel } from './utils.js';
+import { formatRecordingTime, formatRelativeHMS, formatSampleRateLabel, recordingOriginMs } from './utils.js';
 
 /** @type {Record<string, number>} */
 const meterPeak = {
@@ -269,12 +269,14 @@ export function labelRangeSnapshot(result, updating) {
   if (!label) return;
   label.hidden = !state.settings.statsRange;
   const xs = result?.columns.x;
+  const useSystemTime = state.settings.useSystemTime;
+  const originMs = useSystemTime ? recordingOriginMs(result?.columns, state.lastRecordingStartTime) : null;
   setTextIfChanged(
     label,
     result && xs
       ? t('rangeSnapshot', {
-          start: formatRelativeHMS(xs.valueAt(result.startIndex)),
-          end: formatRelativeHMS(xs.valueAt(result.endIndex)),
+          start: formatRecordingTime(xs.valueAt(result.startIndex), { useSystemTime, originMs }),
+          end: formatRecordingTime(xs.valueAt(result.endIndex), { useSystemTime, originMs }),
           updating: updating ? t('updating') : '',
         })
       : t('calculatingRange'),

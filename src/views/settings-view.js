@@ -9,6 +9,7 @@
  * 首次打开时由 shell 的 init 钩子调用。
  */
 
+import { loadSystemFonts } from '../fonts.js';
 import { onLanguageChange, t } from '../i18n.js';
 import { processRecovery, recoveryActionDisabled, scanRecoveries, subscribeRecoveries } from '../recording-recovery.js';
 import { initAboutView } from './about-view.js';
@@ -192,6 +193,7 @@ export function initSettingsView() {
 
   subscribeRecoveries(showSpoolRecoveries);
   scanRecoveries().catch((/** @type {unknown} */ error) => console.error('读取临时恢复文件失败:', error));
+  void loadSystemFonts().catch((/** @type {unknown} */ error) => console.error('枚举系统字体失败:', error));
 
   const versionEl = document.getElementById('about-version');
   if (!versionEl) return;

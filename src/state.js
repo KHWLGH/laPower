@@ -44,6 +44,12 @@ import { defaultVideoExportOptions } from './video-export-options.js';
  * @property {import('./video-export-options.js').VideoExportOptions} videoExport - 报告视频的上次选项
  * @property {import('./protocol-report-model.js').ProtocolReportOptions} protocolReportExport
  * @property {boolean} immediateMarker - 使用默认标签立即打点，之后可在列表中改名
+ * @property {boolean} useSystemTime - 图表、时间线、悬停提示与打点时间按记录起始的系统时间显示
+ * @property {string}  cjkFont - 自定义中文字体族名（空串 = 跟随系统默认）
+ * @property {string}  jaFont - 自定义日文字体族名（空串 = 跟随系统默认）
+ * @property {string}  latinFont - 自定义英数字体族名（中/日文界面下生效；空串 = 跟随系统默认）
+ * @property {string}  enUiFont - 自定义界面字体族名（英文界面下生效；空串 = 跟随系统默认）
+ * @property {string}  enMonoFont - 自定义等宽/数字字体族名（英文界面下生效；空串 = 跟随系统默认）
  * @property {number} rangeStart
  * @property {number} rangeEnd
  * @property {number} sampleRate      - 采样间隔 (ms)
@@ -358,6 +364,12 @@ export const defaultSettings = {
   videoExport: defaultVideoExportOptions,
   protocolReportExport: defaultProtocolReportOptions,
   immediateMarker: false,
+  useSystemTime: false,
+  cjkFont: '',
+  jaFont: '',
+  latinFont: '',
+  enUiFont: '',
+  enMonoFont: '',
   rangeStart: 0,
   rangeEnd: 1000,
   sampleRate: 250,

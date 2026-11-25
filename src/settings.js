@@ -10,20 +10,24 @@
 
 import {
   applyChartTheme,
+  refreshChartFonts,
   refreshChartLineWidths,
   refreshChartScales,
+  refreshChartTimeAxis,
   setChartFillEnabled,
   setSeriesFill,
   setSeriesVisible,
 } from './chart.js';
 import {
   refreshRecordLimitUI,
+  updateChartRange,
   updateEnergyDisplay,
   updateSampleRateStatus,
   updateSliderFill,
   updateStatsDisplay,
 } from './data.js';
 import { normalizeCsvExportOptions } from './export-options.js';
+import { applyFontPreferences, echoFontUI, normalizeFontName } from './fonts.js';
 import { applyLanguage, errorText, normalizeLanguagePreference, t } from './i18n.js';
 import { clampPdm } from './km003c-model.js';
 import { normalizeProtocolReportOptions } from './protocol-report-model.js';
@@ -107,6 +111,13 @@ function normalizeSettings(saved) {
   merged.protocolReportExport = normalizeProtocolReportOptions(source.protocolReportExport);
   merged.immediateMarker =
     typeof source.immediateMarker === 'boolean' ? source.immediateMarker : defaultSettings.immediateMarker;
+  merged.useSystemTime =
+    typeof source.useSystemTime === 'boolean' ? source.useSystemTime : defaultSettings.useSystemTime;
+  merged.cjkFont = normalizeFontName(source.cjkFont);
+  merged.jaFont = normalizeFontName(source.jaFont);
+  merged.latinFont = normalizeFontName(source.latinFont);
+  merged.enUiFont = normalizeFontName(source.enUiFont);
+  merged.enMonoFont = normalizeFontName(source.enMonoFont);
 
   /** @param {number} value @param {number} min @param {number} max @param {number} fallback */
   const clamp = (value, min, max, fallback) =>
@@ -267,7 +278,9 @@ function echoSettingsUI() {
   setChecked('show-cc', state.settings.showCc);
   setChecked('signed-current', state.settings.signedCurrent);
   setChecked('immediate-marker', state.settings.immediateMarker);
+  setChecked('use-system-time', state.settings.useSystemTime);
   setChecked('pd-follow-recording', state.settings.pdFollowRecording);
+  echoFontUI();
   echoHeadroomUI();
   applyBackgroundOpacity();
   applyBackgroundBlur();
@@ -455,6 +468,8 @@ export async function loadSettings() {
     try {
       applyThemePreference(state.settings.theme);
       refreshTheme();
+      applyFontPreferences();
+      refreshChartFonts();
       applyChartTheme();
       echoChannelColorsUI();
       await applyUiScale(state.settings.uiScalePercent);
@@ -541,6 +556,9 @@ export async function resetSettings() {
     echoRealtimePanelWidth();
     applyThemePreference(state.settings.theme);
     refreshTheme();
+    applyFontPreferences();
+    refreshChartFonts();
+    refreshChartTimeAxis();
     applyChartTheme();
     echoChannelColorsUI();
     await applyUiScale(state.settings.uiScalePercent);
@@ -567,6 +585,7 @@ export async function resetSettings() {
     refreshChartLineWidths();
     refreshChartScales();
 
+    updateChartRange();
     updateStatsDisplay();
     updateEnergyDisplay();
     updateTempUIVisibility();

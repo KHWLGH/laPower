@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { t } from '../src/i18n.js';
+import { applyLanguage, t } from '../src/i18n.js';
 
 /**
  * 设置持久化的失败路径。
@@ -47,6 +47,10 @@ globalThis.document = {
       setProperty(name, value) {
         cssProps.set(name, String(value));
       },
+      /** @param {string} name */
+      removeProperty(name) {
+        cssProps.delete(name);
+      },
     },
     setAttribute() {},
     getAttribute: () => null,
@@ -65,6 +69,17 @@ globalThis.requestAnimationFrame = (cb) => {
 globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 
 const { defaultSettings, state } = await import('../src/state.js');
+const {
+  applyFontPreferences,
+  buildFontStacks,
+  CJK_FONT_ALIAS,
+  echoFontUI,
+  EN_MONO_FONT_ALIAS,
+  EN_UI_FONT_ALIAS,
+  LATIN_FONT_ALIAS,
+  normalizeFontName,
+  resolveDefaultFontLabel,
+} = await import('../src/fonts.js');
 const { getStore, loadSettings, saveSettings, resetSettings } = await import('../src/settings.js');
 const { toast } = await import('../src/ui/toast.js');
 
@@ -491,6 +506,192 @@ test('shortcut unbinding and CSV options survive the existing settings store wit
   } finally {
     state.settings = before;
     state.isTempConnected = wasTempConnected;
+    if (!hadElement) delete globalThis.HTMLElement;
+  }
+});
+
+test('useSystemTime and custom CJK/Latin font settings normalize, apply CSS tokens, persist and reset', async () => {
+  installStoreStub();
+  const previous = state.settings;
+  const invoke = window.__TAURI__.core.invoke;
+  const hadElement = 'HTMLElement' in globalThis;
+  if (!hadElement) globalThis.HTMLElement = class {};
+  try {
+    assert.equal(normalizeFontName('  JetBrains; Mono{}\n '), 'JetBrains Mono');
+    assert.equal(normalizeFontName(123), '');
+
+    const cjkOnly = buildFontStacks({ latinFont: '', cjkFont: 'Noto Serif SC', os: 'windows', language: 'zh-CN' });
+    assert.equal(
+      cjkOnly.ui,
+      `"${CJK_FONT_ALIAS}", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`,
+    );
+    assert.equal(
+      cjkOnly.mono,
+      `"${CJK_FONT_ALIAS}", "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace`,
+    );
+
+    const latinOnly = buildFontStacks({ latinFont: 'Cascadia Code', cjkFont: '', os: 'windows', language: 'zh-CN' });
+    assert.equal(
+      latinOnly.ui,
+      `"${LATIN_FONT_ALIAS}", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`,
+    );
+    assert.equal(
+      latinOnly.mono,
+      `"${LATIN_FONT_ALIAS}", "Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace`,
+    );
+
+    const both = buildFontStacks({
+      latinFont: 'JetBrains Mono',
+      cjkFont: 'PingFang SC',
+      os: 'macos',
+      language: 'zh-CN',
+    });
+    assert.equal(
+      both.ui,
+      `"${LATIN_FONT_ALIAS}", "${CJK_FONT_ALIAS}", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif`,
+    );
+    assert.equal(
+      both.mono,
+      `"${LATIN_FONT_ALIAS}", "${CJK_FONT_ALIAS}", "SF Mono", Menlo, Monaco, "PingFang SC", "Hiragino Sans GB", monospace`,
+    );
+
+    const enUiOnly = buildFontStacks({ enUiFont: 'Inter', enMonoFont: '', os: 'windows', language: 'en' });
+    assert.equal(
+      enUiOnly.ui,
+      `"${EN_UI_FONT_ALIAS}", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`,
+    );
+    assert.equal(enUiOnly.mono, '"Cascadia Mono", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", monospace');
+
+    const enMonoOnly = buildFontStacks({ enUiFont: '', enMonoFont: 'JetBrains Mono', os: 'macos', language: 'en' });
+    assert.equal(enMonoOnly.ui, '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif');
+    assert.equal(
+      enMonoOnly.mono,
+      `"${EN_MONO_FONT_ALIAS}", "SF Mono", Menlo, Monaco, "PingFang SC", "Hiragino Sans GB", monospace`,
+    );
+
+    const jaOnly = buildFontStacks({ jaFont: 'Yu Gothic', latinFont: '', os: 'windows', language: 'ja' });
+    assert.equal(
+      jaOnly.ui,
+      `"${CJK_FONT_ALIAS}", "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", "Microsoft YaHei UI", sans-serif`,
+    );
+    assert.equal(
+      jaOnly.mono,
+      `"${CJK_FONT_ALIAS}", "Cascadia Mono", Consolas, "Yu Gothic UI", "Meiryo UI", "Microsoft YaHei UI", monospace`,
+    );
+
+    assert.deepEqual(buildFontStacks({ enUiFont: '', enMonoFont: '', os: 'linux', language: 'en' }), {
+      ui: null,
+      mono: null,
+    });
+
+    const sampleFonts = [
+      {
+        family: 'Microsoft YaHei UI',
+        zh_cn: '微软雅黑 UI',
+        zh_tw: '微軟雅黑 UI',
+        has_cjk: true,
+        has_ja: false,
+        has_latin: true,
+      },
+      { family: 'Yu Gothic UI', ja: '游ゴシック UI', has_cjk: true, has_ja: true, has_latin: true },
+      { family: 'Segoe UI Variable Text', has_cjk: false, has_ja: false, has_latin: true },
+      { family: 'Cascadia Mono', has_cjk: false, has_ja: false, has_latin: true },
+    ];
+    assert.equal(resolveDefaultFontLabel('primary', 'windows', 'zh-CN', sampleFonts), '微软雅黑 UI');
+    assert.equal(
+      resolveDefaultFontLabel('secondary', 'windows', 'zh-CN', sampleFonts),
+      'Segoe UI Variable Text / Cascadia Mono',
+    );
+    assert.equal(resolveDefaultFontLabel('primary', 'windows', 'en', sampleFonts), 'Segoe UI Variable Text');
+    assert.equal(resolveDefaultFontLabel('secondary', 'windows', 'en', sampleFonts), 'Cascadia Mono');
+    assert.equal(resolveDefaultFontLabel('primary', 'windows', 'ja', sampleFonts), '游ゴシック UI');
+    assert.equal(resolveDefaultFontLabel('primary', 'macos', 'zh-CN', []), 'PingFang SC');
+
+    await applyLanguage('zh-CN');
+    window.__TAURI__.core.invoke = async (command, args = {}) => {
+      if (command === 'plugin:store|get' && args.key === 'appSettings') {
+        return [
+          {
+            language: 'zh-CN',
+            useSystemTime: true,
+            cjkFont: 'SimHei;{}',
+            jaFont: 'Meiryo UI',
+            latinFont: 'Cascadia Code',
+            enUiFont: 'Segoe UI',
+            enMonoFont: 'JetBrains Mono',
+          },
+          true,
+        ];
+      }
+      return invoke(command, args);
+    };
+    state.settings = { ...defaultSettings };
+    await loadSettings();
+    assert.equal(state.settings.useSystemTime, true);
+    assert.equal(el('use-system-time').checked, true);
+    assert.equal(state.settings.cjkFont, 'SimHei');
+    assert.equal(state.settings.jaFont, 'Meiryo UI');
+    assert.equal(state.settings.latinFont, 'Cascadia Code');
+    assert.equal(state.settings.enUiFont, 'Segoe UI');
+    assert.equal(state.settings.enMonoFont, 'JetBrains Mono');
+    assert.equal(el('font-cjk-select').value, 'SimHei');
+    assert.equal(el('font-latin-select').value, 'Cascadia Code');
+    assert.equal(el('btn-font-reset').disabled, false);
+    assert.match(
+      cssProps.get('--font-ui') ?? '',
+      new RegExp(`^"${LATIN_FONT_ALIAS}", "${CJK_FONT_ALIAS}", "Segoe UI Variable Text"`),
+    );
+    assert.match(
+      cssProps.get('--font-mono') ?? '',
+      new RegExp(`^"${LATIN_FONT_ALIAS}", "${CJK_FONT_ALIAS}", "Cascadia Mono"`),
+    );
+
+    await applyLanguage('en');
+    applyFontPreferences();
+    echoFontUI();
+    assert.equal(el('font-cjk-select').value, 'Segoe UI');
+    assert.equal(el('font-latin-select').value, 'JetBrains Mono');
+    assert.match(cssProps.get('--font-ui') ?? '', new RegExp(`^"${EN_UI_FONT_ALIAS}", "Segoe UI Variable Text"`));
+    assert.match(cssProps.get('--font-mono') ?? '', new RegExp(`^"${EN_MONO_FONT_ALIAS}", "Cascadia Mono"`));
+
+    await applyLanguage('ja');
+    applyFontPreferences();
+    echoFontUI();
+    assert.equal(el('font-cjk-select').value, 'Meiryo UI');
+    assert.equal(el('font-latin-select').value, 'Cascadia Code');
+    assert.match(
+      cssProps.get('--font-ui') ?? '',
+      new RegExp(`^"${LATIN_FONT_ALIAS}", "${CJK_FONT_ALIAS}", "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI"`),
+    );
+
+    window.__TAURI__.core.invoke = invoke;
+    assert.equal(await saveSettings(), true);
+    state.settings = { ...defaultSettings };
+    await applyLanguage('zh-CN');
+    await loadSettings();
+    assert.equal(state.settings.useSystemTime, true);
+    assert.equal(state.settings.cjkFont, 'SimHei');
+    assert.equal(state.settings.jaFont, 'Meiryo UI');
+    assert.equal(state.settings.latinFont, 'Cascadia Code');
+    assert.equal(state.settings.enUiFont, 'Segoe UI');
+    assert.equal(state.settings.enMonoFont, 'JetBrains Mono');
+
+    assert.equal(await resetSettings(), true);
+    assert.equal(state.settings.useSystemTime, false);
+    assert.equal(el('use-system-time').checked, false);
+    assert.equal(state.settings.cjkFont, '');
+    assert.equal(state.settings.jaFont, '');
+    assert.equal(state.settings.latinFont, '');
+    assert.equal(state.settings.enUiFont, '');
+    assert.equal(state.settings.enMonoFont, '');
+    assert.equal(el('font-cjk-select').value, '');
+    assert.equal(el('font-latin-select').value, '');
+    assert.equal(el('btn-font-reset').disabled, true);
+    assert.equal(cssProps.has('--font-ui'), false);
+    assert.equal(cssProps.has('--font-mono'), false);
+  } finally {
+    state.settings = previous;
+    window.__TAURI__.core.invoke = invoke;
     if (!hadElement) delete globalThis.HTMLElement;
   }
 });

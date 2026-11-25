@@ -126,6 +126,7 @@ flowchart LR
 | `shutdown` | 停止全部后台线程并销毁主窗口 |
 | `km003c_trigger` / `km003c_cancel_trigger` | 执行或取消 POWER-Z 协议控制与检测命令 |
 | `choose_custom_background` / `load_custom_background` / `clear_custom_background` | 本地自定义背景图片选择、加载与清除 |
+| `list_system_fonts` | 枚举本机已安装系统字体、字重/字面名称及 CJK/拉丁字符支持 |
 | `csv_export_pick` / `pd_export_pick` / `text_export_pick` / `png_export_pick` / `paired_export_pick` / `csv_import_pick` / `pd_import_pick` | 选择文件并签发受控后端读写句柄（CSV/PD/文本日志/协议检测 PNG） |
 | `video_export_capability` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | 报告图片/视频导出探测、一次性目标 ticket、后台单槽任务控制与进度查询 |
 
@@ -192,7 +193,7 @@ Interface 0 Vendor Bulk 与 CDC 串口控制：`protocol::auth`（AES-128-ECB）
 | 打点与快捷键 | `markers.js`、`marker-ui.js`、`shortcuts-core.js`、`shortcuts.js`、`shortcut-hints.js` | 数据集标记管理（纯函数）与全局快捷键绑定 |
 | PD 与协议控制 | `pd-model.js`、`pd-export*.js`、`views/pd.js`、`views/pd-list.js`、`views/pd-transfer.js`、`km003c-model.js`、`views/trigger.js`、`views/trigger-detection.js`、`views/trigger-history.js` | PD 摘要/过滤/列表/导入导出、KM003C 模型与触发/检测/历史视图 |
 | 设备与温度 | `device.js`、`temperature.js` | 设备连接生命周期、信息浮层与 TCP 温度状态 |
-| 设置、外观与关于 | `settings.js`、`views/settings-view.js`、`custom-background.js`、`ui-scale.js`、`theme-boot.js`、`views/about-view.js` | 持久化设置、自定义本地壁纸、50–200% 缩放、首帧主题、组件清单与更新检查 |
+| 设置、外观与关于 | `settings.js`、`views/settings-view.js`、`custom-background.js`、`fonts.js`、`ui-scale.js`、`theme-boot.js`、`views/about-view.js` | 持久化设置、自定义本地壁纸、自定义系统字体、50–200% 缩放、首帧主题与字体、组件清单与更新检查 |
 | 界面原语 | `ui/` | `dialog` `toast` `menu` `flyout` `tabbar` `controlbar` `display-stepper` `windowcontrols` |
 | 样式与依赖 | `styles/`、`vendor/` | `tokens` → `base` → `components` → `app` → `views` → `compact` → `glass`；内置 uPlot 与 Store shim |
 

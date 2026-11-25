@@ -24,7 +24,7 @@ import { energyMaxStepS } from './measurement.js';
 import { captureRangeStatsSnapshot, computeRangeStatsSync, rangeStatsRevision } from './range-stats.js';
 import { computeRangeStatsBackground } from './range-stats-background.js';
 import { state } from './state.js';
-import { formatRelativeHMS } from './utils.js';
+import { formatRecordingTime, formatRelativeHMS, recordingOriginMs } from './utils.js';
 
 /** @typedef {import('./range-stats.js').RangeStatsSnapshot} RangeSnapshot */
 /** @typedef {Pick<RangeSnapshot,'columns'|'startIndex'|'endIndex'|'len'|'revision'|'maxStepS'>} RangeMetadata */
@@ -432,11 +432,13 @@ export function createRangeUi(hooks) {
     const { startIndex, endIndex } = getVisibleDataRange();
     const startSeconds = Number.isFinite(xs.valueAt(startIndex)) ? xs.valueAt(startIndex) : 0;
     const endSeconds = Number.isFinite(xs.valueAt(endIndex)) ? xs.valueAt(endIndex) : 0;
+    const useSystemTime = state.settings.useSystemTime;
+    const originMs = useSystemTime ? recordingOriginMs(state.chartSeries, state.lastRecordingStartTime) : null;
 
     const el1 = getEl('range-start-time');
     const el2 = getEl('range-end-time');
-    setTextIfChanged(el1, formatRelativeHMS(startSeconds));
-    setTextIfChanged(el2, formatRelativeHMS(endSeconds));
+    setTextIfChanged(el1, formatRecordingTime(startSeconds, { useSystemTime, originMs }));
+    setTextIfChanged(el2, formatRecordingTime(endSeconds, { useSystemTime, originMs }));
 
     const points = endIndex - startIndex + 1;
     const durationSec = Math.max(0, endSeconds - startSeconds);

@@ -32,6 +32,7 @@ declare namespace TauriAPI {
   interface Core {
     invoke(cmd: 'pd_log_after', args: PdPageRequest): Promise<PdPage>;
     invoke(cmd: 'decode_pd_at', args: { index: number; generation: number }): Promise<import('./pd-model.js').PdMeta>;
+    invoke(cmd: 'list_system_fonts'): Promise<import('./fonts.js').SystemFontEntry[]>;
     invoke(cmd: string, args?: Record<string, unknown>): Promise<any>;
   }
   interface Event {
@@ -92,6 +93,7 @@ interface PerformanceDiagnostics {
 interface Window {
   __TAURI__: TauriAPI.Tauri;
   __WITRN_BOOT__?: BootTiming;
+  __laPowerBootFonts?: FontFace[];
   __WITRN_STREAM__?: (() => StreamDiagnostics) | null;
   __WITRN_PERF__?: (() => PerformanceDiagnostics) | null;
   __WITRN_PERF_RESET__?: (() => void) | null;

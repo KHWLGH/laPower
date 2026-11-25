@@ -708,6 +708,58 @@
                     </div>
                     <div class="settings-row">
                       <div class="settings-row-text">
+                        <label class="settings-row-title" for="font-cjk-select"><span data-i18n="cjkFont">Interface font</span></label>
+                        <div class="settings-row-desc"><span data-i18n="cjkFontHint">Choose an installed system font for interface labels, menus, and buttons.</span></div>
+                      </div>
+                      <div class="settings-row-control">
+                        <select id="font-cjk-select" class="ribbon-select font-select" aria-label="Interface font" data-i18n-aria-label="cjkFont">
+                          <option value="">Default</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="font-latin-select"><span data-i18n="latinFont">Monospace &amp; numeric font</span></label>
+                        <div class="settings-row-desc"><span data-i18n="latinFontHint">Choose an installed system font for live readings, timestamps, chart ticks, and tables.</span></div>
+                      </div>
+                      <div class="settings-row-control">
+                        <select id="font-latin-select" class="ribbon-select font-select" aria-label="Monospace &amp; numeric font" data-i18n-aria-label="latinFont">
+                          <option value="">Default</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="settings-row font-preview-row">
+                      <div class="font-preview-card" id="font-preview-sample">
+                        <div class="font-preview-head">
+                          <div class="font-preview-title">
+                            <span class="font-preview-brand">laPower</span>
+                            <span class="font-preview-sep" aria-hidden="true">·</span>
+                            <span class="font-preview-ui" data-i18n="fontPreviewUi">USB Power Monitor</span>
+                          </div>
+                          <button type="button" class="btn btn-subtle font-preview-reset" id="btn-font-reset" disabled><span data-i18n="fontReset">Reset fonts</span></button>
+                        </div>
+                        <div class="font-preview-metrics">
+                          <div class="font-preview-metric is-voltage">
+                            <span class="font-preview-metric-label" data-i18n="voltage">Voltage</span>
+                            <span class="font-preview-metric-value">12.345 <span class="font-preview-metric-unit">V</span></span>
+                          </div>
+                          <div class="font-preview-metric is-current">
+                            <span class="font-preview-metric-label" data-i18n="current">Current</span>
+                            <span class="font-preview-metric-value">2.500 <span class="font-preview-metric-unit">A</span></span>
+                          </div>
+                          <div class="font-preview-metric is-power">
+                            <span class="font-preview-metric-label" data-i18n="power">Power</span>
+                            <span class="font-preview-metric-value">30.86 <span class="font-preview-metric-unit">W</span></span>
+                          </div>
+                        </div>
+                        <div class="font-preview-foot">
+                          <span class="font-preview-caption" data-i18n="fontPreviewCaption">Live curves &amp; protocol analysis · USB-PD 3.1 PPS</span>
+                          <span class="font-preview-time">21:45:00.0</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
                         <label class="settings-row-title" for="ui-scale"><span data-i18n="uiScale">UI scale</span></label>
                         <div class="settings-row-desc" id="ui-scale-hint">
                           <span data-i18n="uiScaleHint">Scale the whole interface, including charts and the title bar. Reduce it if system scaling crowds the window; 100% follows the system.</span>
@@ -797,6 +849,20 @@
                       <div class="settings-row-control">
                         <label class="toggle">
                           <input type="checkbox" id="immediate-marker" aria-describedby="immediate-marker-hint" />
+                          <span class="toggle-track"></span>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="settings-row">
+                      <div class="settings-row-text">
+                        <label class="settings-row-title" for="use-system-time"><span data-i18n="useSystemTime">Start recording with system time</span></label>
+                        <div class="settings-row-desc" id="use-system-time-hint">
+                          <span data-i18n="useSystemTimeHint">Display chart X-axis, timeline range, tooltips, and marker times as system clock time starting from recording start instead of 00:00:00.0. Recording duration and exported CSV files remain unchanged.</span>
+                        </div>
+                      </div>
+                      <div class="settings-row-control">
+                        <label class="toggle">
+                          <input type="checkbox" id="use-system-time" aria-describedby="use-system-time-hint" />
                           <span class="toggle-track"></span>
                         </label>
                       </div>

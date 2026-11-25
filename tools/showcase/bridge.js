@@ -408,6 +408,114 @@ async function invoke(command, args = {}, ipc = {}) {
       return 'windows';
     case 'get_system_locale':
       return options.get('systemLocale') || navigator.language;
+    case 'list_system_fonts':
+      return [
+        {
+          family: 'Microsoft YaHei UI',
+          zh_cn: '微软雅黑 UI',
+          zh_tw: '微軟雅黑 UI',
+          has_cjk: true,
+          has_ja: false,
+          has_latin: true,
+          faces: [
+            { weight: 400, italic: false, names: ['MicrosoftYaHeiUI', 'Microsoft YaHei UI'] },
+            { weight: 700, italic: false, names: ['MicrosoftYaHeiUI-Bold', 'Microsoft YaHei UI Bold'] },
+          ],
+        },
+        {
+          family: 'Microsoft YaHei',
+          zh_cn: '微软雅黑',
+          zh_tw: '微軟雅黑',
+          has_cjk: true,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['MicrosoftYaHei', 'Microsoft YaHei'] }],
+        },
+        {
+          family: 'SimSun',
+          zh_cn: '宋体',
+          zh_tw: '宋體',
+          has_cjk: true,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['SimSun'] }],
+        },
+        {
+          family: 'SimHei',
+          zh_cn: '黑体',
+          zh_tw: '黑體',
+          has_cjk: true,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['SimHei'] }],
+        },
+        {
+          family: 'KaiTi',
+          zh_cn: '楷体',
+          zh_tw: '楷體',
+          has_cjk: true,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['KaiTi'] }],
+        },
+        {
+          family: 'Yu Gothic UI',
+          ja: '游ゴシック UI',
+          has_cjk: true,
+          has_ja: true,
+          has_latin: true,
+          faces: [
+            { weight: 400, italic: false, names: ['YuGothicUI-Regular', 'Yu Gothic UI'] },
+            { weight: 700, italic: false, names: ['YuGothicUI-Bold', 'Yu Gothic UI Bold'] },
+          ],
+        },
+        {
+          family: 'Meiryo UI',
+          ja: 'メイリオ UI',
+          has_cjk: true,
+          has_ja: true,
+          has_latin: true,
+          faces: [
+            { weight: 400, italic: false, names: ['MeiryoUI', 'Meiryo UI'] },
+            { weight: 700, italic: false, names: ['MeiryoUI-Bold', 'Meiryo UI Bold'] },
+          ],
+        },
+        {
+          family: 'Segoe UI Variable Text',
+          has_cjk: false,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['Segoe UI Variable Text'] }],
+        },
+        {
+          family: 'Segoe UI',
+          has_cjk: false,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['Segoe UI'] }],
+        },
+        {
+          family: 'Cascadia Mono',
+          has_cjk: false,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['CascadiaMono-Regular', 'Cascadia Mono'] }],
+        },
+        {
+          family: 'Consolas',
+          has_cjk: false,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['Consolas'] }],
+        },
+        {
+          family: 'Arial',
+          has_cjk: false,
+          has_ja: false,
+          has_latin: true,
+          faces: [{ weight: 400, italic: false, names: ['ArialMT', 'Arial'] }],
+        },
+      ];
     case 'load_custom_background':
       return null;
     case 'choose_custom_background':

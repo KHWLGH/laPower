@@ -31,6 +31,53 @@ export function formatRelativeHMS(seconds) {
 }
 
 /**
+ * 将墙钟毫秒时间戳格式化为本地 HH:mm:ss.s 字符串。
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatSystemHMS(ms) {
+  if (!Number.isFinite(ms)) return '--';
+  const roundedMs = Math.round(ms / 100) * 100;
+  const d = new Date(roundedMs);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  const tenths = Math.floor(d.getMilliseconds() / 100);
+  return `${hh}:${mm}:${ss}.${tenths}`;
+}
+
+/**
+ * 推导当前记录在相对秒 x = 0 处的系统墙钟毫秒起点。
+ * @param {{ x?: { length?: number, valueAt?: (i: number) => number }, timestamps?: { length?: number, valueAt?: (i: number) => number } }|null|undefined} cols
+ * @param {number|null|undefined} [fallbackStartTime=null]
+ * @returns {number|null}
+ */
+export function recordingOriginMs(cols, fallbackStartTime = null) {
+  if ((cols?.timestamps?.length ?? 0) > 0 && (cols?.x?.length ?? 0) > 0) {
+    const t0 = cols?.timestamps?.valueAt?.(0);
+    const x0 = cols?.x?.valueAt?.(0);
+    if (Number.isFinite(t0) && Number.isFinite(x0)) {
+      return Number(t0) - Number(x0) * 1000;
+    }
+  }
+  return Number.isFinite(fallbackStartTime) ? Number(fallbackStartTime) : null;
+}
+
+/**
+ * 按当前时间显示模式格式化记录时刻（相对秒或系统时间）。
+ * @param {number} seconds
+ * @param {{ useSystemTime?: boolean, originMs?: number|null }} [options]
+ * @returns {string}
+ */
+export function formatRecordingTime(seconds, options = {}) {
+  if (options.useSystemTime && Number.isFinite(options.originMs)) {
+    const safeSeconds = Number.isFinite(seconds) ? seconds : 0;
+    return formatSystemHMS(Number(options.originMs) + safeSeconds * 1000);
+  }
+  return formatRelativeHMS(seconds);
+}
+
+/**
  * 将 HEX 颜色字符串转换为 rgba() 格式。
  * @param {string} hex - 例如 "#65ade5"
  * @param {number} opacityPercent - 0-100

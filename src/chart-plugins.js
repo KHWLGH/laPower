@@ -22,7 +22,7 @@ import { getResolvedLanguage } from './i18n.js';
 import { markersOf } from './markers.js';
 import { state } from './state.js';
 import { chartTheme } from './theme.js';
-import { formatRelativeHMS } from './utils.js';
+import { formatRecordingTime, recordingOriginMs } from './utils.js';
 
 /** 最多叠几行标签；更多的重叠标记只画竖线，标签可在标记列表里查看。 */
 const MARKER_LABEL_ROWS = 3;
@@ -201,6 +201,7 @@ export function createCursorAndTooltip(hooks) {
     let lastMask = -1;
     let lastTheme = -1;
     let lastLanguage = '';
+    let lastTimeKey = '';
     let visibleRows = 0;
     let shown = false;
     let sizeDirty = true;
@@ -245,14 +246,18 @@ export function createCursorAndTooltip(hooks) {
       const dataGen = hooks.getDataGen();
       const tooltipThemeGen = hooks.getTooltipThemeGen();
       const language = getResolvedLanguage();
+      const useSystemTime = state.settings.useSystemTime;
+      const originMs = useSystemTime ? recordingOriginMs(state.chartSeries, state.lastRecordingStartTime) : null;
+      const timeKey = useSystemTime ? `sys:${originMs ?? ''}` : 'rel';
       if (
         realIdx !== lastIndex ||
         dataGen !== lastGen ||
         mask !== lastMask ||
         tooltipThemeGen !== lastTheme ||
-        language !== lastLanguage
+        language !== lastLanguage ||
+        timeKey !== lastTimeKey
       ) {
-        const heading = formatRelativeHMS(Number(xVal));
+        const heading = formatRecordingTime(Number(xVal), { useSystemTime, originMs });
         if (title.textContent !== heading) title.textContent = heading;
         visibleRows = 0;
         for (let i = 0; i < rows.length; i++) {
@@ -274,6 +279,7 @@ export function createCursorAndTooltip(hooks) {
         lastMask = mask;
         lastTheme = tooltipThemeGen;
         lastLanguage = language;
+        lastTimeKey = timeKey;
         sizeDirty = true;
       }
       if (visibleRows === 0) {

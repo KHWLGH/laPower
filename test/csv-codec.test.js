@@ -12,6 +12,7 @@ import {
   formatExcelTime,
   formatSpoolHeader,
   formatSpoolHeaderPatch,
+  formatSystemTime,
   parseCsv,
   parseCsvDateTime,
   SPOOL_PATCH_BYTES,
@@ -109,7 +110,7 @@ test('all finite Number digits round-trip in every measurement channel, includin
   const cols = makeColumns(
     values.map((v, i) => ({
       x: i / 7,
-      timestamps: START + i * 0.125,
+      timestamps: START + i * 100,
       voltage: v,
       current: v,
       power: Math.abs(v),
@@ -124,32 +125,44 @@ test('all finite Number digits round-trip in every measurement channel, includin
   for (const key of KEYS) assert.deepEqual(parsed[key].view(), cols[key].view(), key);
 });
 
-test('precise relative seconds and original wall-clock ms remain independent across pauses and clock rollback', () => {
+test('precise software seconds and SystemTime wall-clock remain independent across pauses and clock rollback', () => {
   const cols = makeColumns([
     { x: 3723.50000000003, timestamps: START, voltage: 5, current: -2, power: 10 },
-    { x: 3723.75000000003, timestamps: START + 3_600_000.125, voltage: 5, current: 2, power: 10 },
-    { x: 3724.00000000003, timestamps: START - 123.5, voltage: 5, current: -2, power: 10 },
+    { x: 3723.75000000003, timestamps: START + 3_600_000, voltage: 5, current: 2, power: 10 },
+    { x: 3724.00000000003, timestamps: START - 123, voltage: 5, current: -2, power: 10 },
   ]);
   const text = encode(cols);
+  const lines = text.trimEnd().split('\n');
+  assert.doesNotMatch(lines[1], /="/);
+  assert.doesNotMatch(lines[6], /="/);
+  assert.equal(lines[6].split(',')[0], formatSystemTime(START));
+  assert.equal(lines[6].split(',')[1], '3723.50000000003');
   const parsed = decode(text).columns;
   assert.deepEqual(parsed.x.view(), cols.x.view());
   assert.deepEqual(parsed.timestamps.view(), cols.timestamps.view());
-  const displayTime = text.split('\n')[6].split(',')[0];
-  assert.notEqual(parseRelativeTime(displayTime), cols.x.at(0));
   assert.deepEqual(
     calculateEnergyInRange(parsed.x.view(), parsed.current.view(), parsed.power.view(), 0, 2),
     calculateEnergyInRange(cols.x.view(), cols.current.view(), cols.power.view(), 0, 2),
   );
 });
 
-test('export keeps legacy prefix columns and appends exact time columns only at the end', () => {
+test('export uses standard SystemTime and SoftwareTime(s) headers without duplicate time columns', () => {
   const cols = makeColumns([{ x: 0, timestamps: START, voltage: 5, current: 2, power: 10 }]);
   for (const withTemp of [false, true]) {
     const header = encode(cols, { withTemp }).split('\n')[5];
-    const prefix = `${OLD_HEADER}${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),`;
-    assert.equal(header, `${prefix}RelativeTime(s),Timestamp(ms),SampleInterval(ms),`);
-    assert.deepEqual(mapCsvColumns(header), mapCsvColumns(prefix));
+    const expected = `SystemTime,SoftwareTime(s),Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),SampleInterval(ms),`;
+    assert.equal(header, expected);
+    assert.equal(header.includes(OLD_HEADER.split(',')[0]), false);
+    assert.equal(header.includes('RelativeTime(s)'), false);
+    assert.equal(header.includes('Timestamp(ms)'), false);
     assert.equal(header.includes('RecordingSegment'), false);
+    const mapped = mapCsvColumns(header);
+    const legacyMapped = mapCsvColumns(`${OLD_HEADER}${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),`);
+    assert.equal(mapped.tempIdx, withTemp ? legacyMapped.tempIdx + 1 : -1);
+    assert.equal(mapped.dpIdx, legacyMapped.dpIdx + 1);
+    assert.equal(mapped.dnIdx, legacyMapped.dnIdx + 1);
+    assert.equal(mapped.cc1Idx, legacyMapped.cc1Idx + 1);
+    assert.equal(mapped.cc2Idx, legacyMapped.cc2Idx + 1);
   }
 });
 
@@ -281,7 +294,9 @@ test('BOM, CRLF, blank cells and invalid rows preserve NaN and parseFloat legacy
 
 test('DateTime explicitly parses local components, leap days, milliseconds and years below 100', () => {
   assert.equal(parseCsvDateTime('2024-02-29 12:34:56.789'), START);
+  assert.equal(parseCsvDateTime('="2024-02-29 12:34:56.789"'), START);
   assert.equal(parseCsvDateTime('2024/2/29 12:34:56.7'), new Date(2024, 1, 29, 12, 34, 56, 700).getTime());
+  assert.equal(parseCsvDateTime('2024-02-29 12:34:56.78925'), START + 0.25);
   const early = new Date(0);
   early.setFullYear(99, 0, 2);
   early.setHours(3, 4, 5, 0);
@@ -443,7 +458,8 @@ test('range formatting concatenates to exactly the chunked body', () => {
   for (let i = 0; i < 10; i++) for (const key of KEYS) cols[key].push(key === 'x' ? i / 4 : i + 0.5);
   const snapshot = snapshotCsvColumns(cols, { sampleRate: 250, startTime: START });
   const [header, ...body] = [...formatCsvChunks(snapshot, 4)];
-  assert.ok(header.endsWith('RelativeTime(s),Timestamp(ms),SampleInterval(ms),\n'));
+  assert.ok(header.includes('\nSystemTime,SoftwareTime(s),'));
+  assert.ok(header.endsWith(',SampleInterval(ms),\n'));
   assert.equal(
     [formatCsvRange(snapshot, 0, 3), formatCsvRange(snapshot, 3, 7), formatCsvRange(snapshot, 7, 99)].join(''),
     body.join(''),
@@ -456,7 +472,7 @@ test('the spool header has a fixed-width patchable prefix and imports like an ex
   const large = formatSpoolHeaderPatch({ length: 123_456_789, lastX: 40 * 86400 + 3661.5, sampleRate: 60000 });
   assert.equal(small.length, SPOOL_PATCH_BYTES);
   assert.equal(large.length, SPOOL_PATCH_BYTES);
-  assert.match(large, /^SUM,000123456789\nTotalTime,="0040\.01:01:01\.500"\nSampTime\(ms\),060000\n$/);
+  assert.match(large, /^SUM,000123456789\nTotalTime,0040\.01:01:01\.500\nSampTime\(ms\),060000\n$/);
 
   const cols = makeColumns([
     { x: 0, timestamps: START, voltage: 5, current: 1, power: 5, temp: 30 },
@@ -571,7 +587,7 @@ test('source lines sit between DateTime and the column header and come back on i
   const lines = text.split('\n');
   assert.ok(lines[3].startsWith('DateTime,'));
   assert.deepEqual(lines.slice(4, 8), ['Software,laPower 0.2.4', 'Device,WITRN K2 (0716:5060)', 'Points,mean', '']);
-  assert.ok(lines[8].startsWith('Time(D.hh:mm:ss.ms),'));
+  assert.ok(lines[8].startsWith('SystemTime,SoftwareTime(s),'));
   const parsed = decode(text);
   assert.deepEqual(parsed.source, source);
   assert.equal(parsed.columns.x.length, 2, 'the extra lines are not data');
@@ -580,7 +596,7 @@ test('source lines sit between DateTime and the column header and come back on i
 test('missing source items are left out and old files report no source', () => {
   const cols = makeColumns([{ x: 0, timestamps: START, voltage: 5, current: 1, power: 5 }]);
   const partial = encode(cols, { source: { software: 'laPower', devices: [], points: null } });
-  assert.match(partial, /DateTime,[^\n]*\nSoftware,laPower\n\nTime/);
+  assert.match(partial, /DateTime,[^\n]*\nSoftware,laPower\n\nSystemTime,/);
   assert.ok(!partial.includes('Device,') && !partial.includes('Points,'));
   assert.equal(encode(cols, { source: null }), encode(cols), 'no source, unchanged output');
   assert.deepEqual(decode(encode(cols)).source, { software: null, devices: [], points: null });

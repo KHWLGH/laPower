@@ -941,6 +941,11 @@ export function initPdView() {
     metricsDirty = true;
     scheduleWindowSync(false);
   });
+  document.addEventListener('lapower:fonts-changed', () => {
+    monoAdvance = 0;
+    metricsDirty = true;
+    scheduleWindowSync(false);
+  });
 
   syncPdUi();
 }

@@ -285,7 +285,7 @@ test('the spool header names the meter that is recording', async () => {
   const file = onlyFile();
   assert.match(
     file.text,
-    /\nDateTime,[^\n]*\nSoftware,laPower[^\n]*\nDevice,POWER-Z KM003C \(5FC9:0063\)\nPoints,mean\n\nTime/,
+    /\nDateTime,[^\n]*\nSoftware,laPower[^\n]*\nDevice,POWER-Z KM003C \(5FC9:0063\)\nPoints,mean\n\nSystemTime,SoftwareTime\(s\),/,
   );
   assert.deepEqual(parseCsv(file.text, { fallbackStartTime: 0 }).source.devices, ['POWER-Z KM003C (5FC9:0063)']);
 });

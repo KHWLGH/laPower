@@ -17,6 +17,7 @@ import {
   parseRelativeTime,
 } from '../src/measurement.js';
 import { F64Col } from '../src/state.js';
+import { formatRecordingTime, formatRelativeHMS, formatSystemHMS, recordingOriginMs } from '../src/utils.js';
 
 /** An independent re-implementation of the segmented integration rule, written the obvious
  * way (call the exported helper per point). src/measurement.js inlines nothing today, but this
@@ -308,4 +309,32 @@ test('chunked columns preserve energy and interval results across chunk boundari
     );
   }
   assert.equal(estimateIntervalMsFromX(columns[0]), estimateIntervalMsFromX(times));
+});
+
+test('system time formatting rolls cleanly across second and midnight boundaries', () => {
+  const local = (year, month, day, h, m, s, ms) => new Date(year, month, day, h, m, s, ms).getTime();
+  assert.equal(formatSystemHMS(local(2026, 10, 25, 21, 45, 0, 120)), '21:45:00.1');
+  assert.equal(formatSystemHMS(local(2026, 10, 25, 12, 34, 56, 740)), '12:34:56.7');
+  assert.equal(formatSystemHMS(local(2026, 10, 25, 12, 34, 56, 760)), '12:34:56.8');
+  assert.equal(formatSystemHMS(local(2026, 10, 25, 23, 59, 59, 960)), '00:00:00.0');
+  assert.equal(formatSystemHMS(Number.NaN), '--');
+  assert.equal(formatSystemHMS(Number.POSITIVE_INFINITY), '--');
+});
+
+test('recordingOriginMs and formatRecordingTime resolve system vs relative time', () => {
+  const origin = new Date(2026, 10, 25, 9, 30, 0, 0).getTime();
+  const cols = {
+    x: new F64Col(),
+    timestamps: new F64Col(),
+  };
+  cols.x.set([0.5, 1.0]);
+  cols.timestamps.set([origin + 500, origin + 1000]);
+
+  assert.equal(recordingOriginMs(cols, origin + 9999), origin);
+  assert.equal(recordingOriginMs({ x: new F64Col(), timestamps: new F64Col() }, origin), origin);
+  assert.equal(recordingOriginMs(null, null), null);
+
+  assert.equal(formatRecordingTime(12.5, { useSystemTime: false, originMs: origin }), formatRelativeHMS(12.5));
+  assert.equal(formatRecordingTime(12.5, { useSystemTime: true, originMs: origin }), '09:30:12.5');
+  assert.equal(formatRecordingTime(12.5, { useSystemTime: true, originMs: null }), formatRelativeHMS(12.5));
 });

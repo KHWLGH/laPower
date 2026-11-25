@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 /** @param {string} id @param {number} value */
 export function echoDisplayStepper(id, value) {
   const output = document.getElementById(id);
-  if (!(output instanceof HTMLOutputElement)) return;
+  if (typeof HTMLOutputElement === 'undefined' || !(output instanceof HTMLOutputElement)) return;
   output.value = String(value);
   for (const button of output.parentElement?.querySelectorAll('button[data-direction]') ?? []) {
     const atLimit =
@@ -18,7 +18,7 @@ export function echoDisplayStepper(id, value) {
 /** @param {string} id @param {(value: number) => void} onChange */
 export function bindDisplayStepper(id, onChange) {
   const output = document.getElementById(id);
-  if (!(output instanceof HTMLOutputElement)) return;
+  if (typeof HTMLOutputElement === 'undefined' || !(output instanceof HTMLOutputElement)) return;
   const buttons = document.createElement('span');
   buttons.className = 'display-stepper-buttons';
   const min = Number(output.dataset.min);

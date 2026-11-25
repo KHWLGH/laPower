@@ -126,6 +126,7 @@ flowchart LR
 | `shutdown` | Stop all workers and destroy the main window |
 | `km003c_trigger` / `km003c_cancel_trigger` | Execute or cancel POWER-Z protocol control and detection |
 | `choose_custom_background` / `load_custom_background` / `clear_custom_background` | Select, load, and clear local custom background image |
+| `list_system_fonts` | Enumerate installed system fonts, localized/face metadata, and CJK/Latin coverage |
 | `csv_export_pick` / `pd_export_pick` / `text_export_pick` / `png_export_pick` / `paired_export_pick` / `csv_import_pick` / `pd_import_pick` | Pick files and issue controlled backend read/write handles (CSV/PD/text log/protocol PNG) |
 | `video_export_capability` / `video_export_pick` / `video_export_start` / `video_export_status` / `video_export_current` / `video_export_cancel` | Probe image/video encoding, issue single-use destination ticket, and manage single-slot background report export |
 
@@ -188,7 +189,7 @@ POWER-Z Interface 0 Vendor Bulk + CDC control: `protocol::auth` (AES-128-ECB), `
 | Markers & shortcuts | `markers.js`, `marker-ui.js`, `shortcuts-core.js`, `shortcuts.js`, `shortcut-hints.js` | Pure dataset marker management and global keybindings |
 | PD & protocol control | `pd-model.js`, `pd-export*.js`, `views/pd.js`, `views/pd-list.js`, `views/pd-transfer.js`, `km003c-model.js`, `views/trigger.js`, `views/trigger-detection.js`, `views/trigger-history.js` | PD summaries/filtering/list/transfer, KM003C models, and trigger/detection/history UI |
 | Devices & temp | `device.js`, `temperature.js` | Connection lifecycle, info flyout, and TCP temperature state |
-| Settings, UI & About | `settings.js`, `views/settings-view.js`, `custom-background.js`, `ui-scale.js`, `theme-boot.js`, `views/about-view.js` | Persisted settings, custom wallpapers, 50–200% scale, first-frame theme, licenses, and update checks |
+| Settings, UI & About | `settings.js`, `views/settings-view.js`, `custom-background.js`, `fonts.js`, `ui-scale.js`, `theme-boot.js`, `views/about-view.js` | Persisted settings, custom wallpapers, custom system fonts, 50–200% scale, first-frame theme/fonts, licenses, and update checks |
 | UI primitives | `ui/` | `dialog`, `toast`, `menu`, `flyout`, `tabbar`, `controlbar`, `display-stepper`, `windowcontrols` |
 | Styles & vendor | `styles/`, `vendor/` | `tokens` → `base` → `components` → `app` → `views` → `compact` → `glass`; vendored uPlot & Store shim |
 

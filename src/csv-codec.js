@@ -30,6 +30,9 @@ const COLUMN_KEYS = [
   'sampleIntervals',
   'currentMagnitudes',
 ];
+const SYSTEM_TIME_HEADER = 'SystemTime';
+const SOFTWARE_TIME_HEADER = 'SoftwareTime(s)';
+/** 旧格式首列表头；导入保留兼容。 */
 const TIME_HEADER = 'Time(D.hh:mm:ss.ms)';
 /** 标记列的表头名。单元格是清洗过的标签（不含逗号、换行与引号），空单元格表示该行没有标记。 */
 const MARKER_HEADER = 'Marker';
@@ -112,8 +115,13 @@ function numericCell(value) {
   return typeof value === 'number' && !Number.isNaN(value) ? (Object.is(value, -0) ? '-0' : String(value)) : '';
 }
 
-/** 保持首列的旧 Excel 显示格式；精确相对秒由尾列承载。 @param {number} seconds */
-export function formatExcelTime(seconds) {
+/** @param {number} value @param {number} [width=2] */
+function padInt(value, width = 2) {
+  return String(value).padStart(width, '0');
+}
+
+/** 标准化时长文本（不加 `="..."` 包裹），用于文件头 `TotalTime`。 @param {number} seconds */
+function formatDurationTime(seconds) {
   const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   const day = Math.floor(safe / 86400);
   const rem = safe - day * 86400;
@@ -121,25 +129,72 @@ export function formatExcelTime(seconds) {
   const m = Math.floor((rem % 3600) / 60);
   const s = Math.floor(rem % 60);
   const ms = Math.floor((rem % 1) * 1000);
-  const hms = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
-  return day > 0 ? `="${day}.${hms}"` : `="${hms}"`;
+  const hms = `${padInt(h)}:${padInt(m)}:${padInt(s)}.${padInt(ms, 3)}`;
+  return day > 0 ? `${day}.${hms}` : hms;
+}
+
+/** 保持兼容导出的旧 Excel 显示格式辅助函数。 @param {number} seconds */
+export function formatExcelTime(seconds) {
+  return `="${formatDurationTime(seconds)}"`;
 }
 
 /**
- * 数据区列标题。温度、段号、电流幅值与标记列可选；标记列在最后，读取方按表头名找列。
+ * 本地时间的 `YYYY-MM-DD HH:MM:SS.mmm`（标准纯文本 CSV，不加 `="..."`）。
+ * @param {number} ms
+ */
+export function formatSystemTime(ms) {
+  return formatSystemTimeWithCache(ms, null);
+}
+
+/** 创建带整秒前缀缓存的系统时间格式化器，加速连续高采样率导出。 @returns {(ms: number) => string} */
+function createSystemTimeFormatter() {
+  const cache = { wholeSec: Number.NaN, prefix: '' };
+  return (ms) => formatSystemTimeWithCache(ms, cache);
+}
+
+/**
+ * @param {number} ms
+ * @param {{ wholeSec: number, prefix: string } | null} cache
+ */
+function formatSystemTimeWithCache(ms, cache) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '';
+  const rounded = Math.round(ms);
+  const wholeSec = Math.floor(rounded / 1000);
+  const msPart = rounded - wholeSec * 1000;
+  if (cache && cache.wholeSec === wholeSec) {
+    return cache.prefix ? `${cache.prefix}.${padInt(msPart, 3)}` : '';
+  }
+  const d = new Date(wholeSec * 1000);
+  if (!Number.isFinite(d.getTime())) {
+    if (cache) {
+      cache.wholeSec = wholeSec;
+      cache.prefix = '';
+    }
+    return '';
+  }
+  const prefix = `${padInt(d.getFullYear(), 4)}-${padInt(d.getMonth() + 1)}-${padInt(d.getDate())} ${padInt(d.getHours())}:${padInt(d.getMinutes())}:${padInt(d.getSeconds())}`;
+  if (cache) {
+    cache.wholeSec = wholeSec;
+    cache.prefix = prefix;
+  }
+  return `${prefix}.${padInt(msPart, 3)}`;
+}
+
+/**
+ * 数据区列标题：前两列固定为系统时间 `SystemTime` 与软件相对时间 `SoftwareTime(s)`。
+ * 温度、段号、电流幅值与标记列可选；标记列在最后，读取方按表头名找列。
  * @param {boolean} withTemp @param {boolean} withSegments
  * @param {boolean} [withMarkers=false] @param {boolean} [withCurrentMagnitudes=false]
  */
 function columnHeader(withTemp, withSegments, withMarkers = false, withCurrentMagnitudes = false) {
-  return `${TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V),RelativeTime(s),Timestamp(ms)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),${withCurrentMagnitudes ? 'CurrentMagnitude(A),' : ''}${withMarkers ? `${MARKER_HEADER},` : ''}`;
+  return `${SYSTEM_TIME_HEADER},${SOFTWARE_TIME_HEADER},Voltage(V),Current(A),Power(W),${withTemp ? 'Temp(°C),' : ''}D+(V),D-(V),CC1(V),CC2(V)${withSegments ? ',RecordingSegment' : ''},SampleInterval(ms),${withCurrentMagnitudes ? 'CurrentMagnitude(A),' : ''}${withMarkers ? `${MARKER_HEADER},` : ''}`;
 }
 
 /** 本地时间的 `YYYY-MM-DD HH:MM:SS`。 @param {number} ms */
 function formatDateTime(ms) {
   const d = new Date(ms);
-  /** @param {number} value */
-  const pad = (value) => String(value).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  if (!Number.isFinite(d.getTime())) return '';
+  return `${padInt(d.getFullYear(), 4)}-${padInt(d.getMonth() + 1)}-${padInt(d.getDate())} ${padInt(d.getHours())}:${padInt(d.getMinutes())}:${padInt(d.getSeconds())}`;
 }
 
 /**
@@ -153,11 +208,12 @@ export function formatCsvRange(snapshot, from, to) {
   const start = Math.max(0, Math.min(snapshot.length, from));
   const end = Math.max(start, Math.min(snapshot.length, to));
   if (end === start) return '';
+  const fmtSystemTime = createSystemTimeFormatter();
   const lines = new Array(end - start);
   for (let i = start; i < end; i++) {
     const signals = `${numericCell(c.dp.valueAt(i))},${numericCell(c.dn.valueAt(i))},${numericCell(c.cc1.valueAt(i))},${numericCell(c.cc2.valueAt(i))}`;
     lines[i - start] =
-      `${formatExcelTime(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals},${numericCell(c.x.valueAt(i))},${numericCell(c.timestamps.valueAt(i))}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},${withCurrentMagnitudes ? `${numericCell(c.currentMagnitudes.valueAt(i))},` : ''}${markers ? `${markers.get(i) ?? ''},` : ''}`;
+      `${fmtSystemTime(c.timestamps.valueAt(i))},${numericCell(c.x.valueAt(i))},${numericCell(c.voltage.valueAt(i))},${numericCell(c.current.valueAt(i))},${numericCell(c.power.valueAt(i))},${withTemp ? `${numericCell(c.temp.valueAt(i))},` : ''}${signals}${recordingSegments ? `,${numericCell(recordingSegments.valueAt(i))}` : ''},${numericCell(c.sampleIntervals.valueAt(i))},${withCurrentMagnitudes ? `${numericCell(c.currentMagnitudes.valueAt(i))},` : ''}${markers ? `${markers.get(i) ?? ''},` : ''}`;
   }
   return `${lines.join('\n')}\n`;
 }
@@ -188,7 +244,7 @@ export function formatCsvHeader(snapshot) {
     source,
     withCurrentMagnitudes,
   } = snapshot;
-  return `SUM,${length}\nTotalTime,${formatExcelTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n${formatSourceLines(source)}\n${columnHeader(withTemp, !!recordingSegments, !!markers, withCurrentMagnitudes)}\n`;
+  return `SUM,${length}\nTotalTime,${formatDurationTime(c.x.at(-1))}\nSampTime(ms),${numericCell(sampleRate)}\nDateTime,${formatDateTime(startTime)}\n${formatSourceLines(source)}\n${columnHeader(withTemp, !!recordingSegments, !!markers, withCurrentMagnitudes)}\n`;
 }
 
 /**
@@ -206,7 +262,7 @@ export function* formatCsvChunks(snapshot, chunkRows = CSV_CHUNK_ROWS) {
   }
 }
 
-/** 落盘总时长：天数补到 4 位，任何时长都是同一个字节长度。 @param {number} seconds */
+/** 落盘总时长：天数补到 4 位，不带 `="..."`，任何时长都是同一个字节长度。 @param {number} seconds */
 function formatSpoolTotalTime(seconds) {
   const safe = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 9999 * 86400) : 0;
   const day = Math.floor(safe / 86400);
@@ -215,7 +271,7 @@ function formatSpoolTotalTime(seconds) {
   const m = Math.floor((rem % 3600) / 60);
   const s = Math.floor(rem % 60);
   const ms = Math.floor((rem % 1) * 1000);
-  return `="${String(day).padStart(4, '0')}.${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}"`;
+  return `${padInt(day, 4)}.${padInt(h)}:${padInt(m)}:${padInt(s)}.${padInt(ms, 3)}`;
 }
 
 /**
@@ -255,9 +311,11 @@ export function formatSpoolHeader(summary) {
  * @returns {number|null}
  */
 export function parseCsvDateTime(text) {
-  const match = /^(\d{4})([-/])(\d{1,2})\2(\d{1,2})[ T](\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?$/.exec(
-    text.trim(),
-  );
+  const cleaned = text
+    .trim()
+    .replace(/^="(.*)"$/, '$1')
+    .trim();
+  const match = /^(\d{4})([-/])(\d{1,2})\2(\d{1,2})[ T](\d{1,2}):(\d{1,2}):(\d{1,2})(?:\.(\d+))?$/.exec(cleaned);
   if (!match) return null;
   const year = Number(match[1]);
   const month = Number(match[3]) - 1;
@@ -265,10 +323,12 @@ export function parseCsvDateTime(text) {
   const hour = Number(match[5]);
   const minute = Number(match[6]);
   const second = Number(match[7]);
-  const ms = Number((match[8] || '').padEnd(3, '0'));
+  const frac = match[8] || '';
+  const wholeMs = Number(frac.slice(0, 3).padEnd(3, '0'));
+  const subMs = frac.length > 3 ? Number(`0.${frac.slice(3)}`) : 0;
   const date = new Date(0);
   date.setFullYear(year, month, day);
-  date.setHours(hour, minute, second, ms);
+  date.setHours(hour, minute, second, wholeMs);
   if (
     date.getFullYear() !== year ||
     date.getMonth() !== month ||
@@ -278,7 +338,7 @@ export function parseCsvDateTime(text) {
     date.getSeconds() !== second
   )
     return null;
-  return date.getTime();
+  return date.getTime() + subMs;
 }
 
 /** 旧可选列使用 parseFloat，非有限 / 空值保持 NaN。 @param {string[]} parts @param {number} index */
@@ -342,12 +402,19 @@ export function createCsvParser(options) {
   let declaredIntervalMs = null;
   /** @type {ReturnType<typeof mapCsvColumns>} */
   let map = mapCsvColumns('');
+  let systemTimeIndex = -1;
+  let softwareTimeIndex = -1;
+  let legacyTimeIndex = -1;
   let relativeIndex = -1;
   let timestampIndex = -1;
+  let voltageIndex = 1;
+  let currentIndex = 2;
+  let powerIndex = 3;
   let segmentIndex = -1;
   let intervalIndex = -1;
   let markerIndex = -1;
   let magnitudeIndex = -1;
+  let expectedParts = 0;
   /** @type {import('./markers.js').Marker[]} */
   const markers = [];
   /** @type {CsvSource} */
@@ -365,29 +432,53 @@ export function createCsvParser(options) {
     headerFound = true;
     map = mapCsvColumns(text);
     const headers = text.split(',').map((cell) => cell.trim());
+    systemTimeIndex = headers.indexOf(SYSTEM_TIME_HEADER);
+    softwareTimeIndex = headers.indexOf(SOFTWARE_TIME_HEADER);
+    legacyTimeIndex = headers.indexOf(TIME_HEADER);
     relativeIndex = headers.indexOf('RelativeTime(s)');
     timestampIndex = headers.indexOf('Timestamp(ms)');
+    const vIdx = headers.findIndex((h) => h === 'Voltage(V)' || h.startsWith('Voltage'));
+    const cIdx = headers.findIndex(
+      (h) => h === 'Current(A)' || (h.startsWith('Current') && !h.startsWith('CurrentMagnitude')),
+    );
+    const pIdx = headers.findIndex((h) => h === 'Power(W)' || h.startsWith('Power'));
+    voltageIndex = vIdx !== -1 ? vIdx : 1;
+    currentIndex = cIdx !== -1 ? cIdx : 2;
+    powerIndex = pIdx !== -1 ? pIdx : 3;
     segmentIndex = headers.indexOf('RecordingSegment');
     intervalIndex = headers.indexOf('SampleInterval(ms)');
     markerIndex = headers.indexOf(MARKER_HEADER);
     magnitudeIndex = headers.indexOf('CurrentMagnitude(A)');
-    precise = relativeIndex !== -1 && timestampIndex !== -1;
+    precise = (systemTimeIndex !== -1 && softwareTimeIndex !== -1) || (relativeIndex !== -1 && timestampIndex !== -1);
+    expectedParts = precise && text.endsWith(',') ? headers.length : 0;
     readCell = precise ? exactCell : optionalCell;
   }
 
   /** @param {string} text */
   function dataRow(text) {
     const parts = text.split(',');
-    if (parts.length < 4) return;
-    const voltage = precise ? exactCell(parts, 1) : Number.parseFloat(parts[1]);
-    const rawCurrent = precise ? exactCell(parts, 2) : Number.parseFloat(parts[2]);
+    if (parts.length <= Math.max(voltageIndex, currentIndex, powerIndex)) return;
+    const voltage = precise ? exactCell(parts, voltageIndex) : Number.parseFloat(parts[voltageIndex]);
+    const rawCurrent = precise ? exactCell(parts, currentIndex) : Number.parseFloat(parts[currentIndex]);
     const current = precise || options.signedCurrent ? rawCurrent : Math.abs(rawCurrent);
-    const power = precise ? exactCell(parts, 3) : Math.abs(Number.parseFloat(parts[3]));
+    const power = precise ? exactCell(parts, powerIndex) : Math.abs(Number.parseFloat(parts[powerIndex]));
     if (!precise && (Number.isNaN(voltage) || Number.isNaN(current) || Number.isNaN(power))) return;
-    const exactSeconds = exactCell(parts, relativeIndex);
-    const seconds = Number.isFinite(exactSeconds) ? exactSeconds : parseRelativeTime(parts[0]);
-    if (seconds === null) return;
-    let timestamp = exactCell(parts, timestampIndex);
+    const exactSeconds =
+      softwareTimeIndex !== -1 ? exactCell(parts, softwareTimeIndex) : exactCell(parts, relativeIndex);
+    const legacyRawTime = legacyTimeIndex !== -1 ? parts[legacyTimeIndex] : undefined;
+    const seconds = Number.isFinite(exactSeconds)
+      ? exactSeconds
+      : legacyRawTime !== undefined
+        ? parseRelativeTime(legacyRawTime)
+        : null;
+    if (seconds === null || !Number.isFinite(seconds)) return;
+    let timestamp = Number.NaN;
+    if (systemTimeIndex !== -1) {
+      const rawSystemTime = systemTimeIndex < parts.length ? parts[systemTimeIndex] : '';
+      if (rawSystemTime.trim()) timestamp = parseCsvDateTime(rawSystemTime) ?? Number.NaN;
+    } else if (timestampIndex !== -1) {
+      timestamp = exactCell(parts, timestampIndex);
+    }
     if (!Number.isFinite(timestamp)) {
       // DateTime 在后面才出现时起点未定：先占位，finish 统一补。
       if (foundDate) timestamp = startTime + seconds * 1000;
@@ -436,13 +527,20 @@ export function createCsvParser(options) {
       return;
     }
     if (!headerFound) {
-      if (text.startsWith(TIME_HEADER)) acceptHeader(text);
+      if (text.startsWith(`${SYSTEM_TIME_HEADER},`) || text.startsWith(TIME_HEADER)) acceptHeader(text);
       else if (text.startsWith(SOFTWARE_HEADER)) source.software = text.slice(SOFTWARE_HEADER.length).trim() || null;
       else if (text.startsWith(DEVICE_HEADER)) source.devices = parseDeviceList(text.slice(DEVICE_HEADER.length));
       else if (text.startsWith(POINTS_HEADER)) source.points = text.slice(POINTS_HEADER.length).trim() || null;
       return;
     }
-    if (last && precise && rowsEndWithComma && columns.x.length > 0 && !text.endsWith(',')) return;
+    if (
+      last &&
+      precise &&
+      rowsEndWithComma &&
+      columns.x.length > 0 &&
+      (!text.endsWith(',') || (expectedParts > 0 && text.split(',').length < expectedParts))
+    )
+      return;
     dataRow(text);
   }
 

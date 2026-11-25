@@ -205,6 +205,26 @@
   box-shadow: var(--glass-rim), var(--glass-shadow);
 }
 
+.font-preview-card {
+  background: var(--glass-sheen), var(--glass-control);
+  border-color: var(--glass-edge);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-rim);
+}
+
+.font-preview-head,
+.font-preview-foot {
+  border-color: var(--glass-divider);
+}
+
+.font-preview-metric {
+  background: color-mix(in srgb, var(--preview-accent) 10%, var(--glass-panel));
+  border-color: color-mix(in srgb, var(--preview-accent) 26%, var(--glass-edge));
+  border-left: 3px solid var(--preview-accent);
+  border-radius: calc(var(--glass-radius) - 4px);
+  box-shadow: var(--glass-rim);
+}
+
 .timeline-container,
 .chart-container,
 .settings-group,
@@ -1171,6 +1191,8 @@
   .trigger-pdo-list,
   .settings-nav,
   .settings-group,
+  .font-preview-card,
+  .font-preview-metric,
   .fluent-dialog,
   .flyout-panel,
   .cs-menu,

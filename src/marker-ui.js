@@ -27,7 +27,7 @@ import {
 import { state } from './state.js';
 import { promptText } from './ui/dialog.js';
 import { createFlyout } from './ui/flyout.js';
-import { formatRelativeHMS } from './utils.js';
+import { formatRecordingTime, recordingOriginMs } from './utils.js';
 
 /** @type {HTMLElement|null} */
 let panel = null;
@@ -108,12 +108,17 @@ function renderList() {
   if (!panel || panel.hidden || !list) return;
   const cols = state.chartSeries;
   const n = cols.x.length;
+  const useSystemTime = state.settings.useSystemTime;
+  const originMs = useSystemTime ? recordingOriginMs(cols, state.lastRecordingStartTime) : null;
   const rows = markersOf(cols).map((marker) => {
     const item = document.createElement('li');
     item.className = 'marker-row';
     const time = document.createElement('span');
     time.className = 'marker-time';
-    time.textContent = marker.index < n ? formatRelativeHMS(cols.x.valueAt(marker.index)) : t('markerPending');
+    time.textContent =
+      marker.index < n
+        ? formatRecordingTime(cols.x.valueAt(marker.index), { useSystemTime, originMs })
+        : t('markerPending');
     const label = document.createElement('button');
     label.type = 'button';
     label.className = 'marker-label';
@@ -131,6 +136,11 @@ function renderList() {
     return item;
   });
   list.replaceChildren(...rows);
+}
+
+/** 语言或时间显示模式变化后刷新打点列表。 */
+export function refreshMarkerList() {
+  renderList();
 }
 
 /** 标记变化：按钮可用状态由 refreshRecordButton 统一同步，列表随之重建。 */
