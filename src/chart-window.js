@@ -228,3 +228,53 @@ export function panTimeWindow(min, max, delta, dataMin, dataMax) {
   const start = Math.max(dataMin, Math.min(dataMax - span, min + delta));
   return { min: start, max: Math.min(dataMax, start + span) };
 }
+
+/**
+ * Settle a navigator drag/pan gesture against the gesture domain, then carry full/follow to the live tail.
+ * @param {{
+ *   min: number,
+ *   max: number,
+ *   dataMin: number,
+ *   dataMax: number,
+ *   latest: number,
+ *   part: 'start'|'end'|'pan',
+ *   secondsPerPixel?: number,
+ *   moved?: boolean,
+ * }} args
+ * @returns {{ min: number, max: number }}
+ */
+export function settleNavigatorWindow(args) {
+  const { min, max, dataMin, dataMax, latest, part, secondsPerPixel = 0, moved = true } = args;
+  const tail = Number.isFinite(latest) ? latest : dataMax;
+  const dataSpan = dataMax - dataMin;
+  if (!(dataSpan > 0) || !Number.isFinite(min) || !Number.isFinite(max)) {
+    const resolved = resolveChartWindow(emptyChartWindow(), dataMin, tail);
+    return { min: resolved.min, max: resolved.max };
+  }
+  const winSpan = Math.max(0, max - min);
+  const pixelTol =
+    moved && Number.isFinite(secondsPerPixel) && secondsPerPixel > 0
+      ? Math.min(secondsPerPixel * 2, dataSpan * 0.005, winSpan * 0.1)
+      : 0;
+  const startEps = part === 'start' || part === 'pan' ? Math.max(1e-6, pixelTol) : 1e-6;
+  const endEps = part === 'end' || part === 'pan' ? Math.max(1e-6, pixelTol) : 1e-6;
+  const atStart = min <= dataMin + startEps;
+  const atEnd = max >= dataMax - endEps;
+  /** @type {ChartWindow} */
+  let window;
+  if (atEnd && atStart) {
+    window = { mode: 'full', duration: dataSpan, min: dataMin, max: dataMax };
+  } else if (atEnd) {
+    const duration = part === 'end' ? Math.max(0, dataMax - min) : winSpan;
+    window = { mode: 'follow', duration, min: Math.max(dataMin, dataMax - duration), max: dataMax };
+  } else {
+    window = {
+      mode: 'frozen',
+      duration: winSpan,
+      min: Math.min(dataMax, Math.max(dataMin, min)),
+      max: Math.min(dataMax, Math.max(dataMin, max)),
+    };
+  }
+  const resolved = resolveChartWindow(window, dataMin, tail);
+  return { min: resolved.min, max: resolved.max };
+}

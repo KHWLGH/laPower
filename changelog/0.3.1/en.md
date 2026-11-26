@@ -9,7 +9,11 @@
 ## Changed
 
 - Refactored exported and temporary recovery CSV time columns to `SystemTime` (`YYYY-MM-DD HH:MM:SS.mmm`) and `SoftwareTime(s)` (exact relative seconds), removing duplicate time columns and `="..."` wrappers while remaining compatible with legacy CSV imports.
-- Refined Monitor chart X-axis time tick layout and edge clamping: the end timestamp always renders in full, while start and interior ticks are retained as space permits without canvas clipping or label overlap.
+- Refined Monitor chart X-axis time tick density and edge clamping: divisions stay uniform for the active plot width while preserving full start and end timestamps (prioritizing the end time on narrow plots), preventing density jumps, edge gaps, clipping, or label overlap while panning, dragging, or zooming.
+
+## Fixed
+
+- Fixed dragging the bottom timeline navigator (right handle or range bar) all the way to the right edge during active recording staying frozen on the pre-drag range instead of entering live follow/full tracking.
 
 ## Performance and maintenance
 

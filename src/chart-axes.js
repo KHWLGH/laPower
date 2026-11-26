@@ -98,47 +98,64 @@ export function smartTick(value) {
 }
 
 /**
- * 计算主图 X 轴时间刻度：保留完整起止时刻，并在起止安全间距内插入整齐的中间刻度。
+ * 计算主图 X 轴时间刻度：按绘图区宽度保持恒定分割密度并保留完整起止时刻，
+ * 避免拖动、缩放或平移时因跨越固定步长阈值而出现刻度密度跳变与边缘漂移。
  * 极窄绘图区退化为仅显示结束时刻，确保用户始终看清当前终点时间。
  * @param {number} scaleMin
  * @param {number} scaleMax
  * @param {number} foundIncr
  * @param {number} foundSpace
- * @param {{ startGapPx?: number, endGapPx?: number, minSpanPx?: number }} [options]
+ * @param {{
+ *   plotWidthCss?: number,
+ *   labelWidthPx?: number,
+ *   minGapPx?: number,
+ *   extraLeftPx?: number,
+ *   extraRightPx?: number,
+ *   minSpanPx?: number,
+ *   targetSlotPx?: number,
+ *   minStep?: number,
+ * }} [options]
  * @returns {number[]}
  */
 export function computeTimeAxisSplits(scaleMin, scaleMax, foundIncr, foundSpace, options = {}) {
   if (!Number.isFinite(scaleMin) || !Number.isFinite(scaleMax)) return [];
   if (!(scaleMax > scaleMin)) return [scaleMax];
 
-  const startGapPx = options.startGapPx ?? 92;
-  const endGapPx = options.endGapPx ?? 92;
-  const minSpanPx = options.minSpanPx ?? 92;
   const span = scaleMax - scaleMin;
-  const pxPerUnit = foundIncr > 0 && foundSpace > 0 ? foundSpace / foundIncr : 0;
-  const plotWidthCss = pxPerUnit > 0 ? span * pxPerUnit : 0;
+  const plotWidthCss =
+    options.plotWidthCss != null && options.plotWidthCss > 0
+      ? options.plotWidthCss
+      : foundIncr > 0 && foundSpace > 0
+        ? (span * foundSpace) / foundIncr
+        : 0;
+  const labelWidthPx = options.labelWidthPx ?? 76;
+  const minGapPx = options.minGapPx ?? 14;
+  const extraLeftPx = Math.max(0, options.extraLeftPx ?? 0);
+  const extraRightPx = Math.max(0, options.extraRightPx ?? 0);
+  const minSpanPx = options.minSpanPx ?? labelWidthPx + minGapPx + extraLeftPx + extraRightPx;
   if (plotWidthCss > 0 && plotWidthCss < minSpanPx) return [scaleMax];
 
-  /** @type {number[]} */
-  const interior = [];
-  if (foundIncr > 0 && Number.isFinite(foundIncr)) {
-    const dec = foundIncr < 1 ? Math.min(6, Math.ceil(-Math.log10(foundIncr))) : 0;
-    const roundDec = (/** @type {number} */ v) => {
-      const rounded = dec > 0 ? Number(v.toFixed(dec)) : Math.round(v);
-      return Object.is(rounded, -0) ? 0 : rounded;
-    };
-    const eps = span * 1e-9;
-    let v = roundDec(Math.ceil(scaleMin / foundIncr - 1e-9) * foundIncr);
-    for (let steps = 0; steps < 512 && v <= scaleMax + eps; steps++) {
-      if (v - scaleMin > eps && scaleMax - v > eps) {
-        if (pxPerUnit <= 0 || ((v - scaleMin) * pxPerUnit >= startGapPx && (scaleMax - v) * pxPerUnit >= endGapPx)) {
-          interior.push(v);
-        }
-      }
-      v = roundDec(v + foundIncr);
-    }
+  const minStep = options.minStep ?? 0.1;
+  const minSlotPx = labelWidthPx + minGapPx + Math.max(extraLeftPx, extraRightPx);
+  const targetSlotPx = Math.max(options.targetSlotPx ?? 112, labelWidthPx + 34, minSlotPx);
+
+  let divisions = 1;
+  if (plotWidthCss > 0) {
+    const maxFit = Math.max(1, Math.floor(plotWidthCss / minSlotPx));
+    divisions = Math.max(1, Math.min(maxFit, Math.round(plotWidthCss / targetSlotPx)));
   }
-  return [scaleMin, ...interior, scaleMax];
+  if (minStep > 0 && Number.isFinite(minStep)) {
+    divisions = Math.min(divisions, Math.max(1, Math.floor(span / minStep + 1e-9)));
+  }
+
+  /** @type {number[]} */
+  const splits = new Array(divisions + 1);
+  splits[0] = scaleMin;
+  for (let i = 1; i < divisions; i++) {
+    splits[i] = scaleMin + (span * i) / divisions;
+  }
+  splits[divisions] = scaleMax;
+  return splits;
 }
 
 /**
@@ -507,25 +524,40 @@ export function createChartAxes(hooks) {
   }
 
   /**
-   * 动态计算 X 轴最小刻度间距（CSS px），避免字体放大或自定义窄宽字体下碰撞或无刻度。
-   * @param {any} u @param {number} _axisIdx @param {number} _scaleMin @param {number} scaleMax @param {number} plotDim
-   * @returns {number}
+   * 返回单个不小于 5 的 X 轴步长供 uPlot 计算比例；
+   * uPlot 的 getIncrSpace 会到内部小数位 Map (Wl) 查找 < 5 的步长，自定义小值会返回 [0, 0] 并跳过 splits。
+   * 保持 incr >= 5 可绕过 Wl，同时保持 (span * foundSpace) / foundIncr === plotDim。
+   * @param {any} _u @param {number} _axisIdx @param {number} scaleMin @param {number} scaleMax
+   * @returns {number[]}
    */
-  function xAxisSpace(u, _axisIdx, _scaleMin, scaleMax, plotDim) {
-    const sample = hooks.formatXAxisTick?.(Number(scaleMax)) || '00:00:00.0';
-    const desired = Math.ceil(Math.max(88, measureXLabelCssWidth(u, sample) + 16));
-    if (Number.isFinite(plotDim) && plotDim > 0) return Math.min(desired, Math.max(20, Math.floor(plotDim)));
-    return desired;
+  function xAxisIncrs(_u, _axisIdx, scaleMin, scaleMax) {
+    const span = Number(scaleMax) - Number(scaleMin);
+    return [Number.isFinite(span) && span > 5 ? span : 5];
   }
 
   /**
-   * 为主图 X 轴生成包含精确起止点的刻度数组，并为夹紧边缘的起止标签预留防碰撞间距。
-   * @param {any} u @param {number} _axisIdx @param {number} scaleMin @param {number} scaleMax @param {number} foundIncr @param {number} foundSpace
+   * 返回最小合法像素间距，确保 uPlot 始终算出正的 foundSpace 并调用 xAxisSplits。
+   * @param {any} _u @param {number} _axisIdx @param {number} _scaleMin @param {number} _scaleMax @param {number} plotDim
+   * @returns {number}
+   */
+  function xAxisSpace(_u, _axisIdx, _scaleMin, _scaleMax, plotDim) {
+    return Number.isFinite(plotDim) && plotDim > 0 ? Math.min(1, plotDim) : 1;
+  }
+
+  /**
+   * 为主图 X 轴生成包含精确起止点的等密度时间刻度，并为夹紧边缘的起止标签预留防碰撞间距。
+   * @param {any} u
+   * @param {number} _axisIdx
+   * @param {number} scaleMin
+   * @param {number} scaleMax
+   * @param {number} foundIncr
+   * @param {number} foundSpace
    * @returns {number[]}
    */
   function xAxisSplits(u, _axisIdx, scaleMin, scaleMax, foundIncr, foundSpace) {
-    const endSample = hooks.formatXAxisTick?.(Number(scaleMax)) || '00:00:00.0';
-    const labelW = measureXLabelCssWidth(u, endSample);
+    const rawSample = hooks.formatXAxisTick?.(Number(scaleMax)) || '00:00:00.0';
+    const widestSample = rawSample.replace(/\d/g, '8');
+    const labelW = measureXLabelCssWidth(u, widestSample);
     const pxRatio = plotPxRatio(u);
     const canvasW = (u?.ctx?.canvas?.width || 0) / pxRatio;
     let extraLeft = 0;
@@ -537,9 +569,10 @@ export function createChartAxes(hooks) {
       extraRight = Math.max(0, labelW / 2 - rightMargin);
     }
     return computeTimeAxisSplits(scaleMin, scaleMax, foundIncr, foundSpace, {
-      startGapPx: labelW + 14 + extraLeft,
-      endGapPx: labelW + 14 + extraRight,
-      minSpanPx: labelW + 14,
+      labelWidthPx: labelW,
+      minGapPx: 14,
+      extraLeftPx: extraLeft,
+      extraRightPx: extraRight,
     });
   }
 
@@ -590,6 +623,7 @@ export function createChartAxes(hooks) {
     mkYAxis,
     drawYAxisChrome,
     drawYAxisLabels,
+    xAxisIncrs,
     xAxisSpace,
     xAxisSplits,
     drawXAxisLabels,

@@ -24,7 +24,7 @@ import {
   setSeriesVisible,
   updateCharts,
 } from './chart.js';
-import { minZoomSpan, moveNavigatorWindow } from './chart-window.js';
+import { minZoomSpan, moveNavigatorWindow, resolveChartWindow, settleNavigatorWindow } from './chart-window.js';
 import { importCSV } from './csv.js';
 import { clearCustomBackground, initCustomBackgroundControls, loadCustomBackground } from './custom-background.js';
 import {
@@ -370,8 +370,21 @@ function setupControls() {
     function draw(settled) {
       if (!gesture || !state.__rangeDragging || gesture.columns !== state.chartSeries) return;
       const { x, origin, secondsPerPixel, dataMin, dataMax, minSpan } = gesture;
-      const next = moveNavigatorWindow(gesture, part, (x - origin) * secondsPerPixel, dataMin, dataMax, minSpan);
-      if (settled) setRangeDragging(false);
+      let next = moveNavigatorWindow(gesture, part, (x - origin) * secondsPerPixel, dataMin, dataMax, minSpan);
+      if (settled) {
+        setRangeDragging(false);
+        const latest = state.chartSeries.x.at(-1);
+        next = settleNavigatorWindow({
+          min: next.min,
+          max: next.max,
+          dataMin,
+          dataMax,
+          latest: Number.isFinite(latest) ? latest : dataMax,
+          part,
+          secondsPerPixel,
+          moved: x !== origin,
+        });
+      }
       const before = state.chartWindow;
       if (!settled && before.min === next.min && before.max === next.max) return;
       state.__applyChartXWindow?.(next.min, next.max, settled, settled ? undefined : [dataMin, dataMax]);
@@ -382,7 +395,7 @@ function setupControls() {
       const columns = state.chartSeries;
       const dataMin = columns.x.at(0);
       const dataMax = columns.x.at(-1);
-      const { min, max } = state.chartWindow;
+      const { min, max } = resolveChartWindow(state.chartWindow, dataMin, dataMax);
       if (gesture || !event.isPrimary || event.button !== 0 || !(dataMax > dataMin && max > min)) return;
       if (part === 'pan' && max - min >= dataMax - dataMin) return;
       const { width } = sliderContainer.getBoundingClientRect();
@@ -450,7 +463,7 @@ function setupControls() {
       const baseStep = (span * (event.shiftKey ? 10 : event.ctrlKey ? 50 : 1)) / 1000;
       const delta = isHome ? -span : isEnd ? span : isLeft ? -baseStep : baseStep;
       const next = moveNavigatorWindow(
-        state.chartWindow,
+        resolveChartWindow(state.chartWindow, dataMin, dataMax),
         which,
         delta,
         dataMin,

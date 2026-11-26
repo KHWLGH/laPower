@@ -79,12 +79,6 @@ function syncChartFonts() {
   if (monoFont) MONO_FONT = monoFont;
 }
 
-/** X 轴刻度步长候选（秒）— 时间友好的取值（覆盖 0.1 秒到月级跨度）。 */
-const TIME_INCRS = [
-  0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800,
-  259200, 432000, 604800, 1209600, 2592000, 5184000, 8640000,
-];
-
 // ─── Module state ────────────────────────────────────────────────────────────
 
 /** 主图数据（列式）：[x, voltage, current, power, temp, dp, dn, cc1, cc2]。 */
@@ -2178,7 +2172,7 @@ export function initChart() {
         size: 34,
         gap: 4,
         space: chartAxes.xAxisSpace,
-        incrs: TIME_INCRS,
+        incrs: chartAxes.xAxisIncrs,
         splits: chartAxes.xAxisSplits,
         // 刻度与网格沿用 uPlot 计算，文字由 drawXAxisLabels 做夹紧防裁边与起止优先排版。
         values: (/** @type {any} */ _u, /** @type {number[]} */ splits) => splits.map(() => null),

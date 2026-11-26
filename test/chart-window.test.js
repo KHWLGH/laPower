@@ -14,6 +14,7 @@ import {
   panPermilleWindow,
   panTimeWindow,
   resolveChartWindow,
+  settleNavigatorWindow,
   settleWheelZoomWindow,
   wheelZoomFactor,
   wheelZoomPivot,
@@ -208,13 +209,184 @@ test('main-plot pan preserves a short window inside a long recording and at both
   assert.deepEqual(panTimeWindow(first, last, 30, first, last), { min: first, max: last });
 });
 
-test('computeTimeAxisSplits always preserves the end time and avoids crowded boundary ticks', () => {
-  assert.deepEqual(computeTimeAxisSplits(0, 60, 10, 100), [0, 10, 20, 30, 40, 50, 60]);
-  assert.deepEqual(computeTimeAxisSplits(0, 47.3, 10, 110), [0, 10, 20, 30, 47.3]);
-  assert.deepEqual(computeTimeAxisSplits(0, 49.5, 10, 110), [0, 10, 20, 30, 40, 49.5]);
-  assert.deepEqual(computeTimeAxisSplits(12.4, 47.3, 5, 100), [12.4, 20, 25, 30, 35, 40, 47.3]);
-  assert.deepEqual(computeTimeAxisSplits(10.01, 10.06, 0.1, 300), [10.01, 10.06]);
-  assert.deepEqual(computeTimeAxisSplits(0, 60, 60, 70), [60]);
+test('settleNavigatorWindow enters follow/full when pan or end reaches the live right edge', () => {
+  const panFollow = settleNavigatorWindow({
+    min: 80,
+    max: 100,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 104,
+    part: 'pan',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(panFollow, { min: 84, max: 104 });
+  const panWin = classifyChartWindow(panFollow.min, panFollow.max, 0, 104, 1e-6);
+  assert.equal(panWin.mode, 'follow');
+  assert.equal(panWin.duration, 20);
+
+  const endFollow = settleNavigatorWindow({
+    min: 70,
+    max: 100,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 104,
+    part: 'end',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(endFollow, { min: 74, max: 104 });
+  const endWin = classifyChartWindow(endFollow.min, endFollow.max, 0, 104, 1e-6);
+  assert.equal(endWin.mode, 'follow');
+  assert.equal(endWin.duration, 30);
+
+  const endFull = settleNavigatorWindow({
+    min: 0,
+    max: 100,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 104,
+    part: 'end',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(endFull, { min: 0, max: 104 });
+  assert.equal(classifyChartWindow(endFull.min, endFull.max, 0, 104, 1e-6).mode, 'full');
+});
+
+test('settleNavigatorWindow snaps within ~2px of the right edge and respects deliberate stops', () => {
+  const snappedEnd = settleNavigatorWindow({
+    min: 70,
+    max: 99.7,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 104,
+    part: 'end',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(snappedEnd, { min: 74, max: 104 });
+  assert.equal(classifyChartWindow(snappedEnd.min, snappedEnd.max, 0, 104, 1e-6).mode, 'follow');
+
+  const snappedPan = settleNavigatorWindow({
+    min: 79.7,
+    max: 99.7,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 104,
+    part: 'pan',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(snappedPan, { min: 84, max: 104 });
+  assert.equal(classifyChartWindow(snappedPan.min, snappedPan.max, 0, 104, 1e-6).mode, 'follow');
+
+  const deliberateStop = settleNavigatorWindow({
+    min: 70,
+    max: 99,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 104,
+    part: 'end',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(deliberateStop, { min: 70, max: 99 });
+  assert.equal(classifyChartWindow(deliberateStop.min, deliberateStop.max, 0, 104, 1e-6).mode, 'frozen');
+});
+
+test('settleNavigatorWindow preserves follow or restores full on start-handle moves without hijacking frozen end', () => {
+  const startFollow = settleNavigatorWindow({
+    min: 60,
+    max: 100,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 103,
+    part: 'start',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(startFollow, { min: 63, max: 103 });
+  assert.equal(classifyChartWindow(startFollow.min, startFollow.max, 0, 103, 1e-6).mode, 'follow');
+
+  const startFull = settleNavigatorWindow({
+    min: 0.2,
+    max: 100,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 103,
+    part: 'start',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(startFull, { min: 0, max: 103 });
+  assert.equal(classifyChartWindow(startFull.min, startFull.max, 0, 103, 1e-6).mode, 'full');
+
+  const frozenStartMove = settleNavigatorWindow({
+    min: 20,
+    max: 99.8,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 103,
+    part: 'start',
+    secondsPerPixel: 0.2,
+    moved: true,
+  });
+  assert.deepEqual(frozenStartMove, { min: 20, max: 99.8 });
+  assert.equal(classifyChartWindow(frozenStartMove.min, frozenStartMove.max, 0, 103, 1e-6).mode, 'frozen');
+
+  const unmovedClick = settleNavigatorWindow({
+    min: 70,
+    max: 99.8,
+    dataMin: 0,
+    dataMax: 100,
+    latest: 103,
+    part: 'end',
+    secondsPerPixel: 0.2,
+    moved: false,
+  });
+  assert.deepEqual(unmovedClick, { min: 70, max: 99.8 });
+  assert.equal(classifyChartWindow(unmovedClick.min, unmovedClick.max, 0, 103, 1e-6).mode, 'frozen');
+});
+
+test('computeTimeAxisSplits keeps uniform density across pans and spans and handles tiny or narrow ranges', () => {
+  const splits120 = computeTimeAxisSplits(0, 120, 120, 900);
+  assert.deepEqual(splits120, [0, 15, 30, 45, 60, 75, 90, 105, 120]);
+
+  for (const [min, max] of [
+    [0, 60],
+    [12.4, 72.4],
+    [15.7, 75.7],
+    [10, 30],
+    [0, 47.3],
+  ]) {
+    const span = max - min;
+    const splits = computeTimeAxisSplits(min, max, span, 900);
+    assert.equal(splits.length, 9);
+    assert.equal(splits[0], min);
+    assert.equal(splits.at(-1), max);
+    const step = span / 8;
+    for (let i = 1; i < splits.length; i++) {
+      assert.ok(Math.abs(splits[i] - splits[i - 1] - step) < 1e-9);
+    }
+  }
+
+  // Sub-5s spans use foundIncr = 5 from xAxisIncrs so uPlot skips its internal Wl lookup.
+  const sub5 = computeTimeAxisSplits(10, 13.7, 5, (5 / 3.7) * 900);
+  assert.equal(sub5.length, 9);
+  assert.equal(sub5[0], 10);
+  assert.equal(sub5.at(-1), 13.7);
+
+  assert.deepEqual(computeTimeAxisSplits(10.01, 10.06, 5, (5 / 0.05) * 900), [10.01, 10.06]);
+  assert.equal(computeTimeAxisSplits(10.0, 10.3, 5, (5 / 0.3) * 900).length, 4);
+  assert.deepEqual(computeTimeAxisSplits(0, 60, 60, 80), [60]);
+
+  // Hidden Y axes reduce side margins, clamping divisions via extraLeftPx/extraRightPx.
+  const uncapped = computeTimeAxisSplits(0, 60, 60, 320);
+  const marginClamped = computeTimeAxisSplits(0, 60, 60, 320, { extraLeftPx: 38, extraRightPx: 38 });
+  assert.equal(uncapped.length, 4);
+  assert.equal(marginClamped.length, 3);
+  assert.deepEqual(computeTimeAxisSplits(0, 60, 60, 160, { extraLeftPx: 38, extraRightPx: 38 }), [60]);
 });
 
 test('layoutXAxisLabels clamps edge labels inside the canvas and prioritizes end then start time', () => {
