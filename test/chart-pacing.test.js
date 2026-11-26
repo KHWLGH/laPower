@@ -93,3 +93,13 @@ test('live charts follow the display cadence while work fits and back off under 
   assert.equal(liveChartIntervalMs(5, false, 8, 8), 20);
   assert.equal(liveChartIntervalMs(0.4, true, 16, NaN), 0);
 });
+
+test('custom maxGapMs allows density recovery at slower sample rates (e.g. 250ms-1000ms)', () => {
+  const policy = new ChartRenderPolicy({ initialDensity: 1, maxDensity: 4 });
+  feedback(policy, 110, 100);
+  assert.equal(policy.pixelsPerBucket, 4);
+  for (let at = 600; at <= 15000; at += 500) {
+    policy.observe({ delayMs: 16, at, visible: true, dense: true, idleFrameMs: 16, maxGapMs: 1250 });
+  }
+  assert.equal(policy.pixelsPerBucket, 1);
+});

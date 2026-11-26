@@ -129,6 +129,7 @@ export function rasterOrderedFill({
     dirtyBottom = 0,
     dirtyLeft = width,
     dirtyRight = 0;
+  coverage.fill(0);
   for (let x = xStart; x < width; x++) {
     while (first < connect.length && (points[first * 2] - leftOffset) * scale <= x) first++;
     if (first >= connect.length) break;
@@ -174,7 +175,6 @@ export function rasterOrderedFill({
         continue;
       }
     }
-    coverage.fill(0);
     events.length = 0;
     events.push(0, height);
     for (let i = first; i < connect.length; i++) {
@@ -195,7 +195,15 @@ export function rasterOrderedFill({
         add(base, b, (right - left) * (1 - split));
       } else add(a, b, right - left);
     }
-    events.sort((a, b) => a - b);
+    for (let i = 1; i < events.length; i++) {
+      const key = events[i];
+      let j = i - 1;
+      while (j >= 0 && events[j] > key) {
+        events[j + 1] = events[j];
+        j--;
+      }
+      events[j + 1] = key;
+    }
     let c = 0,
       m = 0,
       event = 0,
@@ -239,6 +247,16 @@ export function rasterOrderedFill({
         }
       }
       y = next;
+    }
+    constant[0] = 0;
+    slope[0] = 0;
+    edge[0] = 0;
+    for (let k = 0; k < events.length; k++) {
+      const e = events[k];
+      constant[e] = 0;
+      slope[e] = 0;
+      edge[e] = 0;
+      if (e > 0) edge[e - 1] = 0;
     }
   }
   if (dirty && dirtyBottom > dirtyTop && dirtyRight > dirtyLeft) {

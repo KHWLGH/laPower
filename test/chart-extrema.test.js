@@ -205,3 +205,38 @@ test('paged index stores indices/counts, preserves earliest ties across pages an
   assert.equal(result.count[0], 39);
   assert.equal(index.finiteCount(col, 0, 8177, 8217), 39);
 });
+
+test('Float32 valueLevels match raw rebuildByX bit-for-bit across ties, signed zero, extreme magnitudes and channelMask', () => {
+  const n = 20003;
+  const xs = Float64Array.from({ length: n }, (_, i) => (i < 5000 ? i * 0.001 : 5 + (i - 5000) * 0.05));
+  const series = Array.from({ length: 8 }, (_, s) => {
+    const col = new F64Col();
+    const values = Float64Array.from({ length: n }, (_, i) => {
+      if (i % 97 === 0) return NaN;
+      if (s === 0) return i % 2 ? 1.0000000001 : 1.0000000002;
+      if (s === 1) return i % 2 ? -0 : 0;
+      if (s === 2) return i === 12345 ? -1e100 : i === 12346 ? 1e100 : Math.sin(i / 13) * 1e39;
+      return Math.cos(i / (s + 3)) * 5;
+    });
+    col.set(values);
+    return col;
+  });
+  const xCol = new F64Col();
+  xCol.set(xs);
+  const index = new ExactExtremaIndex();
+  index.sync(series, n);
+  assert.ok(index.valueLevels.length >= 3);
+  for (const mask of [0xff, 0b00000101, 0b01010010]) {
+    for (const [start, end] of [
+      [0, n],
+      [33, n - 17],
+    ]) {
+      const ref = new SeriesBuckets();
+      ref.rebuildByX(xCol, series, start, end, xs[start], xs[end - 1], 120, null, mask);
+      const actual = new SeriesBuckets();
+      actual.rebuildByX(xCol, series, start, end, xs[start], xs[end - 1], 120, index, mask);
+      assert.deepStrictEqual(actual.list, ref.list);
+      assert.deepStrictEqual(actual.flatten(), ref.flatten());
+    }
+  }
+});

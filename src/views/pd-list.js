@@ -15,6 +15,7 @@ import {
   formatBusVI,
   formatDirectionDisplay,
   formatElapsed,
+  formatPdSystemTime,
   headerFields,
   hexWordsForEntry,
   isDivider,
@@ -35,6 +36,28 @@ export function formatPdWallTime(ts) {
   const d = new Date(ts);
   const pad = (/** @type {number} */ n, /** @type {number} */ w = 2) => String(n).padStart(w, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+}
+
+/**
+ * 按当前时间显示模式格式化 PD 行时间文本与悬停提示。
+ * @param {number} t
+ * @param {number} origin
+ * @param {boolean} useSystemTime
+ * @returns {{ text: string, title: string }}
+ */
+function formatPdRowTime(t, origin, useSystemTime) {
+  const elapsed = formatElapsed(t, origin);
+  const sysFull = formatPdSystemTime(t);
+  if (useSystemTime) {
+    return {
+      text: formatPdWallTime(t),
+      title: sysFull ? `${sysFull} (+${elapsed})` : elapsed,
+    };
+  }
+  return {
+    text: elapsed,
+    title: sysFull || formatPdWallTime(t),
+  };
 }
 
 /**
@@ -76,7 +99,7 @@ function dirCell(direction) {
  * @param {number} logIndex
  * @param {number} visibleN
  * @param {number} origin
- * @param {{ selectedIndex: number|null, noteColWidth: number, monoAdvance: number }} ctx
+ * @param {{ selectedIndex: number|null, noteColWidth: number, monoAdvance: number, useSystemTime?: boolean }} ctx
  * @returns {HTMLElement}
  */
 function buildRow(entry, logIndex, visibleN, origin, ctx) {
@@ -94,11 +117,12 @@ function buildRow(entry, logIndex, visibleN, origin, ctx) {
   row.dataset.index = String(logIndex);
   if (ctx.selectedIndex === logIndex) row.classList.add('selected');
   if (noteUsesTwoLines(msg.summary, ctx.noteColWidth, ctx.monoAdvance)) row.classList.add('pd-row-wrap');
+  const time = formatPdRowTime(msg.t, origin, ctx.useSystemTime ?? state.settings.useSystemTime);
   const vi = formatBusVI(msg.vbus, msg.ibus);
 
   row.append(
     cell('pd-col-n', String(visibleN)),
-    cell('pd-col-time', formatElapsed(msg.t, origin), formatPdWallTime(msg.t)),
+    cell('pd-col-time', time.text, time.title),
     cell('pd-col-sop', msg.sop),
     cell(`pd-col-msg ${msgTypeClass(msg.type)}`, displayType(msg.type)),
     cell('pd-col-id', msg.id ?? ''),
@@ -117,16 +141,17 @@ function buildRow(entry, logIndex, visibleN, origin, ctx) {
  * @param {number} logIndex
  * @param {number} visibleN
  * @param {number} origin
- * @param {{ selectedIndex: number|null, noteColWidth: number, monoAdvance: number }} ctx
+ * @param {{ selectedIndex: number|null, noteColWidth: number, monoAdvance: number, useSystemTime?: boolean }} ctx
  */
 function updateMessageRow(row, msg, logIndex, visibleN, origin, ctx) {
   row.dataset.index = String(logIndex);
   row.classList.toggle('selected', ctx.selectedIndex === logIndex);
   row.classList.toggle('pd-row-wrap', noteUsesTwoLines(msg.summary, ctx.noteColWidth, ctx.monoAdvance));
+  const time = formatPdRowTime(msg.t, origin, ctx.useSystemTime ?? state.settings.useSystemTime);
   const vi = formatBusVI(msg.vbus, msg.ibus);
   const kids = row.children;
   setCellText(kids[0], String(visibleN));
-  setCellText(kids[1], formatElapsed(msg.t, origin), formatPdWallTime(msg.t));
+  setCellText(kids[1], time.text, time.title);
   setCellText(kids[2], msg.sop);
   if (kids[3]) {
     kids[3].className = `pd-col-msg ${msgTypeClass(msg.type)}`;
@@ -153,7 +178,7 @@ function updateMessageRow(row, msg, logIndex, visibleN, origin, ctx) {
  * @param {number} start
  * @param {number} end
  * @param {number} origin
- * @param {{ selectedIndex: number|null, noteColWidth: number, monoAdvance: number }} ctx
+ * @param {{ selectedIndex: number|null, noteColWidth: number, monoAdvance: number, useSystemTime?: boolean }} ctx
  */
 export function patchPdWindow(listWindow, log, filtered, start, end, origin, ctx) {
   if (!listWindow) return;

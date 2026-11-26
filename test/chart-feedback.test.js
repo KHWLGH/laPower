@@ -112,7 +112,7 @@ test('real draw hooks lower the bound density even when JS drawing is cheap, pre
   assert.equal(state.chartSeries.x.length, 5000);
   assert.equal(Math.max(...state.mainChart.data[1]), 1);
   const last = performanceDiagnostics.snapshot().charts.main.last;
-  assert.equal(last.pixelsPerBucket, 4);
+  assert.equal(last.pixelsPerBucket, 2);
   assert.equal(last.fillSuppressed, false, 'a first density reduction must retain the user fill');
   assert.equal(last.displayDense, true);
   assert.equal(last.recentAppendCount, 0, 'preloaded history is not a live batch');
@@ -148,7 +148,7 @@ test('background callbacks and paints from replaced columns never degrade the cu
   await frame(200);
   await submit();
   assert.equal(state.mainChart.data[0].length, before);
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 1);
   state.isRecording = false;
   chart.syncChartSeries();
 });
@@ -556,7 +556,7 @@ test('live density detects a severe raster stall without disabling fill', async 
   const last = performanceDiagnostics.snapshot().charts.main.last;
   assert.equal(last.fillSuppressed, false);
   assert.equal(last.fillSuppressionReason, null);
-  assert.equal(last.pixelsPerBucket, 8);
+  assert.equal(last.pixelsPerBucket, 4);
   await paintFeedback();
 });
 
@@ -751,7 +751,7 @@ test('large 1000Hz batches reduce density under pressure and retain fill', async
     append(2500);
     await submit();
   }
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 4);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
   assert.equal(performanceDiagnostics.snapshot().charts.main.last.fillSuppressed, false);
   for (let i = 0; i < 2; i++) {
     await paintFeedback(40);
@@ -805,7 +805,7 @@ test('dense live window changes retain density feedback and user fill', async ()
   await submit();
   await paintFeedback(40);
   await submit();
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 4);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 2);
   assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
   for (let i = 0; i < 2; i++) {
     await paintFeedback(40);
@@ -834,7 +834,7 @@ test('history preparation before draw does not falsely degrade detail or suppres
   await frame(8);
   await submit();
   const last = performanceDiagnostics.snapshot().charts.main.last;
-  assert.equal(last.pixelsPerBucket, 2, 'preparation is not evidence of expensive Canvas work');
+  assert.equal(last.pixelsPerBucket, 1, 'preparation is not evidence of expensive Canvas work');
   assert.equal(last.fillSuppressed, false, 'preparation cannot change the user fill');
   assert.equal(typeof state.mainChart.options.series[1].fill(), 'string');
   assert.equal(performanceDiagnostics.frameDelaySince(time - 9, true, true) <= 9, true);
@@ -907,7 +907,7 @@ test('recording and review budgets are independent and release preserves the ges
   await submit();
   await frame(120);
   await submit();
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 8);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 4);
   chart.setRangeDragging(true);
   chart.setChartXWindow(0.1, 4.9);
   chart.updateCharts('interaction');
@@ -920,7 +920,7 @@ test('recording and review budgets are independent and release preserves the ges
   assert.deepEqual(state.mainChart.data, during);
   append(100);
   await submit();
-  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 8);
+  assert.equal(performanceDiagnostics.snapshot().charts.main.last.pixelsPerBucket, 4);
   await paintFeedback();
 });
 

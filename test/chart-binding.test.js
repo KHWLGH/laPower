@@ -328,8 +328,12 @@ test('medium raw windows bound retraced geometry and keep their choice through r
     chart.setRangeDragging(true);
     await commit(range);
     const dragging = u.data;
-    if (alternating) assert.equal(u.__chartProjection.ppb, 4, 'large repeated swings retain bounded ordered geometry');
-    else assert.equal(dragging[0].length, 3002, 'smooth geometry can use the larger raw budget');
+    if (alternating) {
+      assert.ok(
+        u.__chartProjection.ppb > 1 && u.__chartProjection.ppb <= 3,
+        `large repeated swings retain bounded ordered geometry, got ${u.__chartProjection.ppb}`,
+      );
+    } else assert.equal(dragging[0].length, 3002, 'smooth geometry can use the larger raw budget');
     chart.setRangeDragging(false);
     await commit(range);
     assert.deepEqual(u.data, dragging);
@@ -446,11 +450,13 @@ test('continuous shrink and bidirectional pan paint warm windows without rebuild
         if (end - start + 1 > PLOT_WIDTH) {
           const expected = new SeriesBuckets();
           const cs = state.chartSeries;
-          expected.rebuild(
+          expected.rebuildByX(
             cs.x,
             [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2],
             start,
             end + 1,
+            range[0],
+            range[1],
             PLOT_WIDTH,
           );
           const flat = expected.flatten();
@@ -505,35 +511,38 @@ test('the extrema index is a speed selector with a single build entry', async ()
   assert.match(chooser, /BLOCK_SIZE/, '条带不超过一个块时 fold 省不下读取，须留在暴力扫路径');
 });
 
-test('full-history budget reductions merge the prefix and retain raw extrema without rebuilding', async () => {
+test('full-history budget reductions query the warm index and retain raw extrema without rescanning', async () => {
   seed();
   const u = stubChart();
   state.mainChart = u;
   await commit(windowOf(0, SAMPLES - 1));
   const before = u.data[0].length;
-  const original = SeriesBuckets.prototype.beginRebuild;
-  let rebuilds = 0;
-  SeriesBuckets.prototype.beginRebuild = function (...args) {
-    rebuilds++;
-    return original.apply(this, args);
+  const originalSyncStep = ExactExtremaIndex.prototype.syncStep;
+  let indexScans = 0;
+  ExactExtremaIndex.prototype.syncStep = function (...args) {
+    if (this.channels === 8) indexScans++;
+    return originalSyncStep.apply(this, args);
   };
   try {
     u.bbox = { width: 600 };
     appendSample({ voltage: 60 });
     await commit(windowOf(0, SAMPLES));
-    assert.equal(rebuilds, 0, 'full-history coarsening must not scan the retained prefix');
+    assert.equal(indexScans, 0, 'full-history coarsening must not rescan completed prefix blocks');
     assert.ok(u.data[0].length < before);
     assert.equal(Math.max(...u.data[1]), 60);
   } finally {
-    SeriesBuckets.prototype.beginRebuild = original;
+    ExactExtremaIndex.prototype.syncStep = originalSyncStep;
   }
   const expected = new SeriesBuckets();
   const cs = state.chartSeries;
-  expected.rebuild(
+  const range = windowOf(0, SAMPLES);
+  expected.rebuildByX(
     cs.x,
     [cs.voltage, cs.current, cs.power, cs.temp, cs.dp, cs.dn, cs.cc1, cs.cc2],
     0,
     SAMPLES + 1,
+    range[0],
+    range[1],
     600,
   );
   const flat = expected.flatten();
@@ -541,4 +550,20 @@ test('full-history budget reductions merge the prefix and retain raw extrema wit
     u.data,
     [flat.x, ...flat.ys].map((col) => Array.from(col)),
   );
+});
+
+test('8 visible channels maintain full pixel-column resolution during drag and release', async () => {
+  seed();
+  const u = stubChart();
+  u.bbox = { width: PLOT_WIDTH, height: 300 };
+  u.ctx = { canvas: { width: PLOT_WIDTH } };
+  u.series = [{}, ...Array.from({ length: 8 }, () => ({ show: true }))];
+  state.mainChart = u;
+  const target = windowOf(0, SAMPLES - 1);
+  chart.setRangeDragging(true);
+  const whileDragging = await dragFrame(u, target);
+  chart.setRangeDragging(false);
+  await commit(target);
+  assert.equal(whileDragging[0].length, PLOT_WIDTH * 2);
+  assert.deepEqual(whileDragging, u.data);
 });

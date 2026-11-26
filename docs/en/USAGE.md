@@ -4,7 +4,7 @@
 
 # User guide
 
-This guide covers laPower **0.3.0**. Screenshots come from a simulated Windows setup; enabled temperature, signal channels, and sample rates do not reflect first-run defaults. Dark mode uses identical controls.
+This guide covers laPower **0.3.1**. Screenshots come from a simulated Windows setup; enabled temperature, signal channels, and sample rates do not reflect first-run defaults. Dark mode uses identical controls.
 
 - [Getting started](#getting-started)
 - [Interface overview](#interface-overview)
@@ -194,7 +194,7 @@ To pause list updates while buffering in the background, disable `Follow recordi
 | `Auto scroll` | Scroll to new messages automatically (on by default) |
 | Layout icon | Persist stacked/side-by-side layout (side-by-side requires ≥ 1400 px width); drag divider to resize |
 
-Columns show `#`, `Elapsed`, `SOP`, `Msg`, `ID`, `Direction`, `Obj`, `Rev`, `V/I` (nearby meter sample), and `Summary`. Select any row to inspect raw bytes, header fields, and decoded PDO/RDO trees. To capture a new charger handshake, start recording before reconnecting the tested link.
+Columns show `#`, `Elapsed` (or `System time` when "Display system time" is enabled), `SOP`, `Msg`, `ID`, `Direction`, `Obj`, `Rev`, `V/I` (nearby meter sample), and `Summary`. Select any row to inspect raw bytes, header fields, and decoded PDO/RDO trees. To capture a new charger handshake, start recording before reconnecting the tested link.
 
 ## POWER-Z protocol control
 
@@ -265,7 +265,7 @@ Language switches take effect immediately without losing recordings or connectio
 | `Adjust line thickness on zoom` | On by default; automatically scales line width with zoom level |
 | `Record current direction` | Off by default; preserves signed current for new recordings/imports while integrating magnitudes |
 | `Mark immediately` | Off by default; skips the label prompt when adding markers |
-| `Start recording with system time` | Off by default; displays chart X-axis, timeline bounds, tooltips, and marker times as system clock time from recording start (duration and CSV format stay unchanged) |
+| `Display system time` | Off by default; displays chart X-axis, timeline bounds, tooltips, markers, and PD messages in system clock time (display-only setting, duration stats stay unchanged; exported CSV and PD files always record both system time and relative/timestamp time) |
 | `Recording limit` | 64–8192 MB, default 512 MB; covers all current chart data (including existing/imported) and pauses when reached |
 
 ### Keyboard shortcuts
@@ -302,7 +302,7 @@ SUM,1
 TotalTime,00:00:00.250
 SampTime(ms),250
 DateTime,2026-10-17 12:00:00
-Software,laPower 0.3.0
+Software,laPower 0.3.1
 Device,WITRN K2 (0716:5060)
 Points,mean
 
@@ -316,7 +316,7 @@ SystemTime,SoftwareTime(s),Voltage(V),Current(A),Power(W),Temp(°C),D+(V),D-(V),
 
 ### PD capture
 
-PD uses separate JSON (`app: "laPower"`, `kind: "pd-capture"`, `version: 2`, accepting version 1). Imports validate and replace the current PD log; jointly exported `.csv` and `.pd.json` files must be imported separately in their respective workspaces.
+PD uses separate JSON (`app: "laPower"`, `kind: "pd-capture"`, `version: 2`, accepting version 1; exported entries include local `systemTime` alongside epoch `t`). Imports validate and replace the current PD log; jointly exported `.csv` and `.pd.json` files must be imported separately in their respective workspaces.
 
 ## Troubleshooting
 

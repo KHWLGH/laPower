@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { computeTimeAxisSplits, layoutXAxisLabels } from '../src/chart-axes.js';
 import {
   classifyChartWindow,
   emptyChartWindow,
@@ -205,4 +206,54 @@ test('main-plot pan preserves a short window inside a long recording and at both
   assert.deepEqual(panTimeWindow(500, 501.25, -10_000, first, last), { min: 0.25, max: 1.5 });
   assert.deepEqual(panTimeWindow(500, 501.25, 1e6, first, last), { min: 79_998.75, max: last });
   assert.deepEqual(panTimeWindow(first, last, 30, first, last), { min: first, max: last });
+});
+
+test('computeTimeAxisSplits always preserves the end time and avoids crowded boundary ticks', () => {
+  assert.deepEqual(computeTimeAxisSplits(0, 60, 10, 100), [0, 10, 20, 30, 40, 50, 60]);
+  assert.deepEqual(computeTimeAxisSplits(0, 47.3, 10, 110), [0, 10, 20, 30, 47.3]);
+  assert.deepEqual(computeTimeAxisSplits(0, 49.5, 10, 110), [0, 10, 20, 30, 40, 49.5]);
+  assert.deepEqual(computeTimeAxisSplits(12.4, 47.3, 5, 100), [12.4, 20, 25, 30, 35, 40, 47.3]);
+  assert.deepEqual(computeTimeAxisSplits(10.01, 10.06, 0.1, 300), [10.01, 10.06]);
+  assert.deepEqual(computeTimeAxisSplits(0, 60, 60, 70), [60]);
+});
+
+test('layoutXAxisLabels clamps edge labels inside the canvas and prioritizes end then start time', () => {
+  const full = layoutXAxisLabels(
+    [
+      { x: 6, text: '00:00:00.0', width: 72 },
+      { x: 200, text: '00:00:30.0', width: 72 },
+      { x: 394, text: '00:01:00.0', width: 72 },
+    ],
+    400,
+  );
+  assert.deepEqual(full, [
+    { drawX: 4, align: 'left', left: 4, right: 76, text: '00:00:00.0' },
+    { drawX: 200, align: 'center', left: 164, right: 236, text: '00:00:30.0' },
+    { drawX: 396, align: 'right', left: 324, right: 396, text: '00:01:00.0' },
+  ]);
+
+  const noInterior = layoutXAxisLabels(
+    [
+      { x: 10, text: 'start', width: 72 },
+      { x: 110, text: 'mid', width: 72 },
+      { x: 210, text: 'end', width: 72 },
+    ],
+    220,
+  );
+  assert.deepEqual(
+    noInterior.map((item) => item.text),
+    ['start', 'end'],
+  );
+
+  const endOnly = layoutXAxisLabels(
+    [
+      { x: 10, text: 'start', width: 72 },
+      { x: 130, text: 'end', width: 72 },
+    ],
+    140,
+  );
+  assert.deepEqual(
+    endOnly.map((item) => item.text),
+    ['end'],
+  );
 });

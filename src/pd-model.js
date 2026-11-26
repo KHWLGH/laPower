@@ -428,6 +428,35 @@ export function sessionOrigin(entries) {
   return 0;
 }
 
+let cachedSystemSec = Number.NaN;
+let cachedSystemPrefix = '';
+
+/**
+ * 本地时间的 `YYYY-MM-DD HH:MM:SS.mmm`。
+ * @param {number} ms
+ * @returns {string}
+ */
+export function formatPdSystemTime(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '';
+  const rounded = Math.round(ms);
+  const wholeSec = Math.floor(rounded / 1000);
+  const msPart = rounded - wholeSec * 1000;
+  if (cachedSystemSec === wholeSec) {
+    return cachedSystemPrefix ? `${cachedSystemPrefix}.${String(msPart).padStart(3, '0')}` : '';
+  }
+  const d = new Date(wholeSec * 1000);
+  if (!Number.isFinite(d.getTime())) {
+    cachedSystemSec = wholeSec;
+    cachedSystemPrefix = '';
+    return '';
+  }
+  const pad = (/** @type {number} */ n, w = 2) => String(n).padStart(w, '0');
+  const prefix = `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  cachedSystemSec = wholeSec;
+  cachedSystemPrefix = prefix;
+  return `${prefix}.${pad(msPart, 3)}`;
+}
+
 /**
  * HID `0xFE` 帧去掉前导后的 PD 报文字节；已经是载荷则原样返回。
  * @param {number[]|undefined} bytes
@@ -917,10 +946,16 @@ function normalizeBytes(raw) {
  * @returns {Record<string, unknown>}
  */
 export function packPdCaptureEntry(e) {
-  if (isDivider(e)) return { t: e.t, divider: true };
+  const systemTime = formatPdSystemTime(e.t);
+  if (isDivider(e)) return systemTime ? { t: e.t, systemTime, divider: true } : { t: e.t, divider: true };
   const msg = /** @type {PdEntry} */ (e);
   /** @type {Record<string, unknown>} */
-  const out = { t: msg.t, sop: msg.sop, type: msg.type, role: msg.role, summary: msg.summary };
+  const out = { t: msg.t };
+  if (systemTime) out.systemTime = systemTime;
+  out.sop = msg.sop;
+  out.type = msg.type;
+  out.role = msg.role;
+  out.summary = msg.summary;
   for (const key of ['id', 'obj', 'rev', 'direction']) {
     const value = msg[/** @type {'id'|'obj'|'rev'|'direction'} */ (key)];
     if (value) out[key] = value;

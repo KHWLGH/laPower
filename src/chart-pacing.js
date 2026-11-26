@@ -57,18 +57,19 @@ export class ChartRenderPolicy {
   }
 
   /**
-   * @param {{delayMs: number, at: number, idleFrameMs?: number, visible: boolean, dense: boolean, interactive?: boolean}} sample
+   * @param {{delayMs: number, at: number, idleFrameMs?: number, visible: boolean, dense: boolean, interactive?: boolean, maxGapMs?: number}} sample
    * @returns {boolean} Whether the display density changed.
    */
-  observe({ delayMs, at, idleFrameMs = this.idleFrameMs, visible, dense, interactive = false }) {
+  observe({ delayMs, at, idleFrameMs = this.idleFrameMs, visible, dense, interactive = false, maxGapMs = 250 }) {
     if (!visible || !dense || !Number.isFinite(delayMs) || delayMs < 0 || !Number.isFinite(at)) {
       this.breakFeedback();
       return false;
     }
     if (Number.isFinite(idleFrameMs) && idleFrameMs > 0) this.idleFrameMs = idleFrameMs;
     this.nextFrameDelayMs = delayMs;
+    const gapLimit = Number.isFinite(maxGapMs) && maxGapMs > 0 ? maxGapMs : 250;
     // Sparse/hidden intervals are not evidence of two seconds of healthy chart paints.
-    if (this.lastFeedbackAt !== null && (at < this.lastFeedbackAt || at - this.lastFeedbackAt > 250)) {
+    if (this.lastFeedbackAt !== null && (at < this.lastFeedbackAt || at - this.lastFeedbackAt > gapLimit)) {
       this.slowFrames = 0;
       this.stableSince = null;
     }

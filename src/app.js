@@ -113,6 +113,7 @@ import {
   initPdView,
   markPdDisconnect,
   refreshPdLanguage,
+  refreshPdTimeMode,
   suspendPdView,
   syncPdView,
 } from './views/pd.js';
@@ -716,6 +717,7 @@ function setupControls() {
     updateChartRange();
     updateStatsDisplay();
     refreshMarkerList();
+    refreshPdTimeMode();
     debouncedSaveSettings();
   });
 

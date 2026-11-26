@@ -1262,8 +1262,8 @@ mod tests {
             "kind": "pd-capture",
             "version": 2,
             "entries": [
-                { "t": 100, "sop": "SOP", "type": "Source_Capabilities", "bytes": caps, "vbus": 5.097, "ibus": 0.044 },
-                { "t": 101, "divider": true },
+                { "t": 100, "systemTime": "2026-11-25 23:54:56.100", "sop": "SOP", "type": "Source_Capabilities", "bytes": caps, "vbus": 5.097, "ibus": 0.044 },
+                { "t": 101, "systemTime": "2026-11-25 23:54:56.101", "divider": true },
                 { "t": 102, "sop": "SOP", "type": "Request", "bytes": req },
                 {
                     "t": 103,

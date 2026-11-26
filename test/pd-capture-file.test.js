@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ModuleWorker } from '../bench/module-worker.mjs';
 import { encodePdEntries, PD_EXPORT_BYTES, pdCapturePrefix } from '../src/pd-export-core.js';
-import { buildPdCaptureFile, parsePdCaptureFile, summarize } from '../src/pd-model.js';
+import { buildPdCaptureFile, formatPdSystemTime, parsePdCaptureFile, summarize } from '../src/pd-model.js';
 
 /** 一棵最小但真实形状的解码树（Request 消息 + quick_rdo）。 */
 const meta = {
@@ -42,6 +42,8 @@ test('capture file round-trips entries and dividers', () => {
   assert.equal(file.app, 'laPower');
   assert.equal(file.kind, 'pd-capture');
   assert.equal(file.version, 2);
+  assert.equal(file.entries[0].systemTime, formatPdSystemTime(entry.t));
+  assert.equal(file.entries[1].systemTime, formatPdSystemTime(divider.t));
 
   const parsed = parsePdCaptureFile(JSON.parse(JSON.stringify(file)));
   assert.equal(parsed.ok, true);

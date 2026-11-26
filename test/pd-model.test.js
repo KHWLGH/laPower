@@ -17,6 +17,7 @@ import {
   formatBusVI,
   formatCapNote,
   formatElapsed,
+  formatPdSystemTime,
   formatRequestNote,
   headerFields,
   hexWordsFromWire,
@@ -242,6 +243,14 @@ test('formatElapsed is relative to the session origin', () => {
     ]),
     25,
   );
+});
+
+test('formatPdSystemTime formats finite epoch ms and rejects non-finite values', () => {
+  const ts = new Date(2026, 10, 25, 23, 54, 56, 78).getTime();
+  assert.equal(formatPdSystemTime(ts), '2026-11-25 23:54:56.078');
+  assert.match(formatPdSystemTime(0), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.000$/);
+  assert.equal(formatPdSystemTime(Number.NaN), '');
+  assert.equal(formatPdSystemTime(Number.POSITIVE_INFINITY), '');
 });
 
 test('hex words follow USB-PD little-endian object layout', () => {

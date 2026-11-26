@@ -155,7 +155,7 @@
 .pd-table-head,
 .pd-row {
   display: grid;
-  grid-template-columns: 40px 92px 56px minmax(108px, 1.1fr) 28px 124px 32px 28px 96px minmax(140px, 2.4fr);
+  grid-template-columns: 40px 96px 56px minmax(108px, 1.1fr) 28px 124px 32px 28px 96px minmax(140px, 2.4fr);
   column-gap: 6px;
   align-items: center;
   box-sizing: border-box;

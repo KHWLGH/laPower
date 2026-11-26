@@ -579,6 +579,7 @@ function patchWindow(start, end, origin) {
     selectedIndex,
     noteColWidth,
     monoAdvance,
+    useSystemTime: state.settings.useSystemTime,
   });
 }
 
@@ -795,6 +796,14 @@ function updateEmptyState() {
   if (empty) empty.hidden = hasRows;
 }
 
+function syncPdTimeHeader() {
+  const timeHead = els.tableHead()?.querySelector('.pd-col-time');
+  if (!(timeHead instanceof HTMLElement)) return;
+  const key = state.settings.useSystemTime ? 'pdSystemTime' : 'pdElapsed';
+  timeHead.dataset.i18n = key;
+  timeHead.textContent = t(key);
+}
+
 function updateCounter() {
   if (viewHidden()) return;
   const counter = els.counter();
@@ -947,6 +956,7 @@ export function initPdView() {
     scheduleWindowSync(false);
   });
 
+  syncPdTimeHeader();
   syncPdUi();
 }
 
@@ -983,6 +993,13 @@ export function refreshPdLanguage() {
   });
   updateCounter();
   applyPdSplitLayout();
+  syncPdTimeHeader();
   for (const element of document.querySelectorAll('.pd-detail-vi')) element.setAttribute('title', t('pdBusHint'));
+  if (!viewHidden()) syncWindow(false);
+}
+
+/** 切换系统时间 / 相对时间显示后刷新 PD 列表表头与可见行时间列。 */
+export function refreshPdTimeMode() {
+  syncPdTimeHeader();
   if (!viewHidden()) syncWindow(false);
 }

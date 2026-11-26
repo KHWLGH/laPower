@@ -320,3 +320,52 @@ test('ordered candidates preserve slopes, spikes, steps, repeated time, negative
     assert.ok(g.x.length <= 4 * buckets.list.length);
   }
 });
+
+test('rebuildByX eliminates power-of-two halving and preserves mixed-rate detail and gaps', () => {
+  const cap = 200;
+  // Crosses cap * 2^k + 1 without halving to 128/256 buckets.
+  const n = 513;
+  const xs1 = Float64Array.from({ length: n }, (_, i) => i * 0.001);
+  const ys1 = [Float64Array.from({ length: n }, (_, i) => Math.sin(i / 5))];
+  const b1 = new SeriesBuckets(1);
+  b1.rebuildByX(xs1, ys1, 0, n, xs1[0], xs1[n - 1], cap);
+  assert.equal(b1.list.length, cap);
+  assert.equal(b1.flatten().x.length, cap * 2);
+
+  // Mixed sample rates: 1000 Hz burst (2000 pts in 2s) followed by 1 Hz tail (100 pts in 100s).
+  const mixedX = [];
+  const mixedY = [];
+  for (let i = 0; i < 2000; i++) {
+    mixedX.push(i * 0.001);
+    mixedY.push(i % 10 === 0 ? 10 : 1);
+  }
+  for (let i = 1; i <= 100; i++) {
+    mixedX.push(2 + i);
+    mixedY.push(i % 2 ? 8 : 2);
+  }
+  const mxs = Float64Array.from(mixedX);
+  const mys = [Float64Array.from(mixedY)];
+  const mixed = new SeriesBuckets(1);
+  mixed.rebuildByX(mxs, mys, 0, mxs.length, 0, 102, 510);
+  // 1 Hz samples in [2s, 102s] must each get their own pixel column instead of being merged with burst.
+  const tailBuckets = mixed.list.filter((b) => b.start >= 2000);
+  assert.equal(tailBuckets.length, 100);
+
+  // Gap + clipping neighbor test on a zoomed sub-range [10, 20].
+  const gapX = Float64Array.from([0, 5, 12, 13, 18, 25]);
+  const gapY = [Float64Array.from([1, 2, 3, 4, 5, 6])];
+  const gapped = new SeriesBuckets(1);
+  const start = firstIndexAtOrAfter(gapX, gapX.length, 10);
+  const end = firstIndexAfter(gapX, gapX.length, 20);
+  gapped.rebuildByX(gapX, gapY, start, end, 10, 20, 100);
+  const flatGap = gapped.flatten().channels[0];
+  assert.deepEqual(Array.from(flatGap.x), [5, 12, 13, 18, 25]);
+
+  // Duplicate timestamps remain strictly monotonic in carrier x.
+  const dupX = Float64Array.from({ length: 400 }, (_, i) => Math.floor(i / 4) * 0.1);
+  const dupY = [Float64Array.from({ length: 400 }, (_, i) => (i % 7) - 3)];
+  const dupB = new SeriesBuckets(1);
+  dupB.rebuildByX(dupX, dupY, 0, dupX.length, 0, 9.9, 64);
+  const dupFlat = dupB.flatten();
+  assert.ok(dupFlat.x.every((v, i) => i === 0 || v > dupFlat.x[i - 1]));
+});

@@ -11,6 +11,9 @@ import { F64_CHUNK_SIZE } from './state.js';
 
 export const BUCKET_MIN = 64;
 export const DISPLAY_SERIES = 8;
+const EMPTY_F64 = new Float64Array(0);
+const EMPTY_U32 = new Uint32Array(0);
+const EMPTY_U8 = new Uint8Array(0);
 
 /** @typedef {ArrayLike<number>|import('./state.js').F64Col|import('./state.js').F64Snapshot} NumericColumn */
 
@@ -124,6 +127,12 @@ export class SeriesBuckets {
   /** @type {DisplayBucket[]} */
   list = [];
   ppb = 1;
+  /** @type {'stripe'|'x'} */
+  mode = 'stripe';
+  xMin = NaN;
+  xMax = NaN;
+  xCap = BUCKET_MIN;
+  channelMask = 0xffffffff;
   srcStart = 0;
   srcEnd = 0;
   cap = BUCKET_MIN;
@@ -145,6 +154,11 @@ export class SeriesBuckets {
   reset(start = 0) {
     this.list = [];
     this.ppb = 1;
+    this.mode = 'stripe';
+    this.xMin = NaN;
+    this.xMax = NaN;
+    this.xCap = BUCKET_MIN;
+    this.channelMask = 0xffffffff;
     this.srcStart = this.srcEnd = start;
     this.cap = BUCKET_MIN;
     this._flatView = null;
@@ -329,6 +343,273 @@ export class SeriesBuckets {
     };
   }
 
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} start @param {number} end @param {number} xMin @param {number} xMax @param {number} cap @param {import('./chart-extrema.js').ExactExtremaIndex|null} [index=null] @param {number} [channelMask=0xffffffff] */
+  rebuildByX(xs, series, start, end, xMin, xMax, cap, index = null, channelMask = 0xffffffff) {
+    const step = this.beginRebuildByX(xs, series, start, end, xMin, xMax, cap, index, channelMask);
+    while (!step(Infinity)) {
+      /* synchronous API */
+    }
+  }
+  /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} start @param {number} end @param {number} xMin @param {number} xMax @param {number} cap @param {import('./chart-extrema.js').ExactExtremaIndex|null} [index=null] @param {number} [channelMask=0xffffffff] */
+  beginRebuildByX(xs, series, start, end, xMin, xMax, cap, index = null, channelMask = 0xffffffff) {
+    this.reset(start);
+    const width = Math.max(BUCKET_MIN, Math.floor(cap));
+    this.mode = 'x';
+    this.xMin = xMin;
+    this.xMax = xMax;
+    this.xCap = width;
+    this.channelMask = channelMask;
+    this._xs = xs;
+    this._series = series;
+    this._index = index;
+    if (start >= end) {
+      return () => {
+        this.srcEnd = start;
+        this.ppb = 1;
+        this.cap = BUCKET_MIN;
+        this._flatView = null;
+        return true;
+      };
+    }
+    const channels = this.channels;
+    const xChunks = '_chunks' in xs ? xs._chunks : null;
+    /** @param {number} idx */
+    const xAt = (idx) => (xChunks ? xChunks[idx >>> 12][idx & 4095] : Number(xs[idx]));
+    const seriesChunks = new Array(channels);
+    for (let s = 0; s < channels; s++) {
+      const col = series[s];
+      seriesChunks[s] = col && '_chunks' in col ? col._chunks : null;
+    }
+    /** @param {number} bStart @param {number} bEnd */
+    const createEmptyBucket = (bStart, bEnd) => ({
+      x0: xAt(bStart),
+      x1: xAt(bEnd - 1),
+      start: bStart,
+      n: bEnd - bStart,
+      min: new Array(channels).fill(NaN),
+      max: new Array(channels).fill(NaN),
+      minIndex: new Array(channels).fill(-1),
+      maxIndex: new Array(channels).fill(-1),
+      count: new Array(channels).fill(0),
+    });
+    /** @param {DisplayBucket} target @param {number} from @param {number} to */
+    const scanSlice = (target, from, to) => {
+      for (let s = 0; s < channels; s++) {
+        if ((channelMask & (1 << s)) === 0) continue;
+        const col = series[s];
+        if (!col) continue;
+        const chunks = seriesChunks[s];
+        let min = target.min[s];
+        let max = target.max[s];
+        let mi = target.minIndex[s];
+        let ma = target.maxIndex[s];
+        let count = target.count[s];
+        if (chunks) {
+          for (let j = from; j < to; ) {
+            const ci = j >>> 12;
+            const chunk = chunks[ci];
+            const base = ci * F64_CHUNK_SIZE;
+            const stop = Math.min(to, base + F64_CHUNK_SIZE);
+            for (; j < stop; j++) {
+              const v = chunk[j - base];
+              if (!Number.isFinite(v)) continue;
+              count++;
+              if (mi < 0 || v < min) {
+                min = v;
+                mi = j;
+              }
+              if (ma < 0 || v > max) {
+                max = v;
+                ma = j;
+              }
+            }
+          }
+        } else {
+          for (let j = from; j < to; j++) {
+            const v = Number(col[j]);
+            if (!Number.isFinite(v)) continue;
+            count++;
+            if (mi < 0 || v < min) {
+              min = v;
+              mi = j;
+            }
+            if (ma < 0 || v > max) {
+              max = v;
+              ma = j;
+            }
+          }
+        }
+        target.min[s] = min;
+        target.max[s] = max;
+        target.minIndex[s] = mi;
+        target.maxIndex[s] = ma;
+        target.count[s] = count;
+      }
+    };
+    /** @param {number} sampleIdx */
+    const emitSingle = (sampleIdx) => {
+      const px = xAt(sampleIdx);
+      const min = new Array(channels);
+      const max = new Array(channels);
+      const minIndex = new Array(channels);
+      const maxIndex = new Array(channels);
+      const count = new Array(channels);
+      for (let s = 0; s < channels; s++) {
+        const col = (channelMask & (1 << s)) !== 0 ? series[s] : null;
+        if (!col) {
+          min[s] = max[s] = NaN;
+          minIndex[s] = maxIndex[s] = -1;
+          count[s] = 0;
+          continue;
+        }
+        const chunks = seriesChunks[s];
+        const v = chunks ? chunks[sampleIdx >>> 12][sampleIdx & 4095] : Number(col[sampleIdx]);
+        const valid = Number.isFinite(v);
+        min[s] = max[s] = valid ? v : NaN;
+        minIndex[s] = maxIndex[s] = valid ? sampleIdx : -1;
+        count[s] = Number(valid);
+      }
+      this.list.push({ x0: px, x1: px, start: sampleIdx, n: 1, min, max, minIndex, maxIndex, count });
+    };
+
+    const hasSpan = Number.isFinite(xMin) && Number.isFinite(xMax) && xMax > xMin;
+    const spanX = hasSpan ? xMax - xMin : 0;
+    const dx = hasSpan ? spanX / width : 0;
+    const invDx = hasSpan ? width / spanX : 0;
+    const totalCount = end - start;
+    let leftNeighborDone = !(hasSpan && start > 0 && xAt(start) - xMin > dx);
+    let cursor = start;
+    let col = 0;
+    let prevSpan = Math.max(1, Math.floor(totalCount / width));
+    /** @type {DisplayBucket|null} */
+    let activeBucket = null;
+    let activeEnd = 0;
+    let scanPos = 0;
+
+    return (maxSamples = 4096, maxBuckets = Infinity) => {
+      let remaining = Math.max(1, maxSamples);
+      let bucketsRemaining = Math.max(1, maxBuckets);
+      if (!leftNeighborDone && remaining > 0 && bucketsRemaining > 0) {
+        emitSingle(start - 1);
+        leftNeighborDone = true;
+        remaining--;
+        bucketsRemaining--;
+      }
+      while (remaining > 0 && bucketsRemaining > 0 && (activeBucket !== null || cursor < end)) {
+        if (!activeBucket) {
+          let nextIdx = end;
+          if (hasSpan) {
+            let xEdge = col === width - 1 ? Infinity : xMin + ((col + 1) * spanX) / width;
+            const cx = xAt(cursor);
+            if (Number.isFinite(cx) && cx >= xEdge) {
+              const jumped = Math.floor((cx - xMin) * invDx);
+              col = jumped > col ? Math.min(width - 1, jumped) : Math.min(width - 1, col + 1);
+              xEdge = col === width - 1 ? Infinity : xMin + ((col + 1) * spanX) / width;
+              while (col < width - 1 && cx >= xEdge) {
+                col++;
+                xEdge = col === width - 1 ? Infinity : xMin + ((col + 1) * spanX) / width;
+              }
+            }
+            if (col >= width - 1) {
+              nextIdx = end;
+            } else {
+              let lo = cursor + 1;
+              let hi = end;
+              if (lo < end && xAt(lo) < xEdge) {
+                let step = prevSpan;
+                let pos = Math.min(end - 1, cursor + step);
+                while (xAt(pos) < xEdge) {
+                  lo = pos + 1;
+                  if (lo >= end) {
+                    hi = end;
+                    break;
+                  }
+                  step *= 2;
+                  const nextPos = pos + step;
+                  pos = nextPos < end ? nextPos : end - 1;
+                  if (pos < lo) pos = lo;
+                }
+                if (lo < end && xAt(pos) >= xEdge) {
+                  hi = pos;
+                  if (pos > lo && xAt(pos - 1) < xEdge) {
+                    lo = pos;
+                  } else if (pos - lo > 8) {
+                    const near = Math.max(lo, pos - Math.max(4, prevSpan >>> 3));
+                    if (xAt(near) < xEdge) lo = near + 1;
+                  }
+                }
+                while (lo < hi) {
+                  const mid = (lo + hi) >>> 1;
+                  if (xAt(mid) >= xEdge) hi = mid;
+                  else lo = mid + 1;
+                }
+              }
+              nextIdx = lo;
+              prevSpan = Math.max(1, nextIdx - cursor);
+            }
+            col++;
+          } else {
+            while (col < width) {
+              const bStart = start + Math.floor((col * totalCount) / width);
+              const bEnd = start + Math.floor(((col + 1) * totalCount) / width);
+              col++;
+              if (bEnd > bStart) {
+                cursor = bStart;
+                nextIdx = bEnd;
+                break;
+              }
+            }
+          }
+          const n = nextIdx - cursor;
+          if (n <= 0) {
+            cursor = nextIdx;
+            continue;
+          }
+          if (n === 1) {
+            emitSingle(cursor);
+            cursor = nextIdx;
+            remaining--;
+            bucketsRemaining--;
+            continue;
+          }
+          if (index && n > 32) {
+            const bucket = createEmptyBucket(cursor, nextIdx);
+            index.fold(bucket, series, cursor, nextIdx, channelMask);
+            this.list.push(bucket);
+            cursor = nextIdx;
+            remaining--;
+            bucketsRemaining--;
+            continue;
+          }
+          activeBucket = createEmptyBucket(cursor, nextIdx);
+          activeEnd = nextIdx;
+          scanPos = cursor;
+        }
+        const through = Math.min(activeEnd, scanPos + remaining);
+        scanSlice(activeBucket, scanPos, through);
+        remaining -= through - scanPos;
+        scanPos = through;
+        if (scanPos === activeEnd) {
+          this.list.push(activeBucket);
+          activeBucket = null;
+          cursor = activeEnd;
+          bucketsRemaining--;
+        }
+      }
+      const finished = leftNeighborDone && activeBucket === null && cursor >= end;
+      if (finished && hasSpan && end < xs.length && xMax - xAt(end - 1) > dx) {
+        emitSingle(end);
+      }
+      this.srcEnd = finished ? end : cursor;
+      this._flatView = null;
+      if (finished) {
+        this.ppb = Math.max(1, totalCount / Math.max(1, this.list.length));
+        this.cap = Math.max(BUCKET_MIN, this.list.length * 2);
+      }
+      return finished;
+    };
+  }
+
   /** @param {NumericColumn} xs @param {NumericColumn[]} series @param {number} end */
   appendThrough(xs, series, end) {
     this.appendThroughMode(xs, series, end, false);
@@ -362,9 +643,18 @@ export class SeriesBuckets {
     const col = this._series[s];
     if (col) {
       if (this._index) return this._index.allFinite(col, s, a, end + 1);
-      for (let i = a; i <= end; ) {
-        const span = columnSpan(col, i, end + 1);
-        for (; i < span.end; i++) if (!Number.isFinite(Number(span.values[i - span.base]))) return false;
+      const chunks = '_chunks' in col ? col._chunks : null;
+      const limit = end + 1;
+      if (chunks) {
+        for (let i = a; i < limit; ) {
+          const ci = i >>> 12;
+          const chunk = chunks[ci];
+          const base = ci * F64_CHUNK_SIZE;
+          const stop = Math.min(limit, base + F64_CHUNK_SIZE);
+          for (; i < stop; i++) if (!Number.isFinite(chunk[i - base])) return false;
+        }
+      } else {
+        for (let i = a; i <= end; i++) if (!Number.isFinite(Number(col[i]))) return false;
       }
       return true;
     }
@@ -385,7 +675,17 @@ export class SeriesBuckets {
   flatten() {
     if (this._flatView) return this._flatView;
     const size = this.list.length * 4;
+    const xChunks = this._xs && '_chunks' in this._xs ? this._xs._chunks : null;
+    const candidates = this._candidates;
     const channels = Array.from({ length: this.channels }, (_, s) => {
+      if ((this.channelMask & (1 << s)) === 0) {
+        return {
+          x: EMPTY_F64,
+          y: EMPTY_F64,
+          indices: EMPTY_U32,
+          connect: EMPTY_U8,
+        };
+      }
       let buffer = this._buffers[s];
       const reused = !!buffer && buffer.x.length >= size;
       if (!reused) {
@@ -395,47 +695,80 @@ export class SeriesBuckets {
           y: new Float64Array(capacity),
           indices: new Uint32Array(capacity),
           connect: new Uint8Array(capacity),
-          ends: new Uint32Array(capacity / 4),
+          ends: new Uint32Array(Math.ceil(capacity / 4)),
         };
         this._buffers[s] = buffer;
       }
       const { x, y, indices, connect, ends } = buffer,
         dirty = reused ? this._dirty : 0;
       let n = dirty ? ends[dirty - 1] : 0;
-      const candidates = this._candidates,
-        col = this._series[s];
+      const col = this._series[s];
+      const colChunks = col && '_chunks' in col ? col._chunks : null;
       for (let bi = n ? dirty : 0; bi < this.list.length; bi++) {
         const b = this.list[bi],
           meta = this._stream.get(b);
-        candidates[0] = b.start;
-        candidates[1] = b.minIndex[s];
-        candidates[2] = b.maxIndex[s];
-        candidates[3] = b.start + b.n - 1;
-        candidates.sort((a, b) => a - b);
+        let c0 = b.start;
+        let c1 = b.minIndex[s];
+        let c2 = b.maxIndex[s];
+        let c3 = b.start + b.n - 1;
+        if (c0 > c1) {
+          const t = c0;
+          c0 = c1;
+          c1 = t;
+        }
+        if (c2 > c3) {
+          const t = c2;
+          c2 = c3;
+          c3 = t;
+        }
+        if (c0 > c2) {
+          const t = c0;
+          c0 = c2;
+          c2 = t;
+        }
+        if (c1 > c3) {
+          const t = c1;
+          c1 = c3;
+          c3 = t;
+        }
+        if (c1 > c2) {
+          const t = c1;
+          c1 = c2;
+          c2 = t;
+        }
+        candidates[0] = c0;
+        candidates[1] = c1;
+        candidates[2] = c2;
+        candidates[3] = c3;
         let previous = -1;
-        for (const i of candidates) {
+        for (let k = 0; k < 4; k++) {
+          const i = candidates[k];
           if (i < 0 || i === previous) continue;
           const first = i === b.start,
             last = i === b.start + b.n - 1,
             min = i === b.minIndex[s];
-          const px = this._xs
-            ? columnValue(this._xs, i)
-            : first
-              ? b.x0
-              : last
-                ? b.x1
-                : min
-                  ? meta?.minX[s]
-                  : meta?.maxX[s];
-          const py = col
-            ? columnValue(col, i)
-            : first
-              ? meta?.first[s]
-              : last
-                ? meta?.last[s]
-                : min
-                  ? b.min[s]
-                  : b.max[s];
+          const px = xChunks
+            ? xChunks[i >>> 12][i & 4095]
+            : this._xs
+              ? Number(this._xs[i])
+              : first
+                ? b.x0
+                : last
+                  ? b.x1
+                  : min
+                    ? meta?.minX[s]
+                    : meta?.maxX[s];
+          const py = colChunks
+            ? colChunks[i >>> 12][i & 4095]
+            : col
+              ? Number(col[i])
+              : first
+                ? meta?.first[s]
+                : last
+                  ? meta?.last[s]
+                  : min
+                    ? b.min[s]
+                    : b.max[s];
           connect[n] = Number(
             Number.isFinite(py) &&
               n > 0 &&
@@ -465,18 +798,65 @@ export class SeriesBuckets {
     const x = this._carrierX,
       ys = this._carrierYs;
     let n = 0;
-    for (const b of this.list)
-      for (const last of [false, true]) {
-        const px = last ? b.x1 : b.x0,
-          meta = this._stream.get(b);
-        if (n > 0 && x[n - 1] === px) n--;
-        x[n] = px;
-        for (let s = 0; s < this.channels; s++)
-          ys[s][n] = this._series[s]
-            ? columnValue(this._series[s], last ? b.start + b.n - 1 : b.start)
-            : ((last ? meta?.last[s] : meta?.first[s]) ?? NaN);
+    if (this.mode === 'x') {
+      for (let bi = 0; bi < this.list.length; bi++) {
+        const b = this.list[bi];
+        if (n > 0 && x[n - 1] === b.x0) n--;
+        x[n] = b.x0;
+        const singleX = b.x0 === b.x1;
+        for (let s = 0; s < this.channels; s++) {
+          if ((this.channelMask & (1 << s)) === 0) {
+            ys[s][n] = NaN;
+            continue;
+          }
+          const mi = b.minIndex[s];
+          const ma = b.maxIndex[s];
+          if (singleX) ys[s][n] = ma >= 0 ? b.max[s] : NaN;
+          else if (mi >= 0 && ma >= 0) ys[s][n] = mi <= ma ? b.min[s] : b.max[s];
+          else ys[s][n] = NaN;
+        }
         n++;
+        if (!singleX) {
+          x[n] = b.x1;
+          for (let s = 0; s < this.channels; s++) {
+            if ((this.channelMask & (1 << s)) === 0) {
+              ys[s][n] = NaN;
+              continue;
+            }
+            const mi = b.minIndex[s];
+            const ma = b.maxIndex[s];
+            ys[s][n] = mi >= 0 && ma >= 0 ? (mi <= ma ? b.max[s] : b.min[s]) : NaN;
+          }
+          n++;
+        }
       }
+    } else {
+      const seriesChunks = new Array(this.channels);
+      for (let s = 0; s < this.channels; s++) {
+        const col = this._series[s];
+        seriesChunks[s] = col && '_chunks' in col ? col._chunks : null;
+      }
+      for (let bi = 0; bi < this.list.length; bi++) {
+        const b = this.list[bi],
+          meta = this._stream.get(b);
+        for (let pass = 0; pass < 2; pass++) {
+          const last = pass === 1;
+          const px = last ? b.x1 : b.x0;
+          if (n > 0 && x[n - 1] === px) n--;
+          x[n] = px;
+          const idx = last ? b.start + b.n - 1 : b.start;
+          for (let s = 0; s < this.channels; s++) {
+            const chunks = seriesChunks[s];
+            ys[s][n] = chunks
+              ? chunks[idx >>> 12][idx & 4095]
+              : this._series[s]
+                ? Number(this._series[s][idx])
+                : ((last ? meta?.last[s] : meta?.first[s]) ?? NaN);
+          }
+          n++;
+        }
+      }
+    }
     this._dirty = this.list.length;
     this._flatView = { x: x.subarray(0, n), ys: ys.map((col) => col.subarray(0, n)), channels };
     return this._flatView;

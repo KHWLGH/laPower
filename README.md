@@ -37,7 +37,7 @@ Besides voltage, current, power, and temperature, laPower records **D+ / D− / 
 
 ## 📸 Interface preview
 
-Screenshots below show version **0.3.0** on Windows using simulated devices and data (retaining the full title bar; the app follows the system theme by default). See [Development showcase](docs/en/DEVELOPMENT.md#development-showcase) to regenerate the full set.
+Screenshots below show version **0.3.1** on Windows using simulated devices and data (retaining the full title bar; the app follows the system theme by default). See [Development showcase](docs/en/DEVELOPMENT.md#development-showcase) to regenerate the full set.
 
 | Light theme | Dark theme |
 | :---: | :---: |

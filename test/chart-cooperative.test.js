@@ -94,18 +94,20 @@ test('large chart preparations publish a complete projection and discard replace
   assert.equal(state.mainChart.data, undefined, 'no partial raw fallback is published');
   while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 2));
   const expected = new SeriesBuckets();
-  expected.rebuild(
+  expected.rebuildByX(
     columns.x.view(),
     ['voltage', 'current', 'power', 'temp', 'dp', 'dn', 'cc1', 'cc2'].map((key) => columns[key].view()),
     0,
     columns.x.length,
+    0,
+    columns.x.length - 1,
     1200,
   );
   const flat = expected.flatten();
   assert.deepStrictEqual(state.mainChart.data, [flat.x, ...flat.ys]);
-  const originalBeginRebuild = SeriesBuckets.prototype.beginRebuild;
+  const originalBeginRebuild = SeriesBuckets.prototype.beginRebuildByX;
   let obsoleteSteps = 0;
-  SeriesBuckets.prototype.beginRebuild = function (xs, series, start, end, ...args) {
+  SeriesBuckets.prototype.beginRebuildByX = function (xs, series, start, end, ...args) {
     const step = originalBeginRebuild.call(this, xs, series, start, end, ...args);
     if (end !== 200001) return step;
     return (maxSamples) => {
@@ -121,10 +123,10 @@ test('large chart preparations publish a complete projection and discard replace
     while (attrs.get('aria-busy') === 'true') await new Promise((resolve) => setTimeout(resolve, 2));
     assert.equal(obsoleteSteps, 1, 'shrinking the right edge cancels work even at the same density');
     const replacement = new SeriesBuckets();
-    originalBeginRebuild.call(replacement, columns.x, [columns.voltage], 0, 180001, 1200)(Infinity);
+    originalBeginRebuild.call(replacement, columns.x, [columns.voltage], 0, 180001, 0, 180000, 1200)(Infinity);
     assert.deepStrictEqual(state.mainChart.data[0], replacement.flatten().x);
   } finally {
-    SeriesBuckets.prototype.beginRebuild = originalBeginRebuild;
+    SeriesBuckets.prototype.beginRebuildByX = originalBeginRebuild;
   }
   chart.setChartXWindow(0, columns.x.length - 1);
   const originalSyncStep = ExactExtremaIndex.prototype.syncStep;
@@ -213,11 +215,13 @@ test('changing the window during cold indexing retains the completed prefix for 
     assert.equal(index.blocks, 128, 'cancellation keeps already completed leaves');
     assert.equal(resets, 0);
     const expected = new SeriesBuckets();
-    expected.rebuild(
+    expected.rebuildByX(
       columns.x,
       [columns.voltage, columns.current, columns.power, columns.temp, columns.dp, columns.dn, columns.cc1, columns.cc2],
       0,
       8000,
+      0,
+      7999,
       1200,
     );
     const flat = expected.flatten();
@@ -283,10 +287,10 @@ test('a dense follow window submits complete matching snapshots while samples ad
   chart.setChartXWindow(100000, 299999);
   const previousScheduler = globalThis.scheduler;
   const previousPerformance = globalThis.performance;
-  const previousRebuild = SeriesBuckets.prototype.beginRebuild;
+  const previousRebuild = SeriesBuckets.prototype.beginRebuildByX;
   let simulatedWorkMs = 0;
   globalThis.performance = { now: () => previousPerformance.now() + simulatedWorkMs };
-  SeriesBuckets.prototype.beginRebuild = function (...args) {
+  SeriesBuckets.prototype.beginRebuildByX = function (...args) {
     const step = previousRebuild.apply(this, args);
     return (...budget) => {
       const done = step(...budget);
@@ -315,19 +319,21 @@ test('a dense follow window submits complete matching snapshots while samples ad
     assert.ok(advances > 0 && advances < 200, 'a snapshot finishes while the window is still advancing');
     assert.deepEqual(scale, { min: 100000, max: 299999 }, 'submitted buckets retain their captured X range');
     const expected = new SeriesBuckets();
-    expected.rebuild(
+    expected.rebuildByX(
       columns.x,
       [columns.voltage, columns.current, columns.power, columns.temp, columns.dp, columns.dn, columns.cc1, columns.cc2],
       100000,
       300000,
-      600,
+      100000,
+      299999,
+      1200,
     );
     const flat = expected.flatten();
     assert.deepEqual(submitted, [flat.x, ...flat.ys]);
   } finally {
     globalThis.scheduler = previousScheduler;
     globalThis.performance = previousPerformance;
-    SeriesBuckets.prototype.beginRebuild = previousRebuild;
+    SeriesBuckets.prototype.beginRebuildByX = previousRebuild;
     state.isRecording = false;
     chart.handleMonitorHidden();
   }
@@ -476,8 +482,14 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
     },
   };
   globalThis.document = { hidden: false, getElementById: () => host, querySelector: () => null, addEventListener() {} };
-  globalThis.requestAnimationFrame = () => 1;
-  globalThis.cancelAnimationFrame = () => {};
+  let probeFrame = null;
+  globalThis.requestAnimationFrame = (cb) => {
+    probeFrame = cb;
+    return 1;
+  };
+  globalThis.cancelAnimationFrame = () => {
+    probeFrame = null;
+  };
   const { state, emptyChartColumns } = await import('../src/state.js');
   const chart = await import('../src/chart.js');
   const cs = emptyChartColumns();
@@ -502,7 +514,8 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
     setScale() {},
   };
   const original = ExactExtremaIndex.prototype.syncStep,
-    scheduler = globalThis.scheduler;
+    scheduler = globalThis.scheduler,
+    originalPerformance = globalThis.performance;
   let index = null,
     steps = 0;
   ExactExtremaIndex.prototype.syncStep = function (...args) {
@@ -519,6 +532,34 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
       if (!busy && tasks.length === 0) return;
     }
     assert.fail('background work did not settle');
+  };
+  const degradeLiveBudget = async () => {
+    // Simulate a severe live raster stall so recording drops below review density.
+    const savedNow = globalThis.performance;
+    let clock = savedNow.now();
+    globalThis.performance = { now: () => clock, timeOrigin: 0 };
+    try {
+      while (probeFrame) {
+        clock += 16;
+        const cb = probeFrame;
+        probeFrame = null;
+        cb(clock);
+        await Promise.resolve();
+      }
+      chart.updateCharts('live', { force: true });
+      await Promise.resolve();
+      for (let i = 0; i < 4 && probeFrame; i++) {
+        clock += i === 0 ? 120 : 16;
+        const cb = probeFrame;
+        probeFrame = null;
+        cb(clock);
+        await Promise.resolve();
+      }
+      chart.updateCharts('live');
+      await Promise.resolve();
+    } finally {
+      globalThis.performance = savedNow;
+    }
   };
   try {
     chart.syncChartSeries();
@@ -540,9 +581,7 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
     assert.ok(warm.pauseId > 0);
     assert.ok(warm.pauseToDrawMs >= 0);
     state.isRecording = true;
-    chart.updateCharts('live');
-    chart.setRangeDragging(true);
-    chart.setRangeDragging(false);
+    await degradeLiveBudget();
     globalThis.scheduler = { postTask: () => new Promise((resolve) => tasks.push(resolve)) };
     index.reset();
     steps = 0;
@@ -579,10 +618,8 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
     );
     for (const cancel of ['window', 'resume', 'hidden', 'source']) {
       state.isRecording = true;
-      chart.updateCharts('live');
+      await degradeLiveBudget();
       while (busy) await drain();
-      chart.setRangeDragging(true);
-      chart.setRangeDragging(false);
       index.reset();
       state.isRecording = false;
       chart.updateCharts();
@@ -619,6 +656,7 @@ test('cold pause publishes a complete coarse projection, accepts a bounded tail 
     }
   } finally {
     globalThis.scheduler = scheduler;
+    globalThis.performance = originalPerformance;
     ExactExtremaIndex.prototype.syncStep = original;
     chart.handleMonitorHidden();
     state.isRecording = false;

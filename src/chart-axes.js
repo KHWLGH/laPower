@@ -98,6 +98,127 @@ export function smartTick(value) {
 }
 
 /**
+ * 计算主图 X 轴时间刻度：保留完整起止时刻，并在起止安全间距内插入整齐的中间刻度。
+ * 极窄绘图区退化为仅显示结束时刻，确保用户始终看清当前终点时间。
+ * @param {number} scaleMin
+ * @param {number} scaleMax
+ * @param {number} foundIncr
+ * @param {number} foundSpace
+ * @param {{ startGapPx?: number, endGapPx?: number, minSpanPx?: number }} [options]
+ * @returns {number[]}
+ */
+export function computeTimeAxisSplits(scaleMin, scaleMax, foundIncr, foundSpace, options = {}) {
+  if (!Number.isFinite(scaleMin) || !Number.isFinite(scaleMax)) return [];
+  if (!(scaleMax > scaleMin)) return [scaleMax];
+
+  const startGapPx = options.startGapPx ?? 92;
+  const endGapPx = options.endGapPx ?? 92;
+  const minSpanPx = options.minSpanPx ?? 92;
+  const span = scaleMax - scaleMin;
+  const pxPerUnit = foundIncr > 0 && foundSpace > 0 ? foundSpace / foundIncr : 0;
+  const plotWidthCss = pxPerUnit > 0 ? span * pxPerUnit : 0;
+  if (plotWidthCss > 0 && plotWidthCss < minSpanPx) return [scaleMax];
+
+  /** @type {number[]} */
+  const interior = [];
+  if (foundIncr > 0 && Number.isFinite(foundIncr)) {
+    const dec = foundIncr < 1 ? Math.min(6, Math.ceil(-Math.log10(foundIncr))) : 0;
+    const roundDec = (/** @type {number} */ v) => {
+      const rounded = dec > 0 ? Number(v.toFixed(dec)) : Math.round(v);
+      return Object.is(rounded, -0) ? 0 : rounded;
+    };
+    const eps = span * 1e-9;
+    let v = roundDec(Math.ceil(scaleMin / foundIncr - 1e-9) * foundIncr);
+    for (let steps = 0; steps < 512 && v <= scaleMax + eps; steps++) {
+      if (v - scaleMin > eps && scaleMax - v > eps) {
+        if (pxPerUnit <= 0 || ((v - scaleMin) * pxPerUnit >= startGapPx && (scaleMax - v) * pxPerUnit >= endGapPx)) {
+          interior.push(v);
+        }
+      }
+      v = roundDec(v + foundIncr);
+    }
+  }
+  return [scaleMin, ...interior, scaleMax];
+}
+
+/**
+ * 为 X 轴时间标签分配画布水平位置并消除重叠/裁边。
+ * 优先级：终点标签（必保） > 起点标签 > 由左至右的中间标签。
+ * @param {Array<{ x: number, text: string, width: number }>} items
+ * @param {number} canvasWidth
+ * @param {number} [edgePad=4]
+ * @param {number} [minGap=10]
+ * @returns {Array<{ drawX: number, align: CanvasTextAlign, left: number, right: number, text: string }>}
+ */
+export function layoutXAxisLabels(items, canvasWidth, edgePad = 4, minGap = 10) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  /** @param {{ x: number, text: string, width: number }} item */
+  const place = (item) => {
+    const width = Math.max(0, item.width);
+    const half = width / 2;
+    if (
+      !Number.isFinite(canvasWidth) ||
+      canvasWidth <= edgePad * 2 ||
+      width >= canvasWidth - edgePad * 2 ||
+      item.x - half < edgePad
+    ) {
+      return {
+        drawX: edgePad,
+        align: /** @type {CanvasTextAlign} */ ('left'),
+        left: edgePad,
+        right: edgePad + width,
+        text: item.text,
+      };
+    }
+    if (item.x + half > canvasWidth - edgePad) {
+      return {
+        drawX: canvasWidth - edgePad,
+        align: /** @type {CanvasTextAlign} */ ('right'),
+        left: canvasWidth - edgePad - width,
+        right: canvasWidth - edgePad,
+        text: item.text,
+      };
+    }
+    return {
+      drawX: item.x,
+      align: /** @type {CanvasTextAlign} */ ('center'),
+      left: item.x - half,
+      right: item.x + half,
+      text: item.text,
+    };
+  };
+
+  const end = place(items[items.length - 1]);
+  if (items.length === 1) return [end];
+
+  const start = place(items[0]);
+  const includeStart = start.right + minGap <= end.left;
+  let prevRight = includeStart ? start.right : Number.NEGATIVE_INFINITY;
+  /** @type {Array<{ drawX: number, align: CanvasTextAlign, left: number, right: number, text: string }>} */
+  const placed = includeStart ? [start] : [];
+
+  for (let i = 1; i < items.length - 1; i++) {
+    const cur = place(items[i]);
+    if (cur.left >= prevRight + minGap && cur.right + minGap <= end.left) {
+      placed.push(cur);
+      prevRight = cur.right;
+    }
+  }
+  placed.push(end);
+  return placed;
+}
+
+/** @param {any} u @returns {number} */
+function plotPxRatio(u) {
+  const backing = u?.ctx?.canvas?.width;
+  const css = u?.width;
+  if (backing > 0 && css > 0) return backing / css;
+  const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+  return typeof uPlot !== 'undefined' ? uPlot.pxRatio || dpr : dpr;
+}
+
+/**
  * 创建绑定到图表模块状态的 Y 轴范围、等分与绘制助手。
  * @param {{
  *   getSeriesMax: () => number[],
@@ -105,6 +226,7 @@ export function smartTick(value) {
  *   getChartFont: () => string,
  *   getMonoFont: () => string,
  *   scheduleChartUpdate: () => void,
+ *   formatXAxisTick?: (value: number) => string,
  * }} hooks
  */
 export function createChartAxes(hooks) {
@@ -367,6 +489,100 @@ export function createChartAxes(hooks) {
     ctx.restore();
   }
 
+  /**
+   * 实测 X 轴时间文字宽度（CSS px）；不污染 uPlot 的 Canvas 字体缓存。
+   * @param {any} u
+   * @param {string} sampleText
+   * @returns {number}
+   */
+  function measureXLabelCssWidth(u, sampleText) {
+    if (!u?.ctx?.measureText) return 76;
+    const axis = u.axes?.[0];
+    const previousFont = u.ctx.font;
+    const pxRatio = plotPxRatio(u);
+    u.ctx.font = Array.isArray(axis?.font) ? axis.font[0] : `${Math.round(12 * pxRatio)}px ${hooks.getMonoFont()}`;
+    const width = u.ctx.measureText(sampleText || '00:00:00.0').width / pxRatio;
+    u.ctx.font = previousFont;
+    return Number.isFinite(width) && width > 0 ? width : 76;
+  }
+
+  /**
+   * 动态计算 X 轴最小刻度间距（CSS px），避免字体放大或自定义窄宽字体下碰撞或无刻度。
+   * @param {any} u @param {number} _axisIdx @param {number} _scaleMin @param {number} scaleMax @param {number} plotDim
+   * @returns {number}
+   */
+  function xAxisSpace(u, _axisIdx, _scaleMin, scaleMax, plotDim) {
+    const sample = hooks.formatXAxisTick?.(Number(scaleMax)) || '00:00:00.0';
+    const desired = Math.ceil(Math.max(88, measureXLabelCssWidth(u, sample) + 16));
+    if (Number.isFinite(plotDim) && plotDim > 0) return Math.min(desired, Math.max(20, Math.floor(plotDim)));
+    return desired;
+  }
+
+  /**
+   * 为主图 X 轴生成包含精确起止点的刻度数组，并为夹紧边缘的起止标签预留防碰撞间距。
+   * @param {any} u @param {number} _axisIdx @param {number} scaleMin @param {number} scaleMax @param {number} foundIncr @param {number} foundSpace
+   * @returns {number[]}
+   */
+  function xAxisSplits(u, _axisIdx, scaleMin, scaleMax, foundIncr, foundSpace) {
+    const endSample = hooks.formatXAxisTick?.(Number(scaleMax)) || '00:00:00.0';
+    const labelW = measureXLabelCssWidth(u, endSample);
+    const pxRatio = plotPxRatio(u);
+    const canvasW = (u?.ctx?.canvas?.width || 0) / pxRatio;
+    let extraLeft = 0;
+    let extraRight = 0;
+    if (canvasW > 0 && u?.bbox?.width > 0) {
+      const leftMargin = Math.max(0, u.bbox.left / pxRatio - 4);
+      const rightMargin = Math.max(0, canvasW - (u.bbox.left + u.bbox.width) / pxRatio - 4);
+      extraLeft = Math.max(0, labelW / 2 - leftMargin);
+      extraRight = Math.max(0, labelW / 2 - rightMargin);
+    }
+    return computeTimeAxisSplits(scaleMin, scaleMax, foundIncr, foundSpace, {
+      startGapPx: labelW + 14 + extraLeft,
+      endGapPx: labelW + 14 + extraRight,
+      minSpanPx: labelW + 14,
+    });
+  }
+
+  /**
+   * 绘制主图 X 轴时间标签：边缘自适应左/右对齐，优先保留结束与开始时间且严格不重叠。
+   * @param {any} u
+   */
+  function drawXAxisLabels(u) {
+    const axis = u?.axes?.[0];
+    if (!axis || !axis.show || axis._show === false || !u.ctx || !u.bbox || u.bbox.width <= 0) return;
+    const splits = axis._splits;
+    if (!Array.isArray(splits) || splits.length === 0) return;
+    const formatTick = hooks.formatXAxisTick;
+    if (!formatTick) return;
+
+    const { ctx, bbox } = u;
+    const pxRatio = plotPxRatio(u);
+    const tickSize = axis.ticks?.show ? axis.ticks.size || 0 : 0;
+    const axisPos = Math.round((axis._pos ?? (bbox.top + bbox.height) / pxRatio) * pxRatio);
+    const y = axisPos + Math.round(tickSize * pxRatio) + Math.round((axis.gap ?? 4) * pxRatio);
+
+    ctx.save();
+    ctx.font = Array.isArray(axis.font) ? axis.font[0] : `${Math.round(12 * pxRatio)}px ${hooks.getMonoFont()}`;
+    const fillStyle = typeof axis.stroke === 'function' ? axis.stroke(u, 0) : axis.stroke;
+    if (fillStyle) ctx.fillStyle = fillStyle;
+    ctx.textBaseline = 'top';
+
+    const items = splits.map((/** @type {number} */ v) => {
+      const text = formatTick(Number(v));
+      return {
+        x: Math.round(u.valToPos(v, 'x', true)),
+        text,
+        width: ctx.measureText(text).width,
+      };
+    });
+    const placed = layoutXAxisLabels(items, ctx.canvas.width, Math.round(4 * pxRatio), Math.round(10 * pxRatio));
+    for (const item of placed) {
+      ctx.textAlign = item.align;
+      ctx.fillText(item.text, item.drawX, y);
+    }
+    ctx.restore();
+  }
+
   return {
     mkYRange,
     uniformSplits,
@@ -374,6 +590,9 @@ export function createChartAxes(hooks) {
     mkYAxis,
     drawYAxisChrome,
     drawYAxisLabels,
+    xAxisSpace,
+    xAxisSplits,
+    drawXAxisLabels,
     syncDivisionsAfterResize,
     consumeDivisionSyncPending() {
       if (!divisionSyncPending) return false;

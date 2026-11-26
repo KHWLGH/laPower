@@ -15,7 +15,7 @@ import { rasterOrderedFill } from './chart-fill.js';
 
 const IS_LITTLE_ENDIAN = new Uint8Array(Uint32Array.of(0x04030201).buffer)[0] === 0x01;
 const HEX6_RE = /^#[\da-f]{6}$/i;
-const GESTURE_RASTER_PIXELS = 480_000;
+const GESTURE_RASTER_PIXELS = 1_440_000;
 
 /** @type {Path2D|null} */
 let emptyPath = null;
@@ -301,6 +301,7 @@ export function createBucketRasterizer(hooks) {
     const color = packRgba(hex >>> 16, (hex >>> 8) & 255, hex & 255, 255);
     const fill = series.fill(u, seriesIdx);
     const half = (series.width * hooks.getPlotPixelRatio() * scale) / 2;
+    const r = Math.max(0.5, half);
     const intervalStarted = performance.now();
     if (!geometry.raster || geometry.raster.half !== half || geometry.raster.scale !== scale) {
       columnLengths.fill(0);
@@ -313,21 +314,21 @@ export function createBucketRasterizer(hooks) {
         const y0 = connect[i] ? (points[(i - 1) * 2 + 1] - bbox.top) * scale : y1;
         const maxX = x0 > x1 ? x0 : x1;
         const minX = x0 < x1 ? x0 : x1;
-        if (maxX + half <= 0 || minX - half >= width) continue;
+        if (maxX + r <= 0 || minX - r >= width) continue;
         const maxY = y0 > y1 ? y0 : y1;
         const minY = y0 < y1 ? y0 : y1;
-        if (maxY + half <= 0 || minY - half >= height) continue;
+        if (maxY + r <= 0 || minY - r >= height) continue;
         const dx = x1 - x0;
         const dy = y1 - y0;
-        const left = Math.max(0, Math.floor(minX - half));
-        const right = Math.min(width, Math.ceil(maxX + half));
+        const left = Math.max(0, Math.floor(minX - r + 0.5));
+        const right = Math.min(width, Math.floor(maxX + r - 0.5) + 1);
         for (let x = left; x < right; x++) {
-          const ta = dx ? Math.max(0, Math.min(1, (x - half - x0) / dx)) : 0;
-          const tb = dx ? Math.max(0, Math.min(1, (x + 1 + half - x0) / dx)) : 1;
+          const ta = dx ? Math.max(0, Math.min(1, (x + 0.5 - r - x0) / dx)) : 0;
+          const tb = dx ? Math.max(0, Math.min(1, (x + 0.5 + r - x0) / dx)) : 1;
           const a = y0 + dy * ta;
           const b = y0 + dy * tb;
-          const top = Math.max(0, Math.floor(Math.min(a, b) - half));
-          const bottom = Math.min(height, Math.ceil(Math.max(a, b) + half));
+          const top = Math.max(0, Math.floor(Math.min(a, b) - r + 0.5));
+          const bottom = Math.min(height, Math.floor(Math.max(a, b) + r - 0.5) + 1);
           if (top < bottom) {
             const n = columnLengths[x];
             columns[x][n] = top;
