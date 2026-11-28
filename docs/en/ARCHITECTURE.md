@@ -20,6 +20,13 @@ This document describes laPower's internal architecture. See the [User guide](US
 The Cargo workspace contains four crates plus a plain ES Module frontend directory; release builds generate `out/` via esbuild.
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    nodeSpacing: 30
+    wrappingWidth: 200
+---
 flowchart TB
   subgraph FE["Frontend & Build"]
     SRC["src/<br/>Native ES Modules"] --> OUT["out/<br/>esbuild frontendDist"]
@@ -27,9 +34,9 @@ flowchart TB
 
   subgraph BE["Tauri v2 Backend · src-tauri/"]
     LIB["src/lib.rs<br/>State / Commands / Lifecycle"]
-    STREAM["acquire.rs · stream.rs · pd_capture.rs<br/>Acquisition / Flow / PD Log"]
+    STREAM["acquire.rs · stream.rs<br/>pd_capture.rs<br/>Acquisition / Flow / PD Log"]
     KM_SESS["km003c_session/<br/>Bulk / AdcQueue / CDC"]
-    EXPORT["video_export.rs · usb_port.rs · updates.rs<br/>Reports / USB Topology / Updates"]
+    EXPORT["video_export.rs · usb_port.rs<br/>updates.rs<br/>Reports / USB Topology / Updates"]
     CONF["tauri.conf.json · capabilities/<br/>Window / CSP / ACL"]
     LIB --> STREAM
     LIB --> KM_SESS
@@ -41,6 +48,8 @@ flowchart TB
     WITRN["witrn-hid<br/>WITRN HID Device Wrapper"]
     USBPD["usbpd-parser<br/>USB-PD Packet Decoder"]
     KM["km003c<br/>POWER-Z Bulk / AdcQueue / CDC"]
+    WITRN ~~~ USBPD
+    KM ~~~ USBPD
   end
 
   OUT <-->|"Tauri IPC / Embedded Dist"| LIB
@@ -89,18 +98,25 @@ Hosts application state and device/module command registration under a **lock on
 Each device connection owns an acquisition reader and an IPC sender; POWER-Z adds a dedicated CDC control thread:
 
 ```mermaid
-flowchart LR
+---
+config:
+  htmlLabels: false
+  flowchart:
+    diagramPadding: 84
+    wrappingWidth: 240
+---
+flowchart TB
   READER["Acquisition reader<br/>HID / Bulk decode & window"]
   QUEUE["Bounded channel cap=4096<br/>PD pending 256 / backend log"]
-  EMITTER["IPC sender<br/>Batch forward / final receipt"]
+  EMITTER["IPC sender<br/>Batch forward<br/>Final receipt"]
   CDC["POWER-Z CDC control thread<br/>Trigger & protocol detection"]
   WV["WebView frontend<br/>Charts / stats / recovery spool"]
 
-  READER -->|"Sample window / PD frames"| QUEUE
+  READER -.->|"VoltageCache / PdoCache"| CDC
   QUEUE --> EMITTER
   EMITTER -->|"device-data-batch<br/>pd-data-batch"| WV
   WV -->|"ack_device_stream<br/>abandon_device_stream"| EMITTER
-  READER -.->|"VoltageCache / PdoCache"| CDC
+  READER -->|"Sample window / PD frames"| QUEUE
   CDC <-->|"km003c_trigger<br/>km003c-trigger-progress"| WV
 ```
 
@@ -203,12 +219,19 @@ Pure modules (`measurement.js`, `pd-model.js`, `chart-window.js`, `markers.js`, 
 ### Chart rendering
 
 ```mermaid
-flowchart LR
+---
+config:
+  htmlLabels: false
+  flowchart:
+    diagramPadding: 110
+    wrappingWidth: 240
+---
+flowchart TB
   COL["F64Col chunked columns<br/>4096 pts/chunk · shared constants"]
   IDX["ExactExtremaIndex<br/>256 nodes/page · cooperative slices"]
-  FAST["OffscreenCanvas rasterizer<br/>Transposed Uint32Array + 2D dirty rects"]
+  FAST["OffscreenCanvas rasterizer<br/>Transposed Uint32Array<br/>+ 2D dirty rects"]
   FILL["chart-fill.js<br/>Analytic area coverage composite"]
-  FALLBACK["Canvas 2D fallback<br/>Translucent stroke / no OffscreenCanvas"]
+  FALLBACK["Canvas 2D fallback<br/>Translucent stroke<br/>or no OffscreenCanvas"]
   NAV["Navigator overview<br/>Independent uPlot + power extrema"]
 
   COL --> IDX
@@ -230,29 +253,35 @@ Range statistics serialize on one reusable Worker (transferring and returning �
 ## Data flow
 
 ```mermaid
+---
+config:
+  sequence:
+    actorMargin: 35
+    mirrorActors: false
+---
 sequenceDiagram
   participant FE as WebView frontend
   participant BE as Tauri backend
   participant DEV as USB meter · WITRN / POWER-Z
 
   FE->>BE: enumerate_devices
-  BE-->>FE: Combined WITRN HID and POWER-Z Bulk device list
+  BE-->>FE: Combined WITRN HID and<br/>POWER-Z Bulk device list
 
   FE->>BE: connect_device_by_path
-  BE->>DEV: Open interface, complete Bulk handshake, start CDC thread
+  BE->>DEV: Open interface, complete Bulk<br/>handshake, start CDC thread
 
   alt POWER-Z 1 ms sampling
     BE->>DEV: HardwareID / StreamingAuth / StartGraph(3)
-    Note over BE,DEV: Poll AdcQueue every 20 ms, fallback 10 ms on auth failure
+    Note over BE,DEV: Poll AdcQueue every 20 ms<br/>Fallback to 10 ms on auth failure
   else WITRN HID or polled ADC
-    BE->>DEV: Block on HID reports and drain queue / poll instant ADC
+    BE->>DEV: Block on HID reports and drain queue<br/>or poll instant ADC
   end
 
   loop Live acquisition & flow control
     DEV-->>BE: Measurement frames / PD packets
     BE->>BE: Aggregate per cadence grid window
-    BE-->>FE: device-data-batch / pd-data-batch
-    FE->>FE: Update cards, charts, stats, and 1 s recovery spool
+    BE-->>FE: device-data-batch<br/>pd-data-batch
+    FE->>FE: Update cards, charts, stats,<br/>and 1 s recovery spool
     FE->>BE: ack_device_stream
   end
 ```

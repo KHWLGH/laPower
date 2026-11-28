@@ -20,6 +20,13 @@
 Cargo workspace 包含四个成员 crate 与原生 JavaScript 前端源码目录；发布构建由 esbuild 生成 `out/`。
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    nodeSpacing: 30
+    wrappingWidth: 200
+---
 flowchart TB
   subgraph FE["前端与构建"]
     SRC["src/<br/>原生 ES Modules"] --> OUT["out/<br/>esbuild 产物 frontendDist"]
@@ -27,9 +34,9 @@ flowchart TB
 
   subgraph BE["Tauri v2 后端 · src-tauri/"]
     LIB["src/lib.rs<br/>状态 / 命令 / 生命周期"]
-    STREAM["acquire.rs · stream.rs · pd_capture.rs<br/>采集分窗 / 流控 / PD 会话"]
+    STREAM["acquire.rs · stream.rs<br/>pd_capture.rs<br/>采集分窗 / 流控 / PD 会话"]
     KM_SESS["km003c_session/<br/>Bulk / AdcQueue / CDC"]
-    EXPORT["video_export.rs · usb_port.rs · updates.rs<br/>报告导出 / USB 拓扑 / 更新"]
+    EXPORT["video_export.rs · usb_port.rs<br/>updates.rs<br/>报告导出 / USB 拓扑 / 更新"]
     CONF["tauri.conf.json · capabilities/<br/>窗口 / CSP / ACL 权限"]
     LIB --> STREAM
     LIB --> KM_SESS
@@ -41,6 +48,8 @@ flowchart TB
     WITRN["witrn-hid<br/>WITRN HID 设备封装"]
     USBPD["usbpd-parser<br/>USB-PD 报文解码"]
     KM["km003c<br/>POWER-Z Bulk / AdcQueue / CDC"]
+    WITRN ~~~ USBPD
+    KM ~~~ USBPD
   end
 
   OUT <-->|"Tauri IPC / 静态内嵌"| LIB
@@ -89,18 +98,25 @@ flowchart TB
 每个设备连接拥有读线程与 IPC 发射线程；POWER-Z 额外拥有独立 CDC 协议控制线程：
 
 ```mermaid
-flowchart LR
+---
+config:
+  htmlLabels: false
+  flowchart:
+    diagramPadding: 84
+    wrappingWidth: 240
+---
+flowchart TB
   READER["采集读线程<br/>HID / Bulk 解码与分窗"]
   QUEUE["有界通道 cap=4096<br/>PD pending 256 / 后端日志"]
-  EMITTER["IPC 发射线程<br/>合批转发 / 末包回执"]
+  EMITTER["IPC 发射线程<br/>合批转发<br/>末包回执"]
   CDC["POWER-Z CDC 控制线程<br/>协议触发与检测"]
   WV["WebView 前端<br/>渲染 / 统计 / 恢复文件"]
 
-  READER -->|"采样窗口 / PD 帧"| QUEUE
+  READER -.->|"VoltageCache / PdoCache"| CDC
   QUEUE --> EMITTER
   EMITTER -->|"device-data-batch<br/>pd-data-batch"| WV
   WV -->|"ack_device_stream<br/>abandon_device_stream"| EMITTER
-  READER -.->|"VoltageCache / PdoCache"| CDC
+  READER -->|"采样窗口 / PD 帧"| QUEUE
   CDC <-->|"km003c_trigger<br/>km003c-trigger-progress"| WV
 ```
 
@@ -207,12 +223,19 @@ Interface 0 Vendor Bulk 与 CDC 串口控制：`protocol::auth`（AES-128-ECB）
 ### 图表渲染
 
 ```mermaid
-flowchart LR
+---
+config:
+  htmlLabels: false
+  flowchart:
+    diagramPadding: 110
+    wrappingWidth: 240
+---
+flowchart TB
   COL["F64Col 分块列存储<br/>4096 点/块 · 常量块共享"]
   IDX["ExactExtremaIndex<br/>256 节点/页 · 协作分片"]
-  FAST["OffscreenCanvas 光栅化<br/>Uint32Array 转置位图 + 2D 脏矩形"]
+  FAST["OffscreenCanvas 光栅化<br/>Uint32Array 转置位图<br/>+ 2D 脏矩形"]
   FILL["chart-fill.js<br/>解析面积覆盖合成"]
-  FALLBACK["Canvas 2D 回退<br/>半透明描边 / 无 OffscreenCanvas"]
+  FALLBACK["Canvas 2D 回退<br/>半透明描边<br/>或无 OffscreenCanvas"]
   NAV["导航缩略图<br/>独立 uPlot + 功率极值索引"]
 
   COL --> IDX
@@ -234,29 +257,35 @@ flowchart LR
 ## 数据流
 
 ```mermaid
+---
+config:
+  sequence:
+    actorMargin: 35
+    mirrorActors: false
+---
 sequenceDiagram
   participant FE as WebView 前端
   participant BE as Tauri 后端
   participant DEV as USB 仪表 · WITRN / POWER-Z
 
   FE->>BE: enumerate_devices
-  BE-->>FE: 合并 WITRN HID 与 POWER-Z Bulk 设备列表
+  BE-->>FE: 合并 WITRN HID 与<br/>POWER-Z Bulk 设备列表
 
   FE->>BE: connect_device_by_path
-  BE->>DEV: 打开接口，POWER-Z 完成 Bulk 握手并启动 CDC 线程
+  BE->>DEV: 打开接口，POWER-Z 完成<br/>Bulk 握手并启动 CDC 线程
 
   alt POWER-Z 1 ms 采样
     BE->>DEV: HardwareID / StreamingAuth / StartGraph(3)
-    Note over BE,DEV: 每 20 ms 轮询 AdcQueue，认证失败回退 10 ms
+    Note over BE,DEV: 每 20 ms 轮询 AdcQueue<br/>认证失败回退 10 ms
   else WITRN HID 或常规轮询
-    BE->>DEV: 阻塞读 HID 并排空队列 / 轮询瞬时 ADC
+    BE->>DEV: 阻塞读 HID 并排空队列<br/>或轮询瞬时 ADC
   end
 
   loop 实时采集与流控
     DEV-->>BE: 原始测量帧 / PD 报文
     BE->>BE: 按采样间隔节拍分窗聚合
-    BE-->>FE: device-data-batch / pd-data-batch
-    FE->>FE: 更新读数卡片、图表、统计与 1 s 恢复文件
+    BE-->>FE: device-data-batch<br/>pd-data-batch
+    FE->>FE: 更新读数卡片、图表、<br/>统计与 1 s 恢复文件
     FE->>BE: ack_device_stream
   end
 ```
